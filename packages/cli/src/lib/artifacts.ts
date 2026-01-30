@@ -16,6 +16,26 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 /**
+ * Sanitize a path segment (type or id) to prevent directory traversal.
+ * Rejects any value containing path separators or traversal sequences.
+ */
+function sanitizePathSegment(value: string, label: string): string {
+  if (
+    value.includes('/') ||
+    value.includes('\\') ||
+    value.includes('\0') ||
+    value === '.' ||
+    value === '..' ||
+    value.includes('..')
+  ) {
+    throw new Error(
+      `Invalid ${label}: must not contain path separators or traversal sequences, got "${value}"`
+    );
+  }
+  return value;
+}
+
+/**
  * Known artifact types - single source of truth
  */
 export const ARTIFACT_TYPES = [
@@ -103,6 +123,9 @@ interface WriteArtifactOptions {
 export function writeJsonArtifact(opts: WriteArtifactOptions): string {
   const { baseDir, type, id, data, timestamp = true } = opts;
 
+  sanitizePathSegment(type, 'artifact type');
+  sanitizePathSegment(id, 'artifact id');
+
   const artifactsDir = path.join(baseDir, 'artifacts', type);
 
   // Ensure directory exists
@@ -145,6 +168,8 @@ export function listArtifacts(
   baseDir: string,
   type: string
 ): Array<{ path: string; id: string; timestamp: number }> {
+  sanitizePathSegment(type, 'artifact type');
+
   const artifactsDir = path.join(baseDir, 'artifacts', type);
 
   if (!fs.existsSync(artifactsDir)) {
