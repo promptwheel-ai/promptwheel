@@ -1,67 +1,75 @@
 # BlockSpool
 
-**Autonomous coding swarm that improves your codebase while you focus on what matters.**
-
-BlockSpool scouts your codebase for improvements, executes them in parallel, and batches everything into milestone PRs — all running autonomously for hours.
-
----
-
-## Quick Start
+**Autonomous coding tool. Finds improvements, fixes them, opens PRs.**
 
 ```bash
-# Install (requires Node 18+)
 npm install -g @blockspool/cli
-
-# Initialize in your repo
 cd your-project
 blockspool solo init
-
-# Run overnight with milestone PRs
-blockspool solo auto --hours 8 --batch-size 30
+blockspool solo auto
 ```
 
-That's it. Come back to 5 milestone PRs containing 50+ improvements.
+That's it. BlockSpool scouts your code, runs fixes in parallel, and creates draft PRs.
 
 ---
 
-## What It Does
+## Try It (15 minutes)
+
+```bash
+# Quick run — scout, fix, and PR a few improvements
+blockspool solo auto --minutes 15
+```
+
+You'll see BlockSpool find improvements, execute them, and open draft PRs. Review them, merge what you like.
+
+### Ready for more?
+
+```bash
+# Run for a few hours
+blockspool solo auto --hours 4
+
+# Overnight with milestone PRs (batches fixes into fewer PRs)
+blockspool solo auto --hours 8 --batch-size 30
+
+# Run until you stop it
+blockspool solo auto --continuous
+```
+
+---
+
+## What It Looks Like
 
 ```
-$ blockspool solo auto --hours 4 --batch-size 10
+$ blockspool solo auto --minutes 15
 
 BlockSpool Auto
 
-  Mode: Continuous (Ctrl+C to stop gracefully)
-  Time budget: 4 hours (until 6:00 PM)
+  Model: eco (sonnet for simple, opus for complex)
+  Scout: sonnet
   Categories: refactor, test, docs, types, perf
   Draft PRs: yes
-  Milestone mode: batch size 10
 
-Milestone branch: blockspool/milestone-abc123
+Step 1: Scouting src...
+  Found 8 improvements, processing 3...
 
-[Cycle 1] Scouting src...
-  Found 20 improvements, processing 5...
-  Conflict-aware scheduling: 2 waves
-  Merged to milestone (1/10)
-  Merged to milestone (2/10)
-  Merged to milestone (3/10)
-  Merged to milestone (4/10)
-  Merged to milestone (5/10)
+Will process:
+  • Extract repeated validation into shared helper
+    refactor | simple | 85% | sonnet
+  • Add missing error boundary to dashboard route
+    fix | moderate | 78% | opus
+  • Add unit tests for date formatting utils
+    test | trivial | 92% | sonnet
 
-[Cycle 3] Scouting packages...
-  Found 15 improvements, processing 5...
-  Merged to milestone (6/10)
-  ...
-  Merged to milestone (10/10)
+  ✓ PR created
+    https://github.com/you/repo/pull/42
+  ✓ PR created
+    https://github.com/you/repo/pull/43
+  ✓ PR created
+    https://github.com/you/repo/pull/44
 
-  Milestone PR: https://github.com/you/repo/pull/42
-  New milestone branch: blockspool/milestone-def456
-
-Final Summary
-  Duration: 4h 2m
-  Cycles: 32
-  Milestone PRs: 5
-  Total tickets merged: 50
+Summary
+  Duration: 12m
+  PRs created: 3
 ```
 
 ---
