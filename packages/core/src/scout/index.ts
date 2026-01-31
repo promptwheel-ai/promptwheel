@@ -6,7 +6,7 @@
 
 import { nanoid } from '../utils/id.js';
 import { buildScoutPrompt } from './prompt.js';
-import { runClaude, parseClaudeOutput } from './runner.js';
+import { runClaude, parseClaudeOutput, ClaudeScoutBackend, type ScoutBackend } from './runner.js';
 import { scanFiles, batchFiles, type ScannedFile } from './scanner.js';
 import type {
   ScoutOptions,
@@ -18,7 +18,7 @@ import type {
 
 export * from './types.js';
 export { buildScoutPrompt, buildCategoryPrompt } from './prompt.js';
-export { runClaude, parseClaudeOutput } from './runner.js';
+export { runClaude, parseClaudeOutput, ClaudeScoutBackend, CodexScoutBackend, type ScoutBackend } from './runner.js';
 export { scanFiles, batchFiles, type ScannedFile } from './scanner.js';
 
 /**
@@ -290,7 +290,10 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
     recentlyCompletedTitles,
     model = 'opus',
     customPrompt,
+    backend,
   } = options;
+
+  const scoutBackend: ScoutBackend = backend ?? new ClaudeScoutBackend();
 
   const startTime = Date.now();
   const errors: string[] = [];
@@ -374,8 +377,8 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
         customPrompt,
       });
 
-      // Run Claude
-      const result = await runClaude({
+      // Run scout backend
+      const result = await scoutBackend.run({
         prompt,
         cwd: projectPath,
         timeoutMs,

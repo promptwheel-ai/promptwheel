@@ -112,5 +112,8 @@ gitleaks-report.json
 
 # BlockSpool
 .blockspool/
+.commandlayer/
 *.tgz
+cloud/.next.bak/
+.vercel
 tmp/

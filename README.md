@@ -8,31 +8,68 @@ BlockSpool scouts your codebase for improvements, executes them in parallel, and
 
 ## Quick Start
 
+### Inside Claude Code (recommended)
+
+If you're already using Claude Code, install the plugin and go:
+
+```
+/blockspool:run
+```
+
+The plugin uses your Claude Code subscription — no API key needed. It scouts, executes, creates PRs, and prevents Claude from exiting until the session is done.
+
+### From the terminal
+
 ```bash
-# Install (requires Node 18+)
+# Install
 npm install -g @blockspool/cli
 
 # Initialize in your repo
 cd your-project
-blockspool solo init
+blockspool init
 
-# Run overnight with milestone PRs
-blockspool solo auto --hours 8 --batch-size 30
+# Run with Claude (requires ANTHROPIC_API_KEY)
+blockspool --hours 8 --batch-size 30
+
+# Or run with Codex (no Anthropic key needed)
+codex login
+blockspool --codex --hours 8 --batch-size 30
 ```
 
-That's it. Come back to 5 milestone PRs containing 50+ improvements.
+Come back to 5 milestone PRs containing 50+ improvements.
+
+---
+
+## Four Ways to Run
+
+| Route | Auth | Best for |
+|-------|------|----------|
+| **Plugin** (`/blockspool:run`) | Claude Code subscription | Interactive use, no API key setup |
+| **CLI + Claude** (`blockspool`) | `ANTHROPIC_API_KEY` | CI, cron jobs, overnight runs |
+| **CLI + Codex** (`blockspool --codex`) | `codex login` (or `CODEX_API_KEY`) | No Anthropic key, Codex-native teams |
+| **CLI + OpenAI** (`blockspool-run --provider openai`) | `OPENAI_API_KEY` | OpenAI-native teams |
+
+### Hybrid mode
+
+For cost-effective runs, use Codex for scouting (cheap, high-volume) and Claude for execution (higher quality):
+
+```bash
+blockspool --scout-backend codex
+```
+
+Requires both `codex login` and `ANTHROPIC_API_KEY`.
 
 ---
 
 ## What It Does
 
 ```
-$ blockspool solo auto --hours 4 --batch-size 10
+$ blockspool --batch-size 10 --hours 8
 
 BlockSpool Auto
 
   Mode: Continuous (Ctrl+C to stop gracefully)
-  Time budget: 4 hours (until 6:00 PM)
+  Time budget: 8 hours (until 6:00 AM)
   Categories: refactor, test, docs, types, perf
   Draft PRs: yes
   Milestone mode: batch size 10
@@ -44,13 +81,6 @@ Milestone branch: blockspool/milestone-abc123
   Conflict-aware scheduling: 2 waves
   Merged to milestone (1/10)
   Merged to milestone (2/10)
-  Merged to milestone (3/10)
-  Merged to milestone (4/10)
-  Merged to milestone (5/10)
-
-[Cycle 3] Scouting packages...
-  Found 15 improvements, processing 5...
-  Merged to milestone (6/10)
   ...
   Merged to milestone (10/10)
 
@@ -58,7 +88,7 @@ Milestone branch: blockspool/milestone-abc123
   New milestone branch: blockspool/milestone-def456
 
 Final Summary
-  Duration: 4h 2m
+  Duration: 8h 2m
   Cycles: 32
   Milestone PRs: 5
   Total tickets merged: 50
@@ -89,8 +119,8 @@ Final Summary
 1. **Scout** — Analyzes your codebase for improvement opportunities
 2. **Propose** — Creates tickets with confidence and impact scores
 3. **Filter** — Auto-approves based on category, confidence, and dedup
-4. **Execute** — Runs Claude Code CLI in isolated git worktrees (parallel)
-5. **Merge** — Merges ticket branch into milestone branch (with conflict-aware scheduling)
+4. **Execute** — Runs in isolated git worktrees (parallel)
+5. **Merge** — Merges ticket branch into milestone branch (conflict-aware scheduling)
 6. **PR** — Creates one milestone PR per batch
 
 ```
@@ -110,10 +140,10 @@ Scout ──▶ Filter ──▶ Execute (parallel) ──▶ Merge to milestone
 
 ```bash
 # Individual PRs (default)
-blockspool solo auto --hours 4
+blockspool --hours 4
 
 # Milestone mode (recommended for long runs)
-blockspool solo auto --hours 8 --batch-size 30
+blockspool --hours 8 --batch-size 30
 ```
 
 ---
@@ -122,55 +152,92 @@ blockspool solo auto --hours 8 --batch-size 30
 
 ### Initialize
 ```bash
-blockspool solo init
+blockspool init
 ```
 Creates `.blockspool/` directory with SQLite database. No external services needed.
 
-### Auto (Main Command)
+### Auto (default command)
 ```bash
-# Run overnight with milestone PRs
-blockspool solo auto --hours 8 --batch-size 30
+# Single cycle (default — scout, execute, PR, done)
+blockspool
 
-# Run until stopped (Ctrl+C finalizes partial milestone)
-blockspool solo auto --continuous --batch-size 20
+# Multiple cycles
+blockspool --cycles 3
+
+# Time-based with milestones
+blockspool --hours 8 --batch-size 30
+
+# Run with Codex
+blockspool --codex --cycles 3
 
 # Dry run (show what would happen)
-blockspool solo auto --dry-run
+blockspool --dry-run
 
 # Include more categories
-blockspool solo auto --aggressive
+blockspool --aggressive
 
 # Focus on specific improvements
-blockspool solo auto --formula security-audit
-blockspool solo auto --formula test-coverage
-blockspool solo auto --deep
+blockspool --formula security-audit
+blockspool --formula test-coverage
+blockspool --deep
+
+# Fix CI failures
+blockspool ci
+
+# Process existing tickets
+blockspool work
 ```
 
 ### Other Commands
 ```bash
 # Check prerequisites
-blockspool solo doctor
+blockspool doctor
 
 # Manual scout
-blockspool solo scout src/
+blockspool scout src/
 
 # View status
-blockspool solo status
+blockspool status
 
 # Run single ticket
-blockspool solo run tkt_abc123
+blockspool run tkt_abc123
 
 # Retry failed ticket (regenerates scope)
-blockspool solo retry tkt_abc123
+blockspool retry tkt_abc123
 
 # Steer a running auto session
-blockspool solo nudge "focus on auth module"
-blockspool solo nudge --list
-blockspool solo nudge --clear
+blockspool nudge "focus on auth module"
+blockspool nudge --list
+blockspool nudge --clear
 
 # Interactive TUI
-blockspool solo tui
+blockspool tui
 ```
+
+All commands also work with the `solo` prefix for backwards compatibility: `blockspool solo auto`, `blockspool solo init`, etc.
+
+---
+
+## Plugin (Claude Code)
+
+The BlockSpool plugin runs inside Claude Code sessions:
+
+```
+/blockspool:run                    Single cycle (scout → execute → PR)
+/blockspool:run cycles=3           Run 3 cycles
+/blockspool:run hours=4            Run for 4 hours
+/blockspool:run formula=security-audit
+/blockspool:status                  Check progress
+/blockspool:nudge hint="focus on auth"  Steer the session
+/blockspool:cancel                  Graceful shutdown
+```
+
+The plugin uses Claude Code's own auth — no API key needed. It includes:
+- **Stop hook** — prevents Claude from exiting mid-session
+- **PreToolUse hook** — enforces file scope per ticket
+- **MCP tools** — session management, scouting, execution, git
+
+Install: see [packages/plugin/README.md](./packages/plugin/README.md)
 
 ---
 
@@ -179,12 +246,12 @@ blockspool solo tui
 Formulas are repeatable recipes for specific goals:
 
 ```bash
-blockspool solo auto --formula security-audit   # Focus on vulnerabilities
-blockspool solo auto --formula test-coverage     # Add missing tests
-blockspool solo auto --formula type-safety       # Improve TypeScript types
-blockspool solo auto --formula cleanup           # Dead code, unused imports
-blockspool solo auto --formula docs              # Documentation improvements
-blockspool solo auto --deep                      # Architectural review
+blockspool --formula security-audit   # Focus on vulnerabilities
+blockspool --formula test-coverage     # Add missing tests
+blockspool --formula type-safety       # Improve TypeScript types
+blockspool --formula cleanup           # Dead code, unused imports
+blockspool --formula docs              # Documentation improvements
+blockspool --deep                      # Architectural review
 ```
 
 Custom formulas live in `.blockspool/formulas/`:
@@ -206,7 +273,10 @@ prompt: |
 
 - **Node.js 18+**
 - **Git repository** with GitHub remote
-- **Claude Code CLI** installed (`npm i -g @anthropic-ai/claude-code`)
+- **One of:**
+  - Claude Code (for the plugin)
+  - `ANTHROPIC_API_KEY` (for CLI + Claude)
+  - `codex login` or `CODEX_API_KEY` (for CLI + Codex)
 
 ---
 
@@ -221,10 +291,10 @@ BlockSpool uses a trust ladder to control what changes are auto-approved:
 
 ```bash
 # Default (safe)
-blockspool solo auto
+blockspool
 
 # Aggressive (more categories)
-blockspool solo auto --aggressive
+blockspool --aggressive
 ```
 
 ---
@@ -264,6 +334,12 @@ BlockSpool adds:
 - **Trust ladder** (safe categories by default)
 - **Scope enforcement** (sandboxes each ticket to specific paths)
 
+### Can I use it without an API key?
+
+Yes — two ways:
+1. **Plugin** (`/blockspool:run`): Uses your Claude Code subscription directly
+2. **Codex CLI** (`blockspool --codex`): Uses `codex login` (OAuth, no API key env var needed)
+
 ### Will it break my code?
 
 - Every change runs through **typecheck and tests** before merging
@@ -274,7 +350,7 @@ BlockSpool adds:
 
 ### How much does it cost?
 
-BlockSpool is free and open source. It uses your Claude Code subscription or API key. A typical overnight run produces 50+ improvements for roughly $5-15 in API costs depending on codebase size.
+BlockSpool is free and open source. It uses your existing Claude Code subscription, Anthropic API key, or Codex credentials. API costs depend on your codebase size, run duration, and provider pricing.
 
 ### What are formulas?
 

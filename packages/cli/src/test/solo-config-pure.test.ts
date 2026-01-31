@@ -306,7 +306,7 @@ describe('displayProposal', () => {
   });
 
   it('omits impact string when impact_score is null', () => {
-    displayProposal(makeProposal({ impact_score: undefined }), 0);
+    displayProposal(makeProposal({ impact_score: null }), 0);
     const allOutput = logSpy.mock.calls.map(c => String(c[0] ?? '')).join('\n');
     expect(allOutput).not.toContain('impact');
   });

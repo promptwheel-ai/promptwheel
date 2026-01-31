@@ -1,6 +1,6 @@
 {
   "name": "@blockspool/sqlite",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "SQLite adapter for BlockSpool - zero-config local mode",
   "author": "BlockSpool",
   "homepage": "https://blockspool.com",

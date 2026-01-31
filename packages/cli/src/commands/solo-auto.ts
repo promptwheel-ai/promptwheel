@@ -40,19 +40,21 @@ Trust Ladder (use --aggressive for more):
   Default:   refactor, test, docs, types, perf (safe categories only)
   Aggressive: + security fixes (still excludes deps, migrations)
 
+Backend Lanes:
+  --claude (default):  scout + execute with Claude  (ANTHROPIC_API_KEY)
+  --codex:             scout + execute with Codex   (CODEX_API_KEY or codex login)
+  Hybrid:              --scout-backend codex         (CODEX_API_KEY + ANTHROPIC_API_KEY)
+
 Examples:
-  blockspool solo auto                    # Scout + fix + PR (safe defaults)
-  blockspool solo auto --dry-run          # Show what would be done
-  blockspool solo auto --scope src/api    # Scout specific directory
-  blockspool solo auto --formula security-audit  # Run a predefined formula
-  blockspool solo auto --max-prs 5        # Allow up to 5 PRs
-  blockspool solo auto --aggressive       # Include more categories
-  blockspool solo auto --batch-size 30     # Milestone mode: 30 tickets per PR
-  blockspool solo auto --minutes 15       # Run for 15 minutes
-  blockspool solo auto --hours 4          # Run for 4 hours (overnight mode)
-  blockspool solo auto --continuous       # Run until stopped (Ctrl+C)
-  blockspool solo auto ci                 # Fix failing CI
-  blockspool solo auto work               # Process existing tickets
+  blockspool                              # Scout + fix + PR (Claude, default)
+  blockspool --codex                      # Full Codex mode (no Anthropic key)
+  blockspool --codex --hours 4            # Codex overnight run
+  blockspool --dry-run                    # Show what would be done
+  blockspool --scope src/api              # Scout specific directory
+  blockspool --formula security-audit     # Run a predefined formula
+  blockspool --scout-backend codex        # Hybrid: Codex scouts, Claude executes
+  blockspool ci                           # Fix failing CI
+  blockspool work                         # Process existing tickets
 `)
     .option('--dry-run', 'Show what would be done without making changes')
     .option('--scope <path>', 'Directory to scout (default: src, rotates in continuous mode)')
@@ -63,13 +65,20 @@ Examples:
     .option('--yes', 'Skip confirmation prompt')
     .option('--minutes <n>', 'Run for N minutes (enables continuous mode)')
     .option('--hours <n>', 'Run for N hours (enables continuous mode)')
+    .option('--cycles <n>', 'Number of scout→execute cycles (default: 1)')
     .option('--continuous', 'Run continuously until stopped or PR limit reached')
     .option('-v, --verbose', 'Show detailed output')
     .option('--branch <name>', 'Target branch (default: current)')
     .option('--parallel <n>', 'Number of tickets to run concurrently (default: 3)', '3')
     .option('--formula <name>', 'Use a predefined formula (e.g., security-audit, test-coverage, cleanup, deep)')
     .option('--deep', 'Deep architectural review (shortcut for --formula deep)')
+    .option('--eco', 'Use sonnet model for scouting (cheaper, faster, less thorough)')
     .option('--batch-size <n>', 'Milestone mode: merge N tickets into one PR (default: off)')
+    .option('--codex', 'Use Codex for both scouting and execution (no Anthropic key needed)')
+    .option('--claude', 'Use Claude for both scouting and execution (default)')
+    .option('--scout-backend <name>', 'LLM for scouting: claude | codex (default: claude)')
+    .option('--execute-backend <name>', 'LLM for execution: claude | codex (default: claude)')
+    .option('--codex-unsafe-full-access', 'Use --dangerously-bypass-approvals-and-sandbox for Codex execution (requires isolated runner)')
     .action(async (mode: string | undefined, options: {
       dryRun?: boolean;
       scope?: string;
@@ -80,17 +89,146 @@ Examples:
       yes?: boolean;
       minutes?: string;
       hours?: string;
+      cycles?: string;
       continuous?: boolean;
       verbose?: boolean;
       branch?: string;
       parallel?: string;
       formula?: string;
       deep?: boolean;
+      eco?: boolean;
       batchSize?: string;
+      codex?: boolean;
+      claude?: boolean;
+      scoutBackend?: string;
+      executeBackend?: string;
+      codexUnsafeFullAccess?: boolean;
     }) => {
       if (options.deep && !options.formula) {
         options.formula = 'deep';
       }
+
+      // --codex / --claude shorthands expand to both backends
+      if (options.codex && options.claude) {
+        console.error(chalk.red('✗ Cannot use --codex and --claude together'));
+        process.exit(1);
+      }
+      if (options.codex) {
+        options.scoutBackend = options.scoutBackend ?? 'codex';
+        options.executeBackend = options.executeBackend ?? 'codex';
+      }
+
+      const scoutBackendName = options.scoutBackend ?? 'claude';
+      const executeBackendName = options.executeBackend ?? 'claude';
+      const needsClaude = scoutBackendName === 'claude' || executeBackendName === 'claude';
+      const needsCodex = scoutBackendName === 'codex' || executeBackendName === 'codex';
+      const insideClaudeCode = process.env.CLAUDECODE === '1';
+
+      // Validate backend names
+      for (const [flag, value] of [['--scout-backend', scoutBackendName], ['--execute-backend', executeBackendName]] as const) {
+        if (value !== 'claude' && value !== 'codex') {
+          console.error(chalk.red(`✗ Invalid ${flag}: ${value}`));
+          console.error(chalk.gray('  Valid values: claude, codex'));
+          process.exit(1);
+        }
+      }
+
+      // Detect running inside Claude Code session
+      if (insideClaudeCode) {
+        if (needsClaude) {
+          // Block: spawning `claude -p` inside Claude Code either fails (no key)
+          // or double-charges (subscription + API).
+          console.error(chalk.red('✗ Cannot run Claude backend inside Claude Code'));
+          console.error();
+          console.error(chalk.gray('  The CLI spawns Claude as subprocesses (requires ANTHROPIC_API_KEY).'));
+          console.error(chalk.gray('  Inside Claude Code, use the plugin instead:'));
+          console.error();
+          console.error(chalk.white('    /blockspool:run'));
+          console.error();
+          console.error(chalk.gray('  Or run from a regular terminal:'));
+          console.error();
+          console.error(chalk.white('    blockspool          # Claude (needs ANTHROPIC_API_KEY)'));
+          console.error(chalk.white('    blockspool --codex  # Codex (needs CODEX_API_KEY)'));
+          console.error();
+          process.exit(1);
+        } else {
+          // Codex backend inside Claude Code — technically works but wasteful.
+          // The outer Claude Code session is running (and billing) while Codex
+          // does all the work. Better to run from a regular terminal.
+          console.log(chalk.yellow('⚠ Running inside Claude Code session'));
+          console.log(chalk.yellow('  This works, but you\'re paying for an idle Claude Code session.'));
+          console.log(chalk.yellow('  Consider running from a regular terminal instead:'));
+          console.log(chalk.white('    blockspool --codex'));
+          console.log();
+        }
+      }
+
+      // Auth: Claude lane
+      if (needsClaude && !process.env.ANTHROPIC_API_KEY) {
+        console.error(chalk.red('✗ ANTHROPIC_API_KEY not set'));
+        console.error(chalk.gray('  Required for Claude backend. Set the env var, or use:'));
+        console.error(chalk.gray('    blockspool --codex  (uses CODEX_API_KEY or codex login)'));
+        console.error(chalk.gray('    /blockspool:run    (inside Claude Code, uses subscription)'));
+        process.exit(1);
+      }
+
+      // Auth: Codex lane
+      if (needsCodex) {
+        if (process.env.CODEX_API_KEY) {
+          // Good — env var present
+        } else {
+          const { spawnSync } = await import('node:child_process');
+          const loginCheck = spawnSync('codex', ['login', 'status'], { encoding: 'utf-8', timeout: 10000 });
+          if (loginCheck.status !== 0) {
+            console.error(chalk.red('✗ Codex not authenticated'));
+            console.error(chalk.gray('  Set CODEX_API_KEY or run: codex login'));
+            process.exit(1);
+          }
+        }
+      }
+
+      // Print auth summary
+      if (scoutBackendName === executeBackendName) {
+        const authSource = scoutBackendName === 'claude'
+          ? 'ANTHROPIC_API_KEY (env)'
+          : (process.env.CODEX_API_KEY ? 'CODEX_API_KEY (env)' : 'codex login');
+        console.log(chalk.gray(`Auth: ${authSource}`));
+      } else {
+        const scoutAuth = scoutBackendName === 'claude'
+          ? 'ANTHROPIC_API_KEY (env)'
+          : (process.env.CODEX_API_KEY ? 'CODEX_API_KEY (env)' : 'codex login');
+        const execAuth = executeBackendName === 'claude'
+          ? 'ANTHROPIC_API_KEY (env)'
+          : (process.env.CODEX_API_KEY ? 'CODEX_API_KEY (env)' : 'codex login');
+        console.log(chalk.gray(`Auth (scout):   ${scoutAuth}`));
+        console.log(chalk.gray(`Auth (execute): ${execAuth}`));
+      }
+
+      // Warn about unsafe flag
+      if (options.codexUnsafeFullAccess) {
+        if (executeBackendName !== 'codex') {
+          console.error(chalk.red('✗ --codex-unsafe-full-access only applies with --execute-backend codex'));
+          process.exit(1);
+        }
+        console.log(chalk.yellow('⚠ --codex-unsafe-full-access: sandbox disabled for Codex execution'));
+        console.log(chalk.yellow('  Only use this inside an externally hardened/isolated runner'));
+      }
+
+      // Periodic billing reminder
+      try {
+        const { getBillingReminder } = await import('../lib/run-history.js');
+        const git = createGitService();
+        const root = await git.findRepoRoot(process.cwd());
+        const reminder = root ? getBillingReminder(root) : null;
+        if (reminder) {
+          console.log();
+          console.log(chalk.yellow(reminder));
+          console.log();
+        }
+      } catch {
+        // Non-fatal
+      }
+
       const effectiveMode = mode || 'auto';
 
       if (effectiveMode !== 'ci' && effectiveMode !== 'work' && effectiveMode !== 'auto') {
@@ -100,7 +238,14 @@ Examples:
       }
 
       if (effectiveMode === 'auto') {
-        await runAutoMode({ ...options, formula: options.formula, batchSize: options.batchSize });
+        await runAutoMode({
+          ...options,
+          formula: options.formula,
+          batchSize: options.batchSize,
+          scoutBackend: scoutBackendName,
+          executeBackend: executeBackendName,
+          codexUnsafeFullAccess: options.codexUnsafeFullAccess,
+        });
         return;
       }
 

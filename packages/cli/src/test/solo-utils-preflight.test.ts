@@ -238,7 +238,7 @@ describe('findConflictingTickets', () => {
     } as any;
   });
 
-  const makeTicket = (id: string, projectId: string, allowedPaths: string[], status: 'in_progress' | 'leased' | 'ready' | 'backlog' | 'in_review' | 'done' | 'blocked' | 'aborted' = 'in_progress') => ({
+  const makeTicket = (id: string, projectId: string, allowedPaths: string[], status: string = 'in_progress') => ({
     id,
     projectId,
     title: 'Test',

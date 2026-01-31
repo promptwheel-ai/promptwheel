@@ -1,18 +1,18 @@
 # BlockSpool vs The Field
 
-How BlockSpool compares to other autonomous coding tools.
+How BlockSpool compares to other AI coding tools.
 
 ---
 
 ## The Landscape
 
-Autonomous coding tools fall into three categories:
+AI coding tools fall into three categories:
 
-1. **Orchestrators** — Coordinate multiple agents on tasks (Gas Town, Auto-Claude, Claude Flow)
+1. **Multi-agent coordinators** — Coordinate multiple agents on tasks (Gas Town, Auto-Claude, Claude Flow)
 2. **Issue-to-PR engines** — Convert issues into PRs (Factory, Sweep, Devin)
 3. **Improvement engines** — Continuously scout and improve codebases (BlockSpool)
 
-BlockSpool is the only tool in category 3: purpose-built for unattended, overnight codebase improvement with cost control and safety guarantees.
+BlockSpool is the only tool in category 3: purpose-built for continuous codebase improvement with cost control and safety guarantees.
 
 ---
 
@@ -20,8 +20,8 @@ BlockSpool is the only tool in category 3: purpose-built for unattended, overnig
 
 | Feature | BlockSpool | Gas Town | Auto-Claude | Oh My Claude Code | Factory.ai | Devin | Sweep | Claude Flow |
 |---|---|---|---|---|---|---|---|---|
-| **Primary use** | Overnight improvement runs | Multi-agent orchestration | Desktop agent manager | Claude Code plugin | Issue-to-PR automation | AI software engineer | Simple issue fixes | MCP prompt framework |
-| **Unattended operation** | Yes (designed for it) | No (needs steering) | Partial (desktop app) | No (interactive) | Yes | Yes | Yes | No (interactive) |
+| **Primary use** | Continuous codebase improvement | Multi-agent orchestration | Desktop agent manager | Claude Code plugin | Issue-to-PR automation | AI software engineer | Simple issue fixes | MCP prompt framework |
+| **Long-running operation** | Yes (designed for it) | No (needs steering) | Partial (desktop app) | No (interactive) | Yes | Yes | Yes | No (interactive) |
 | **Milestone batching** | Yes (`--batch-size`) | Partial (checkpoints) | No | No | No | No | No | No |
 | **Parallel execution** | 3-5 adaptive | 20-30 agents | Up to 12 agents | 3-5x (Ultrapilot mode) | Multiple droids | Single | Single | Depends on Claude Code |
 | **Conflict-aware scheduling** | Yes (wave partitioning) | No | No | No | No | N/A | N/A | No |
@@ -33,7 +33,7 @@ BlockSpool is the only tool in category 3: purpose-built for unattended, overnig
 | **Deep architectural review** | Yes (`--deep`) | No | No | No | No | Partial | No | No |
 | **Impact scoring** | Yes (impact x confidence) | No | No | No | No | No | No | No |
 | **Loop detection** | Yes (Spindle) | No | No | No | Unknown | Unknown | No | No |
-| **Cost per 8h run** | ~$5-15 | ~$800 | Claude Code sub | Claude Code sub | SaaS pricing | $500/mo | Free tier | Claude Code sub |
+| **Cost per 8h run** | Fraction of alternatives | High (20-30 agents) | Claude Code sub | Claude Code sub | SaaS pricing | Subscription | Free tier | Claude Code sub |
 | **Runtime** | Claude Code CLI | Claude, Codex, Aider | Claude Code CLI | Claude Code CLI | Proprietary | Proprietary | GitHub Actions | Claude Code (MCP server) |
 | **Open source** | Yes (Apache 2.0) | Yes (MIT) | Yes (AGPL-3.0) | Yes (MIT) | No | No | Partial | Yes (MIT) |
 | **Install** | `npm install -g` | `brew install` / `go install` | Desktop app | Claude Code plugin | SaaS | SaaS | GitHub App | `npm install` |
@@ -44,14 +44,14 @@ BlockSpool is the only tool in category 3: purpose-built for unattended, overnig
 
 BlockSpool is designed around **micro-equilibrium** — doing the most useful work per dollar spent.
 
-### Cost Comparison (8-hour overnight run)
+### Cost Comparison (8-hour run)
 
 | Tool | Agents | Typical output | Estimated cost | Cost per improvement |
 |---|---|---|---|---|
-| **BlockSpool** | 3-5 | 50+ improvements, 5 milestone PRs | $5-15 | ~$0.20 |
-| **Gas Town** | 20-30 | Variable (needs steering) | ~$800 | ~$16+ |
+| **BlockSpool** | 3-5 | 50+ improvements, 5 milestone PRs | Low | Very low |
+| **Gas Town** | 20-30 | Variable (needs steering) | High (20-30 agents) | High |
 | **Auto-Claude** | Up to 12 | Variable (needs desktop) | Claude Code sub | Variable |
-| **Devin** | 1 | 1-3 tasks | $500/mo flat | ~$100+ |
+| **Devin** | 1 | 1-3 tasks | Subscription | High |
 | **Factory** | Variable | Issue-dependent | Usage-based SaaS | Variable |
 
 ### Why the difference?
@@ -83,15 +83,15 @@ Gas Town throws 30 agents at a problem. BlockSpool runs 3-5 agents surgically. T
 - Kubernetes operator for cloud deployment
 
 **Weaknesses:**
-- Requires constant human steering (not unattended)
-- ~$100/hour burn rate
+- Requires constant human steering
+- High burn rate with 20-30 concurrent agents
 - No built-in scope enforcement or dedup
 - Has auto-merged failing tests in early versions
 - No milestone batching (produces many individual changes)
 
-**When to use Gas Town:** You have a large, well-defined task (e.g., migrate 500 files from framework A to B) and can afford $800 for an 8-hour run with active supervision.
+**When to use Gas Town:** You have a large, well-defined task (e.g., migrate 500 files from framework A to B) and can afford a high burn rate for an 8-hour run with active supervision.
 
-**When to use BlockSpool:** You want continuous, unattended improvement of your codebase overnight with cost control and safety guarantees.
+**When to use BlockSpool:** You want continuous improvement of your codebase with cost control and safety guarantees.
 
 ---
 
@@ -109,26 +109,26 @@ Gas Town throws 30 agents at a problem. BlockSpool runs 3-5 agents surgically. T
 **Weaknesses:**
 - Requires desktop app running (not headless/server-friendly)
 - AGPL license restricts commercial use
-- No autonomous scouting (you assign tasks, it doesn't find them)
+- No proactive scouting (you assign tasks, it doesn't find them)
 - No dedup or milestone batching
 - No scope auto-expansion
 
 **When to use Auto-Claude:** You want a visual dashboard for managing multiple Claude Code agents on tasks you define. Good for hands-on developers who want to supervise.
 
-**When to use BlockSpool:** You want headless, unattended operation that finds its own work and runs overnight without a desktop app.
+**When to use BlockSpool:** You want headless operation that finds its own work and runs without a desktop app.
 
 ---
 
 ## Other Tools
 
 ### Oh My Claude Code
-[Oh My Claude Code](https://github.com/Yeachan-Heo/oh-my-claudecode) (3.8k stars, MIT) is a Claude Code plugin with 5 execution modes and 32 specialized agents. It's a prompt/skill layer that runs inside Claude Code — similar to Claude Flow but more polished, with smart model routing (Haiku for simple, Opus for complex) to save tokens. No autonomous scouting, no milestone batching, no scope enforcement. Good for developers who want a more opinionated Claude Code experience with less manual prompting.
+[Oh My Claude Code](https://github.com/Yeachan-Heo/oh-my-claudecode) (3.8k stars, MIT) is a Claude Code plugin with 5 execution modes and 32 specialized agents. It's a prompt/skill layer that runs inside Claude Code — similar to Claude Flow but more polished, with smart model routing (Haiku for simple, Opus for complex) to save tokens. No proactive scouting, no milestone batching, no scope enforcement. Good for developers who want a more opinionated Claude Code experience with less manual prompting.
 
 ### Factory.ai
-Enterprise SaaS that assigns "droids" to GitHub issues. Good for teams with existing issue workflows. Not open source. No unattended scouting — it reacts to issues, doesn't proactively find improvements.
+Enterprise SaaS that assigns "droids" to GitHub issues. Good for teams with existing issue workflows. Not open source. No proactive scouting — it reacts to issues, doesn't find improvements on its own.
 
 ### Devin (Cognition Labs)
-"First AI software engineer." Handles complete projects from planning to deployment. $500/month subscription. Single-agent, no parallel execution. Good for greenfield tasks, not continuous improvement.
+"First AI software engineer." Handles complete projects from planning to deployment. Subscription. Single-agent, no parallel execution. Good for greenfield tasks, not continuous improvement.
 
 ### Sweep.dev
 Lightweight GitHub app that turns issues into PRs for minor fixes. Free tier available. Single-agent, no scouting, no milestone batching. Good for simple, well-defined fixes.
@@ -143,13 +143,13 @@ Open-source MCP server + prompt library that runs *inside* Claude Code. Despite 
 
 ## BlockSpool's Niche
 
-BlockSpool occupies a unique position: **the unattended overnight improvement engine.**
+BlockSpool occupies a unique position: **the continuous improvement engine.**
 
 No other tool combines:
-- Autonomous scouting (finds work to do)
+- Proactive scouting (finds work to do)
 - Milestone batching (coherent PRs)
-- Cost control ($5-15 per overnight run)
+- Cost control (fraction of what alternatives cost)
 - Safety guarantees (scope enforcement, trust ladder, dedup)
-- Zero configuration (`npm install` + `init` + `auto`)
+- Four ways to run: Plugin, Claude CLI, Codex CLI, or OpenAI CLI
 
 The closest comparison is a developer running Claude Code manually for 8 hours — but BlockSpool does it without supervision, avoids duplicates, enforces scope, batches into clean PRs, and costs a fraction of what manual operation would.

@@ -16,6 +16,8 @@ export {
   type Logger,
 } from './scout.js';
 
+export type { ScoutBackend } from '../scout/index.js';
+
 export {
   runQa,
   getQaRunDetails,

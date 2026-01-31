@@ -9,6 +9,7 @@ import type { DatabaseAdapter } from '@blockspool/core/db';
 import {
   scoutRepo,
   type ScoutProgress,
+  type ScoutBackend,
 } from '@blockspool/core/services';
 import { projects, tickets, runs } from '@blockspool/core/repos';
 import type { TicketProposal } from '@blockspool/core/scout';
@@ -23,7 +24,7 @@ import {
   formatProgress,
 } from './solo-config.js';
 import { pathsOverlap, runPreflightChecks } from './solo-utils.js';
-import { soloRunTicket, type RunTicketResult } from './solo-ticket.js';
+import { soloRunTicket, type RunTicketResult, type ExecutionBackend, CodexExecutionBackend } from './solo-ticket.js';
 import {
   createMilestoneBranch,
   mergeTicketToMilestone,
@@ -411,12 +412,17 @@ export async function runAutoMode(options: {
   yes?: boolean;
   minutes?: string;
   hours?: string;
+  cycles?: string;
   continuous?: boolean;
   verbose?: boolean;
   parallel?: string;
   formula?: string;
   deep?: boolean;
+  eco?: boolean;
   batchSize?: string;
+  scoutBackend?: string;
+  executeBackend?: string;
+  codexUnsafeFullAccess?: boolean;
 }): Promise<void> {
   // Load formula if specified
   let activeFormula: import('./formulas.js').Formula | null = null;
@@ -437,7 +443,8 @@ export async function runAutoMode(options: {
     console.log();
   }
 
-  const isContinuous = options.continuous || options.hours !== undefined || options.minutes !== undefined;
+  const maxCycles = options.cycles ? parseInt(options.cycles, 10) : 1;
+  const isContinuous = options.continuous || options.hours !== undefined || options.minutes !== undefined || maxCycles > 1;
   const totalMinutes = (options.hours ? parseFloat(options.hours) * 60 : 0)
     + (options.minutes ? parseFloat(options.minutes) : 0) || undefined;
   const endTime = totalMinutes ? Date.now() + (totalMinutes * 60 * 1000) : undefined;
@@ -600,6 +607,7 @@ export async function runAutoMode(options: {
       if (totalPrsCreated >= maxPrs) return false;
     }
     if (endTime && Date.now() >= endTime) return false;
+    if (cycleCount >= maxCycles && !options.continuous && !options.hours && !options.minutes) return false;
     return true;
   };
 
@@ -620,6 +628,20 @@ export async function runAutoMode(options: {
     });
 
     const deps = createScoutDeps(adapter, { verbose: options.verbose });
+
+    // Instantiate backends based on --scout-backend / --execute-backend
+    let scoutBackend: ScoutBackend | undefined;
+    let executionBackend: ExecutionBackend | undefined;
+    if (options.scoutBackend === 'codex') {
+      const { CodexScoutBackend } = await import('@blockspool/core/scout');
+      scoutBackend = new CodexScoutBackend({ apiKey: process.env.CODEX_API_KEY });
+    }
+    if (options.executeBackend === 'codex') {
+      executionBackend = new CodexExecutionBackend({
+        apiKey: process.env.CODEX_API_KEY,
+        unsafeBypassSandbox: options.codexUnsafeFullAccess,
+      });
+    }
 
     // Detect base branch for milestone mode
     let detectedBaseBranch = 'master';
@@ -725,9 +747,10 @@ export async function runAutoMode(options: {
         scope,
         maxProposals: 20,
         minConfidence: Math.max((cycleFormula?.minConfidence ?? minConfidence) - 20, 30),
-        model: cycleFormula?.model ?? 'opus',
+        model: options.eco ? 'sonnet' : (cycleFormula?.model ?? 'opus'),
         customPrompt: effectivePrompt,
         autoApprove: false,
+        backend: scoutBackend,
         onProgress: (progress: ScoutProgress) => {
           if (options.verbose) {
             const formatted = formatProgress(progress);
@@ -914,6 +937,7 @@ export async function runAutoMode(options: {
                   console.log(chalk.gray(`    ${msg}`));
                 }
               },
+              executionBackend,
               ...(milestoneMode && milestoneBranch ? {
                 baseBranch: milestoneBranch,
                 skipPush: true,

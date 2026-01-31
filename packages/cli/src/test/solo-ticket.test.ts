@@ -10,6 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import {
@@ -47,9 +48,6 @@ describe('solo-ticket: buildTicketPrompt', () => {
       forbiddenPaths: [],
       verificationCommands: [],
       status: 'ready' as const,
-      priority: 5,
-      shard: null,
-      category: 'refactor' as const,
       retryCount: 0,
       maxRetries: 3,
       createdAt: new Date(),
@@ -73,9 +71,6 @@ describe('solo-ticket: buildTicketPrompt', () => {
       forbiddenPaths: [],
       verificationCommands: [],
       status: 'ready' as const,
-      priority: 5,
-      shard: null,
-      category: 'refactor' as const,
       retryCount: 0,
       maxRetries: 3,
       createdAt: new Date(),
@@ -99,9 +94,6 @@ describe('solo-ticket: buildTicketPrompt', () => {
       forbiddenPaths: ['node_modules/**', 'dist/**'],
       verificationCommands: [],
       status: 'ready' as const,
-      priority: 5,
-      shard: null,
-      category: 'refactor' as const,
       retryCount: 0,
       maxRetries: 3,
       createdAt: new Date(),
@@ -125,9 +117,6 @@ describe('solo-ticket: buildTicketPrompt', () => {
       forbiddenPaths: [],
       verificationCommands: ['npm test', 'npm run lint'],
       status: 'ready' as const,
-      priority: 5,
-      shard: null,
-      category: 'refactor' as const,
       retryCount: 0,
       maxRetries: 3,
       createdAt: new Date(),
@@ -151,9 +140,6 @@ describe('solo-ticket: buildTicketPrompt', () => {
       forbiddenPaths: [],
       verificationCommands: [],
       status: 'ready' as const,
-      priority: 5,
-      shard: null,
-      category: 'refactor' as const,
       retryCount: 0,
       maxRetries: 3,
       createdAt: new Date(),
@@ -177,9 +163,6 @@ describe('solo-ticket: buildTicketPrompt', () => {
       forbiddenPaths: ['src/legacy/**'],
       verificationCommands: ['npm test'],
       status: 'ready' as const,
-      priority: 5,
-      shard: null,
-      category: 'refactor' as const,
       retryCount: 0,
       maxRetries: 3,
       createdAt: new Date(),
@@ -197,13 +180,20 @@ describe('solo-ticket: buildTicketPrompt', () => {
 
 describe('solo-ticket: runClaude', () => {
   let mockSpawn: ReturnType<typeof vi.fn>;
+  const originalEnv = process.env.ANTHROPIC_API_KEY;
 
   beforeEach(async () => {
+    process.env.ANTHROPIC_API_KEY = 'test-key-for-tests';
     const { spawn } = await import('node:child_process');
     mockSpawn = vi.mocked(spawn);
   });
 
   afterEach(() => {
+    if (originalEnv !== undefined) {
+      process.env.ANTHROPIC_API_KEY = originalEnv;
+    } else {
+      delete process.env.ANTHROPIC_API_KEY;
+    }
     vi.clearAllMocks();
   });
 
@@ -470,7 +460,6 @@ function createMockChildProcess(opts: {
   stdout: string;
   stderr: string;
 }) {
-  const { EventEmitter } = require('events');
   const mockChild = new EventEmitter();
 
   mockChild.stdin = {

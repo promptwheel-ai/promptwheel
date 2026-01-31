@@ -295,7 +295,7 @@ export function displayProposal(proposal: TicketProposal, index: number): void {
 
   console.log();
   console.log(chalk.bold(`${index + 1}. ${proposal.title}`));
-  const impactStr = proposal.impact_score !== null && proposal.impact_score !== undefined ? ` | impact ${proposal.impact_score}/10` : '';
+  const impactStr = proposal.impact_score !== null ? ` | impact ${proposal.impact_score}/10` : '';
   console.log(
     `   ${color(proposal.category)} | ` +
     `${proposal.estimated_complexity} | ` +

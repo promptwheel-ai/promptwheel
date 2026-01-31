@@ -2,14 +2,14 @@
 
 ## What is BlockSpool?
 
-BlockSpool is an autonomous coding tool that scouts your codebase for improvements, executes them in parallel, and creates PRs — all running locally with zero external infrastructure.
+BlockSpool is a coding tool that scouts your codebase for improvements, executes them in parallel, and creates PRs — all running locally with zero external infrastructure.
 
 ## Solo Mode
 
 ```bash
 blockspool solo init                          # Initialize SQLite database
 blockspool solo auto                          # Scout + fix + PR
-blockspool solo auto --hours 8 --batch-size 30  # Run overnight with milestone PRs
+blockspool solo auto --hours 8 --batch-size 30  # Long run with milestone PRs
 blockspool solo auto --continuous             # Run until stopped (Ctrl+C)
 blockspool solo nudge "focus on auth"         # Steer a running session
 ```
@@ -18,7 +18,7 @@ blockspool solo nudge "focus on auth"         # Steer a running session
 
 - **SQLite** backend (no external database needed)
 - **Claude Code CLI** for execution (default model: **opus**)
-- **Draft PRs** with single commits
+- **Ready-for-review PRs** with single commits
 - **Deduplication** to avoid recreating similar work
 - **Trust ladder** (safe categories by default)
 - **Formulas** for repeatable recipes: `--formula security-audit`
@@ -92,7 +92,7 @@ npm run lint
 
 | Term | Definition |
 |------|------------|
-| **Auto** | The main execution mode. Scouts, proposes, executes, and PRs improvements autonomously. |
+| **Auto** | The main execution mode. Scouts, proposes, executes, and PRs improvements continuously. |
 | **Scout** | The discovery phase. Scans code to find improvement opportunities. |
 | **Ticket** | A unit of work. Created from a proposal, executed in isolation. |
 | **Proposal** | A candidate improvement found by scouting. Becomes a ticket when approved. |

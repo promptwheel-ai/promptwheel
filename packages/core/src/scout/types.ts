@@ -72,6 +72,8 @@ export interface ScoutOptions {
   model?: 'haiku' | 'sonnet' | 'opus';
   /** Custom prompt from formula — tells the AI what to focus on */
   customPrompt?: string;
+  /** Scout backend to use (default: ClaudeScoutBackend) */
+  backend?: import('./runner.js').ScoutBackend;
 }
 
 /**

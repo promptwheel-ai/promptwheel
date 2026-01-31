@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [master, main, preview]
+    branches: [main, preview]
   pull_request:
-    branches: [master, main, preview]
+    branches: [main, preview]
 
 jobs:
   build:
@@ -23,7 +23,7 @@ jobs:
         run: npm ci
 
       - name: Build packages
-        run: npm run build
+        run: npm run packages:build
 
       - name: Type check
         run: npm run typecheck

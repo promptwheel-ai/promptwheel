@@ -18,6 +18,7 @@ import {
   type ScoutOptions as ScanOptions,
   type ScoutResult as ScanResult,
   type TicketProposal,
+  type ScoutBackend,
 } from '../scout/index.js';
 
 /**
@@ -82,6 +83,8 @@ export interface ScoutRepoOptions {
   onProgress?: (progress: ScoutProgress) => void;
   /** Auto-create tickets from proposals */
   autoApprove?: boolean;
+  /** Scout backend override (default: ClaudeScoutBackend) */
+  backend?: ScoutBackend;
 }
 
 /**
@@ -193,6 +196,7 @@ export async function scoutRepo(
       signal: opts.signal,
       recentlyCompletedTitles: recentTitles,
       customPrompt: opts.customPrompt,
+      backend: opts.backend,
       onProgress: (p) => {
         report({
           phase: 'analyzing',

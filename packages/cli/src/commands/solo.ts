@@ -20,11 +20,15 @@ export { EXIT_CODES } from '../lib/solo-ticket.js';
 export const soloCommand = new Command('solo')
   .description('Zero-config local mode - works without any external services')
   .addHelpText('after', `
+Running 'blockspool solo' without a subcommand starts auto mode.
+
 Examples:
+  blockspool solo                 Run auto mode (scout → fix → PR)
+  blockspool solo --codex         Full Codex mode (no Anthropic key needed)
   blockspool solo init            Initialize local state in current repo
   blockspool solo doctor          Check prerequisites and environment health
-  blockspool solo auto ci         Fix CI failures automatically (the wedge!)
-  blockspool solo scout .         Scan current directory for improvement opportunities
+  blockspool solo ci              Fix CI failures automatically
+  blockspool solo scout .         Scan for improvement opportunities
   blockspool solo approve 1-3     Convert proposals 1-3 to tickets
   blockspool solo run tkt_abc123  Execute a ticket using Claude
   blockspool solo retry tkt_abc123  Reset a blocked ticket to ready
