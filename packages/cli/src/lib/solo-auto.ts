@@ -409,6 +409,7 @@ export async function runAutoMode(options: {
   aggressive?: boolean;
   draft?: boolean;
   yes?: boolean;
+  minutes?: string;
   hours?: string;
   continuous?: boolean;
   verbose?: boolean;
@@ -436,9 +437,10 @@ export async function runAutoMode(options: {
     console.log();
   }
 
-  const isContinuous = options.continuous || options.hours !== undefined;
-  const hoursLimit = options.hours ? parseFloat(options.hours) : undefined;
-  const endTime = hoursLimit ? Date.now() + (hoursLimit * 60 * 60 * 1000) : undefined;
+  const isContinuous = options.continuous || options.hours !== undefined || options.minutes !== undefined;
+  const totalMinutes = (options.hours ? parseFloat(options.hours) * 60 : 0)
+    + (options.minutes ? parseFloat(options.minutes) : 0) || undefined;
+  const endTime = totalMinutes ? Date.now() + (totalMinutes * 60 * 1000) : undefined;
 
   const defaultMaxPrs = isContinuous ? 20 : 3;
   const maxPrs = parseInt(options.maxPrs || String(activeFormula?.maxPrs ?? defaultMaxPrs), 10);
@@ -506,9 +508,14 @@ export async function runAutoMode(options: {
   console.log();
   if (isContinuous) {
     console.log(chalk.gray('  Mode: Continuous (Ctrl+C to stop gracefully)'));
-    if (hoursLimit) {
+    if (totalMinutes) {
       const endDate = new Date(endTime!);
-      console.log(chalk.gray(`  Time budget: ${hoursLimit} hours (until ${endDate.toLocaleTimeString()})`));
+      const budgetLabel = totalMinutes < 60
+        ? `${Math.round(totalMinutes)} minutes`
+        : totalMinutes % 60 === 0
+          ? `${totalMinutes / 60} hours`
+          : `${Math.floor(totalMinutes / 60)}h ${Math.round(totalMinutes % 60)}m`;
+      console.log(chalk.gray(`  Time budget: ${budgetLabel} (until ${endDate.toLocaleTimeString()})`));
     }
   } else {
     console.log(chalk.gray('  Mode: Scout → Auto-approve → Run → PR'));
@@ -1141,7 +1148,12 @@ export async function runAutoMode(options: {
       } else if (totalPrsCreated >= maxPrs) {
         console.log(chalk.gray(`Stopped: Reached PR limit (${maxPrs})`));
       } else if (endTime && Date.now() >= endTime) {
-        console.log(chalk.gray(`Stopped: Time budget exhausted (${hoursLimit}h)`));
+        const exhaustedLabel = totalMinutes! < 60
+          ? `${Math.round(totalMinutes!)}m`
+          : totalMinutes! % 60 === 0
+            ? `${totalMinutes! / 60}h`
+            : `${Math.floor(totalMinutes! / 60)}h ${Math.round(totalMinutes! % 60)}m`;
+        console.log(chalk.gray(`Stopped: Time budget exhausted (${exhaustedLabel})`));
       }
     }
 

@@ -48,6 +48,7 @@ Examples:
   blockspool solo auto --max-prs 5        # Allow up to 5 PRs
   blockspool solo auto --aggressive       # Include more categories
   blockspool solo auto --batch-size 30     # Milestone mode: 30 tickets per PR
+  blockspool solo auto --minutes 15       # Run for 15 minutes
   blockspool solo auto --hours 4          # Run for 4 hours (overnight mode)
   blockspool solo auto --continuous       # Run until stopped (Ctrl+C)
   blockspool solo auto ci                 # Fix failing CI
@@ -60,6 +61,7 @@ Examples:
     .option('--aggressive', 'Include more categories (security fixes, etc.)')
     .option('--no-draft', 'Create regular PRs instead of drafts')
     .option('--yes', 'Skip confirmation prompt')
+    .option('--minutes <n>', 'Run for N minutes (enables continuous mode)')
     .option('--hours <n>', 'Run for N hours (enables continuous mode)')
     .option('--continuous', 'Run continuously until stopped or PR limit reached')
     .option('-v, --verbose', 'Show detailed output')
@@ -76,6 +78,7 @@ Examples:
       aggressive?: boolean;
       draft?: boolean;
       yes?: boolean;
+      minutes?: string;
       hours?: string;
       continuous?: boolean;
       verbose?: boolean;

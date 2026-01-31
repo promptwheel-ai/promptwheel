@@ -111,10 +111,8 @@ logs/
 gitleaks-report.json
 
 # BlockSpool
-.blockspool/worktrees/
-.blockspool/spool/
-.blockspool/state.ndjson
 .blockspool/
+.commandlayer/
 *.tgz
 cloud/.next.bak/
 .vercel
