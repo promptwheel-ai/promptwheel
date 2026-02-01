@@ -13,7 +13,7 @@ BlockSpool scouts your codebase for improvements, executes them in parallel, and
 ```bash
 # Add the marketplace and install the plugin
 claude plugin marketplace add blockspool/blockspool
-claude plugin install blockspool@blockspool/blockspool
+claude plugin install blockspool@blockspool
 
 # Then inside any Claude Code session:
 /blockspool:run
