@@ -115,8 +115,10 @@ export async function processEvent(
       }
 
       const raw = payload as Record<string, unknown>;
-      // Coerce files_to_touch if Claude sends plain strings instead of objects
-      const rawFiles = Array.isArray(raw.files_to_touch) ? raw.files_to_touch : [];
+      // Coerce files_to_touch — accept files/touched_files as fallback names
+      const rawFiles = Array.isArray(raw.files_to_touch) ? raw.files_to_touch
+        : Array.isArray(raw.files) ? raw.files
+        : Array.isArray(raw.touched_files) ? raw.touched_files : [];
       const files_to_touch = rawFiles.map((f: unknown) => {
         if (typeof f === 'string') return { path: f, action: 'modify' as const, reason: '' };
         if (f && typeof f === 'object' && 'path' in f) return f as { path: string; action: 'create' | 'modify' | 'delete'; reason: string };

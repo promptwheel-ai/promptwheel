@@ -600,7 +600,7 @@ function buildPlanPrompt(ticket: { title: string; description: string | null; al
     '```json',
     '{',
     `  "ticket_id": "<ticket-id>",`,
-    '  "files": [{"path": "...", "action": "create|modify|delete", "reason": "..."}],',
+    '  "files_to_touch": [{"path": "...", "action": "create|modify|delete", "reason": "..."}],',
     '  "expected_tests": ["npm test -- --grep ..."],',
     '  "estimated_lines": <number>,',
     '  "risk_level": "low|medium|high"',
