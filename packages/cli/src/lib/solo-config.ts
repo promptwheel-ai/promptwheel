@@ -132,6 +132,8 @@ export interface SoloConfig {
   spindle?: Partial<SpindleConfig>;
   auto?: Partial<AutoConfig>;
   retention?: Partial<RetentionConfig>;
+  /** Max parallel tickets for plugin mode (default: 2, max: 5) */
+  pluginParallel?: number;
 }
 
 /**

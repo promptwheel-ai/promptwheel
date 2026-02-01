@@ -116,9 +116,20 @@ export async function filterAndCreateTickets(
     return true;
   });
 
+  // Step 2b: Impact score filter
+  const minImpact = s.min_impact_score ?? 3;
+  const afterImpact = afterConfidence.filter(p => {
+    const impact = p.impact_score ?? 5;
+    if (impact < minImpact) {
+      rejected.push({ proposal: p, reason: `Impact score ${impact} below min ${minImpact}` });
+      return false;
+    }
+    return true;
+  });
+
   // Step 3: Category trust ladder
   const allowedCategories = new Set(s.categories);
-  const afterCategory = afterConfidence.filter(p => {
+  const afterCategory = afterImpact.filter(p => {
     if (!allowedCategories.has(p.category)) {
       rejected.push({ proposal: p, reason: `Category '${p.category}' not in trust ladder` });
       return false;
@@ -215,6 +226,7 @@ export async function filterAndCreateTickets(
     submitted: rawProposals.length,
     valid: valid.length,
     after_confidence: afterConfidence.length,
+    after_impact: afterImpact.length,
     after_category: afterCategory.length,
     after_dedup: uniqueByTitle.length,
     accepted: accepted.length,

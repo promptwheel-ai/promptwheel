@@ -258,7 +258,7 @@ describe('filterAndCreateTickets — cap and scoring', () => {
 
   it('ranks by impact_score × confidence', async () => {
     const proposals = [
-      makeProposal({ title: 'Low score', confidence: 70, impact_score: 1 }), // 70
+      makeProposal({ title: 'Low score', confidence: 70, impact_score: 3 }), // 210
       makeProposal({ title: 'High score', confidence: 90, impact_score: 9 }), // 810
       makeProposal({ title: 'Mid score', confidence: 80, impact_score: 5 }), // 400
     ];

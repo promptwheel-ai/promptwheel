@@ -18,8 +18,11 @@ import type {
   Phase,
   SpindleState,
   SessionConfig,
+  TicketWorkerState,
 } from './types.js';
 import { checkSpindle } from './spindle.js';
+import { detectProjectMetadata } from './project-metadata.js';
+import type { ProjectMetadata } from './project-metadata.js';
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -31,6 +34,7 @@ const DEFAULT_MAX_LINES_PER_TICKET = 500;
 const DEFAULT_MAX_TOOL_CALLS_PER_TICKET = 50;
 const DEFAULT_MAX_PRS = 5;
 const DEFAULT_MIN_CONFIDENCE = 70;
+const DEFAULT_MIN_IMPACT_SCORE = 3;
 const DEFAULT_MAX_PROPOSALS_PER_SCOUT = 5;
 const DEFAULT_SCOPE = 'src/**';
 const DEFAULT_CATEGORIES = ['refactor', 'docs', 'test', 'perf', 'security'];
@@ -115,13 +119,33 @@ export class RunManager {
       categories: config.categories ?? DEFAULT_CATEGORIES,
       min_confidence: config.min_confidence ?? DEFAULT_MIN_CONFIDENCE,
       max_proposals_per_scout: config.max_proposals ?? DEFAULT_MAX_PROPOSALS_PER_SCOUT,
+      min_impact_score: config.min_impact_score ?? DEFAULT_MIN_IMPACT_SCORE,
       draft_prs: config.draft_prs ?? true,
       eco: config.eco ?? false,
       hints: [],
 
+      parallel: Math.min(Math.max(config.parallel ?? 2, 1), 5),
+      ticket_workers: {},
+
       spindle: emptySpindle(),
       recent_intent_hashes: [],
       deferred_proposals: [],
+
+      project_metadata: null,
+    };
+
+    // Detect project metadata (test runner, framework, etc.)
+    const detectedMeta = detectProjectMetadata(this.projectPath);
+    this.state.project_metadata = {
+      languages: detectedMeta.languages,
+      package_manager: detectedMeta.package_manager,
+      test_runner_name: detectedMeta.test_runner?.name ?? null,
+      test_run_command: detectedMeta.test_runner?.run_command ?? null,
+      test_filter_syntax: detectedMeta.test_runner?.filter_syntax ?? null,
+      framework: detectedMeta.framework,
+      linter: detectedMeta.linter,
+      type_checker: detectedMeta.type_checker,
+      monorepo_tool: detectedMeta.monorepo_tool,
     };
 
     // Create run folder
@@ -261,6 +285,73 @@ export class RunManager {
     this.runDir = null;
     this.eventsPath = null;
     return finalState;
+  }
+
+  // -----------------------------------------------------------------------
+  // Ticket worker lifecycle (parallel mode)
+  // -----------------------------------------------------------------------
+
+  /** Initialize a ticket worker entry */
+  initTicketWorker(ticketId: string, ticket: { title: string }): void {
+    const s = this.require();
+    s.ticket_workers[ticketId] = {
+      phase: 'PLAN',
+      plan: null,
+      plan_approved: false,
+      plan_rejections: 0,
+      qa_retries: 0,
+      step_count: 0,
+      spindle: emptySpindle(),
+    };
+    this.persistState();
+    this.appendEvent('TICKET_ASSIGNED', { ticket_id: ticketId, parallel: true });
+  }
+
+  /** Get a ticket worker state */
+  getTicketWorker(ticketId: string): TicketWorkerState | null {
+    const s = this.require();
+    return s.ticket_workers[ticketId] ?? null;
+  }
+
+  /** Update a ticket worker state */
+  updateTicketWorker(ticketId: string, updates: Partial<TicketWorkerState>): void {
+    const s = this.require();
+    const worker = s.ticket_workers[ticketId];
+    if (!worker) throw new Error(`No worker for ticket ${ticketId}`);
+    Object.assign(worker, updates);
+    this.persistState();
+  }
+
+  /** Complete a ticket worker — increment counters and remove from workers */
+  completeTicketWorker(ticketId: string): void {
+    const s = this.require();
+    const worker = s.ticket_workers[ticketId];
+    if (worker) {
+      s.step_count += worker.step_count;
+      s.tickets_completed++;
+      delete s.ticket_workers[ticketId];
+      this.persistState();
+      this.appendEvent('TICKET_COMPLETED', { ticket_id: ticketId, parallel: true });
+    }
+  }
+
+  /** Fail a ticket worker — increment counters and remove from workers */
+  failTicketWorker(ticketId: string, reason: string): void {
+    const s = this.require();
+    const worker = s.ticket_workers[ticketId];
+    if (worker) {
+      s.step_count += worker.step_count;
+      s.tickets_failed++;
+      delete s.ticket_workers[ticketId];
+      this.persistState();
+      this.appendEvent('TICKET_FAILED', { ticket_id: ticketId, reason, parallel: true });
+    }
+  }
+
+  /** Check if all ticket workers are done */
+  allWorkersComplete(): boolean {
+    const s = this.require();
+    return Object.keys(s.ticket_workers).length === 0;
   }
 
   // -----------------------------------------------------------------------

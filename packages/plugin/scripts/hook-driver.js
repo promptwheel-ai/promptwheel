@@ -100,8 +100,25 @@ if (hookType === 'PreToolUse') {
       process.exit(0);
     }
 
-    // Read cached scope policy from .blockspool/scope-policy.json
-    const policyPath = join(process.cwd(), '.blockspool', 'scope-policy.json');
+    // Resolve scope policy: check for per-ticket policy first (parallel mode),
+    // then fall back to single scope-policy.json (sequential mode).
+    const cwd = process.cwd();
+    let policyPath;
+
+    // Check if we're in a worktree: .blockspool/worktrees/{ticket_id}
+    const worktreeMatch = cwd.match(/\.blockspool\/worktrees\/([^/]+)/);
+    if (worktreeMatch) {
+      const ticketId = worktreeMatch[1];
+      const perTicketPath = join(cwd.split('.blockspool/worktrees')[0], '.blockspool', 'scope-policies', `${ticketId}.json`);
+      if (existsSync(perTicketPath)) {
+        policyPath = perTicketPath;
+      }
+    }
+
+    if (!policyPath) {
+      policyPath = join(cwd, '.blockspool', 'scope-policy.json');
+    }
+
     if (!existsSync(policyPath)) {
       // No policy cached — allow
       process.exit(0);

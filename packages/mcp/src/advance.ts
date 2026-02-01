@@ -22,6 +22,7 @@ import type {
   AdvanceResponse,
   AdvanceConstraints,
   Phase,
+  ParallelTicketInfo,
 } from './types.js';
 import { TERMINAL_PHASES } from './types.js';
 import { deriveScopePolicy } from './scope-policy.js';
@@ -29,6 +30,7 @@ import { checkSpindle, getFileEditWarnings } from './spindle.js';
 import { loadFormula } from './formulas.js';
 import type { Formula } from './formulas.js';
 import { loadGuidelines, formatGuidelinesForPrompt } from './guidelines.js';
+import { detectProjectMetadata, formatMetadataForPrompt } from './project-metadata.js';
 
 const MAX_PLAN_REJECTIONS = 3;
 const MAX_QA_RETRIES = 3;
@@ -133,6 +135,8 @@ export async function advance(ctx: AdvanceContext): Promise<AdvanceResponse> {
       return advanceQa(ctx);
     case 'PR':
       return advancePr(ctx);
+    case 'PARALLEL_EXECUTE':
+      return advanceParallelExecute(ctx);
     default:
       return stopResponse(run, 'FAILED_VALIDATION', `Unknown phase: ${s.phase}`);
   }
@@ -169,8 +173,12 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
   const guidelines = loadGuidelines(ctx.project.rootPath);
   const guidelinesBlock = guidelines ? formatGuidelinesForPrompt(guidelines) + '\n\n' : '';
 
-  const prompt = guidelinesBlock + buildScoutPrompt(s.scope, s.categories, s.min_confidence,
-    s.max_proposals_per_scout, dedupContext, formula, hints, s.eco);
+  // Detect project metadata for tooling context
+  const projectMeta = detectProjectMetadata(ctx.project.rootPath);
+  const metadataBlock = formatMetadataForPrompt(projectMeta) + '\n\n';
+
+  const prompt = guidelinesBlock + metadataBlock + buildScoutPrompt(s.scope, s.categories, s.min_confidence,
+    s.max_proposals_per_scout, dedupContext, formula, hints, s.eco, s.min_impact_score);
 
   s.scout_cycles++;
   run.appendEvent('ADVANCE_RETURNED', { phase: 'SCOUT', has_prompt: true });
@@ -196,9 +204,12 @@ async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> 
     return stopResponse(run, 'DONE', `PR limit reached (${s.prs_created}/${s.max_prs})`);
   }
 
-  // Find next ready ticket
+  const prBudget = s.max_prs - s.prs_created;
+  const parallelCount = Math.min(s.parallel, prBudget);
+
+  // Find ready tickets
   const readyTickets = await repos.tickets.listByProject(
-    db, s.project_id, { status: 'ready', limit: 1 }
+    db, s.project_id, { status: 'ready', limit: parallelCount }
   );
 
   if (readyTickets.length === 0) {
@@ -211,6 +222,55 @@ async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> 
     return stopResponse(run, 'DONE', 'No more tickets to process');
   }
 
+  // If parallel > 1 and multiple tickets ready → dispatch batch
+  if (parallelCount > 1 && readyTickets.length > 1) {
+    const parallelTickets: ParallelTicketInfo[] = [];
+
+    for (const ticket of readyTickets) {
+      await repos.tickets.updateStatus(db, ticket.id, 'in_progress');
+      run.initTicketWorker(ticket.id, ticket);
+
+      await repos.runs.create(db, {
+        projectId: s.project_id,
+        type: 'worker',
+        ticketId: ticket.id,
+      });
+
+      const policy = deriveScopePolicy({
+        allowedPaths: ticket.allowedPaths ?? [],
+        category: ticket.category ?? 'refactor',
+        maxLinesPerTicket: s.max_lines_per_ticket,
+      });
+
+      parallelTickets.push({
+        ticket_id: ticket.id,
+        title: ticket.title,
+        description: ticket.description ?? '',
+        constraints: {
+          allowed_paths: policy.allowed_paths,
+          denied_paths: policy.denied_paths,
+          denied_patterns: policy.denied_patterns.map(r => r.source),
+          max_files: policy.max_files,
+          max_lines: policy.max_lines,
+          required_commands: ticket.verificationCommands ?? [],
+          plan_required: policy.plan_required,
+        },
+      });
+    }
+
+    run.setPhase('PARALLEL_EXECUTE');
+    return {
+      next_action: 'PARALLEL_EXECUTE',
+      phase: 'PARALLEL_EXECUTE',
+      prompt: null,
+      reason: `Dispatching ${readyTickets.length} tickets for parallel execution`,
+      constraints: emptyConstraints(),
+      digest: run.buildDigest(),
+      parallel_tickets: parallelTickets,
+    };
+  }
+
+  // Sequential flow (parallel=1 or only 1 ticket)
   const ticket = readyTickets[0];
 
   // Assign ticket
@@ -425,6 +485,33 @@ async function advancePr(ctx: AdvanceContext): Promise<AdvanceResponse> {
     });
 }
 
+async function advanceParallelExecute(ctx: AdvanceContext): Promise<AdvanceResponse> {
+  const { run } = ctx;
+
+  // Check if all ticket workers are done
+  if (run.allWorkersComplete()) {
+    run.setPhase('NEXT_TICKET');
+    return advance(ctx);
+  }
+
+  // Workers still active — return status (shouldn't happen if plugin waits properly)
+  const s = run.require();
+  const activeWorkers = Object.entries(s.ticket_workers).map(([id, w]) => ({
+    ticket_id: id,
+    phase: w.phase,
+    step_count: w.step_count,
+  }));
+
+  return {
+    next_action: 'PROMPT',
+    phase: 'PARALLEL_EXECUTE',
+    prompt: `Parallel execution still in progress. ${activeWorkers.length} ticket(s) still active. Wait for all subagents to complete, then call blockspool_advance again.`,
+    reason: `${activeWorkers.length} ticket workers still active`,
+    constraints: emptyConstraints(),
+    digest: run.buildDigest(),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Budget checks
 // ---------------------------------------------------------------------------
@@ -516,6 +603,7 @@ function buildScoutPrompt(
   formula: Formula | null,
   hints: string[],
   eco: boolean,
+  minImpactScore: number = 3,
 ): string {
   const parts = [
     '# Scout Phase',
@@ -526,9 +614,17 @@ function buildScoutPrompt(
     `**Scope:** \`${scope}\``,
     `**Categories:** ${categories.join(', ')}`,
     `**Min confidence:** ${minConfidence}`,
+    `**Min impact score:** ${minImpactScore} (proposals below this will be rejected)`,
     `**Max proposals:** ${maxProposals}`,
     '',
     '**DO NOT propose changes to these files** (read-only context): CLAUDE.md, .claude/**',
+    '',
+    '## Quality Bar',
+    '',
+    '- Proposals must have **real user or developer impact** — not just lint cleanup or style nits.',
+    '- Do NOT propose fixes for lint warnings, unused variables, or cosmetic issues unless they cause actual bugs or test failures.',
+    '- If project guidelines are provided above, **respect them**. Do NOT propose changes the guidelines explicitly discourage (e.g., "avoid over-engineering", "don\'t change code you didn\'t touch").',
+    '- Focus on: bugs, missing tests, security issues, performance problems, correctness, and meaningful refactors.',
     '',
   ];
 

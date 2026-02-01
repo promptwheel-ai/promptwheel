@@ -24,8 +24,8 @@ import {
 // ---------------------------------------------------------------------------
 
 describe('BUILTIN_FORMULAS', () => {
-  it('contains 6 built-in formulas', () => {
-    expect(BUILTIN_FORMULAS.length).toBe(6);
+  it('contains 7 built-in formulas', () => {
+    expect(BUILTIN_FORMULAS.length).toBe(7);
     const names = BUILTIN_FORMULAS.map(f => f.name);
     expect(names).toContain('security-audit');
     expect(names).toContain('test-coverage');
@@ -33,6 +33,7 @@ describe('BUILTIN_FORMULAS', () => {
     expect(names).toContain('cleanup');
     expect(names).toContain('deep');
     expect(names).toContain('docs');
+    expect(names).toContain('docs-audit');
   });
 
   it('all have version 1', () => {
@@ -107,7 +108,7 @@ describe('loadFormula', () => {
 describe('listFormulas', () => {
   it('returns all built-ins when no user formulas', () => {
     const all = listFormulas('/nonexistent');
-    expect(all.length).toBe(6);
+    expect(all.length).toBe(7);
   });
 
   it('merges user and built-in, user overrides', () => {
@@ -120,8 +121,8 @@ describe('listFormulas', () => {
       'description: Brand new\n');
 
     const all = listFormulas(tmpDir);
-    // 5 built-ins (cleanup overridden) + 2 user = 7
-    expect(all.length).toBe(7);
+    // 6 built-ins (cleanup overridden) + 2 user = 8
+    expect(all.length).toBe(8);
     const cleanup = all.find(f => f.name === 'cleanup');
     expect(cleanup!.description).toBe('Custom cleanup');
 

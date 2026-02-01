@@ -167,8 +167,8 @@ describe('DirectClient — golden path', () => {
         description: 'Add tests for utils',
         acceptance_criteria: ['Tests exist'],
         verification_commands: ['npm test'],
-        allowed_paths: ['src/**', 'test/**'],
-        files: ['test/utils.test.ts'],
+        allowed_paths: ['src/**'],
+        files: ['src/utils.test.ts'],
         confidence: 90,
         impact_score: 8,
         risk: 'low',
@@ -183,7 +183,7 @@ describe('DirectClient — golden path', () => {
       const ticketId = client.getState().current_ticket_id!;
       await client.ingestEvent('PLAN_SUBMITTED', {
         ticket_id: ticketId,
-        files_to_touch: [{ path: 'test/utils.test.ts', action: 'create', reason: 'Add tests' }],
+        files_to_touch: [{ path: 'src/utils.test.ts', action: 'create', reason: 'Add tests' }],
         expected_tests: ['npm test'],
         estimated_lines: 30,
         risk_level: 'low',
@@ -195,7 +195,7 @@ describe('DirectClient — golden path', () => {
     // Submit result
     await client.ingestEvent('TICKET_RESULT', {
       status: 'done',
-      changed_files: ['test/utils.test.ts'],
+      changed_files: ['src/utils.test.ts'],
       lines_added: 30,
       lines_removed: 0,
     });

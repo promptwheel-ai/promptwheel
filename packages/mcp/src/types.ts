@@ -15,6 +15,7 @@ export type Phase =
   | 'QA'
   | 'PR'
   | 'NEXT_TICKET'
+  | 'PARALLEL_EXECUTE'
   // terminal
   | 'DONE'
   | 'BLOCKED_NEEDS_HUMAN'
@@ -111,9 +112,14 @@ export interface RunState {
   categories: string[];
   min_confidence: number;
   max_proposals_per_scout: number;
+  min_impact_score: number;
   draft_prs: boolean;
   eco: boolean;
   hints: string[];
+
+  // Parallel execution
+  parallel: number;
+  ticket_workers: Record<string, TicketWorkerState>;
 
   // Spindle
   spindle: SpindleState;
@@ -123,6 +129,35 @@ export interface RunState {
 
   // Deferred proposals (out-of-scope, retried when scope matches)
   deferred_proposals: DeferredProposal[];
+
+  // Project metadata (detected at session start)
+  project_metadata: ProjectMetadataSnapshot | null;
+}
+
+export interface ProjectMetadataSnapshot {
+  languages: string[];
+  package_manager: string | null;
+  test_runner_name: string | null;
+  test_run_command: string | null;
+  test_filter_syntax: string | null;
+  framework: string | null;
+  linter: string | null;
+  type_checker: string | null;
+  monorepo_tool: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Ticket Worker State (per-ticket in parallel mode)
+// ---------------------------------------------------------------------------
+
+export interface TicketWorkerState {
+  phase: 'PLAN' | 'EXECUTE' | 'QA' | 'PR' | 'DONE' | 'FAILED';
+  plan: CommitPlan | null;
+  plan_approved: boolean;
+  plan_rejections: number;
+  qa_retries: number;
+  step_count: number;
+  spindle: SpindleState;
 }
 
 export interface DeferredProposal {
@@ -202,13 +237,21 @@ export interface AdvanceDigest {
   time_remaining_ms: number | null;
 }
 
+export interface ParallelTicketInfo {
+  ticket_id: string;
+  title: string;
+  description: string;
+  constraints: AdvanceConstraints;
+}
+
 export interface AdvanceResponse {
-  next_action: 'PROMPT' | 'STOP';
+  next_action: 'PROMPT' | 'STOP' | 'PARALLEL_EXECUTE';
   phase: Phase;
   prompt: string | null;
   reason: string;
   constraints: AdvanceConstraints;
   digest: AdvanceDigest;
+  parallel_tickets?: ParallelTicketInfo[];
 }
 
 // ---------------------------------------------------------------------------
@@ -230,4 +273,6 @@ export interface SessionConfig {
   max_cycles?: number;
   draft_prs?: boolean;
   eco?: boolean;
+  parallel?: number;
+  min_impact_score?: number;
 }

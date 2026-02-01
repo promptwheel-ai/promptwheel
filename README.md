@@ -13,10 +13,13 @@ BlockSpool scouts your codebase for improvements, executes them in parallel, and
 ```bash
 # Add the marketplace and install the plugin
 claude plugin marketplace add blockspool/blockspool
-claude plugin install blockspool
+claude plugin install blockspool@blockspool/blockspool
 
 # Then inside any Claude Code session:
 /blockspool:run
+
+# Update to the latest version:
+claude plugin update blockspool@blockspool/blockspool
 ```
 
 The plugin uses your Claude Code subscription — no API key needed. It scouts, executes, creates PRs, and prevents Claude from exiting until the session is done.
@@ -104,7 +107,7 @@ Final Summary
 | Feature | Description |
 |---------|-------------|
 | **Milestone Mode** | Batches N tickets into one PR instead of 50 individual PRs |
-| **Parallel Execution** | Runs 3-5 tickets concurrently with adaptive parallelism |
+| **Parallel Execution** | CLI: 3-5 concurrent tickets (adaptive). Plugin: 2 concurrent via Task subagents (max 5) |
 | **Wave Scheduling** | Detects overlapping file paths, serializes conflicting tickets |
 | **Scope Enforcement** | Each ticket is sandboxed to specific file paths |
 | **Scope Expansion** | Auto-expands for root configs, cross-package, sibling files |
@@ -231,19 +234,23 @@ All commands also work with the `solo` prefix for backwards compatibility: `bloc
 The BlockSpool plugin runs inside Claude Code sessions:
 
 ```
-/blockspool:run                    Single cycle (scout → execute → PR)
-/blockspool:run cycles=3           Run 3 cycles
-/blockspool:run hours=4            Run for 4 hours
+/blockspool:run                        Single cycle (scout → execute → PR)
+/blockspool:run cycles=3               Run 3 cycles
+/blockspool:run hours=4                Run for 4 hours
 /blockspool:run formula=security-audit
-/blockspool:status                  Check progress
-/blockspool:nudge hint="focus on auth"  Steer the session
-/blockspool:cancel                  Graceful shutdown
+/blockspool:run parallel=3             Execute 3 tickets concurrently
+/blockspool:status                     Check progress
+/blockspool:nudge hint="focus on auth" Steer the session
+/blockspool:cancel                     Graceful shutdown
 ```
 
 The plugin uses Claude Code's own auth — no API key needed. It includes:
+- **Parallel execution** — spawns Task subagents per ticket in isolated worktrees (default: 2, max: 5)
+- **Project detection** — auto-detects test runner, framework, linter, and language for correct CLI syntax
+- **Quality gating** — minimum impact score filter rejects low-value lint/cleanup proposals
 - **Stop hook** — prevents Claude from exiting mid-session
-- **PreToolUse hook** — enforces file scope per ticket
-- **MCP tools** — session management, scouting, execution, git
+- **PreToolUse hook** — enforces file scope per ticket (worktree-aware in parallel mode)
+- **MCP tools** — session management, scouting, execution, git, per-ticket advance
 
 Install: see [packages/plugin/README.md](./packages/plugin/README.md)
 

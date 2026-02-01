@@ -7,6 +7,7 @@ import { z } from 'zod';
 import type { SessionManager } from '../state.js';
 import { advance } from '../advance.js';
 import { processEvent } from '../event-processor.js';
+import { advanceTicketWorker, ingestTicketEvent } from '../ticket-worker.js';
 import type { EventType, SessionConfig } from '../types.js';
 import { deriveScopePolicy, isFileAllowed, serializeScopePolicy } from '../scope-policy.js';
 import { repos } from '@blockspool/core';
@@ -31,6 +32,8 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
       max_cycles: z.number().optional().describe('Max scout→execute cycles (default: 1). Use with hours for multi-cycle runs.'),
       draft_prs: z.boolean().optional().describe('Create draft PRs (default: true).'),
       eco: z.boolean().optional().describe('Eco mode: allow subagent delegation during scout for lower cost (default: false).'),
+      parallel: z.number().optional().describe('Number of tickets to execute in parallel (default: 2, max: 5). Set to 1 for sequential mode.'),
+      min_impact_score: z.number().optional().describe('Minimum impact score (1-10) for proposals to be accepted (default: 3). Filters out low-value lint/cleanup.'),
     },
     async (params) => {
       const state = getState();
@@ -51,6 +54,8 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
         max_cycles: params.max_cycles,
         draft_prs: params.draft_prs,
         eco: params.eco,
+        parallel: params.parallel,
+        min_impact_score: params.min_impact_score,
       };
 
       let formulaInfo: { name: string; description: string } | undefined;
@@ -327,6 +332,72 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
               pending_hints: s.hints.length,
               message: 'Hint added. Will be consumed in next scout cycle.',
             }, null, 2),
+          }],
+        };
+      } catch (e) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ error: (e as Error).message }),
+          }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'blockspool_advance_ticket',
+    'Advance a single ticket through its PLAN→EXECUTE→QA→PR lifecycle (parallel mode). Called by subagents working on individual tickets.',
+    {
+      ticket_id: z.string().describe('The ticket ID to advance.'),
+    },
+    async (params) => {
+      const state = getState();
+      try {
+        const response = await advanceTicketWorker(
+          { run: state.run, db: state.db, project: state.project },
+          params.ticket_id,
+        );
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify(response, null, 2),
+          }],
+        };
+      } catch (e) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ error: (e as Error).message }),
+          }],
+          isError: true,
+        };
+      }
+    },
+  );
+
+  server.tool(
+    'blockspool_ingest_ticket_event',
+    'Report an event for a specific ticket (parallel mode). Used by subagents to report plan submissions, QA results, PR creation, etc.',
+    {
+      ticket_id: z.string().describe('The ticket ID this event belongs to.'),
+      type: z.string().describe('Event type (e.g., PLAN_SUBMITTED, TICKET_RESULT, QA_PASSED, QA_FAILED, QA_COMMAND_RESULT, PR_CREATED).'),
+      payload: z.record(z.string(), z.unknown()).describe('Event payload data.'),
+    },
+    async (params) => {
+      const state = getState();
+      try {
+        const result = await ingestTicketEvent(
+          { run: state.run, db: state.db, project: state.project },
+          params.ticket_id,
+          params.type,
+          params.payload as Record<string, unknown>,
+        );
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify(result, null, 2),
           }],
         };
       } catch (e) {
