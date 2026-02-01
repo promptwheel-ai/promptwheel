@@ -70,7 +70,7 @@ describe('DirectClient — golden path', () => {
     const scout = await client.advance();
     expect(scout.phase).toBe('SCOUT');
 
-    // Step 2: Submit proposals via SCOUT_OUTPUT
+    // Step 2: Submit proposals via SCOUT_OUTPUT (stored as pending)
     await client.ingestEvent('SCOUT_OUTPUT', {
       proposals: [{
         category: 'refactor',
@@ -86,6 +86,17 @@ describe('DirectClient — golden path', () => {
         touched_files_estimate: 1,
         rollback_note: 'Revert commit',
       }],
+    });
+
+    // Step 2b: Advance returns review prompt
+    const reviewResp = await client.advance();
+    expect(reviewResp.prompt).toContain('Adversarial Proposal Review');
+
+    // Step 2c: Submit reviewed proposals
+    await client.ingestEvent('PROPOSALS_REVIEWED', {
+      reviewed_proposals: [
+        { title: 'Extract helper function', confidence: 85, impact_score: 7 },
+      ],
     });
 
     // Step 3: Advance → should now be in NEXT_TICKET or PLAN
@@ -175,6 +186,14 @@ describe('DirectClient — golden path', () => {
         touched_files_estimate: 1,
         rollback_note: 'Remove test file',
       }],
+    });
+
+    // Review prompt
+    await client.advance();
+    await client.ingestEvent('PROPOSALS_REVIEWED', {
+      reviewed_proposals: [
+        { title: 'Add unit tests', confidence: 90, impact_score: 8 },
+      ],
     });
 
     // Advance through to EXECUTE
@@ -325,6 +344,14 @@ describe('DirectClient — spindle detection', () => {
         touched_files_estimate: 1,
         rollback_note: 'revert',
       }],
+    });
+
+    // Review prompt
+    await client.advance();
+    await client.ingestEvent('PROPOSALS_REVIEWED', {
+      reviewed_proposals: [
+        { title: 'Stalling test', confidence: 80, impact_score: 5 },
+      ],
     });
 
     // Advance to get ticket assigned

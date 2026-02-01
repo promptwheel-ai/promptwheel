@@ -339,7 +339,7 @@ export function generateCIFixDescription(failure: ParsedFailure, scope: string[]
  * Generate actionable recommendations for Spindle abort
  */
 export function generateSpindleRecommendations(
-  trigger: 'oscillation' | 'spinning' | 'stalling' | 'repetition' | 'token_budget',
+  trigger: 'oscillation' | 'spinning' | 'stalling' | 'repetition' | 'token_budget' | 'qa_ping_pong' | 'command_failure',
   ticket: { allowedPaths: string[]; forbiddenPaths: string[] },
   config: { tokenBudgetAbort: number; maxStallIterations: number; similarityThreshold: number }
 ): string[] {
@@ -379,6 +379,20 @@ export function generateSpindleRecommendations(
         'Agent has high activity but no progress',
         'Simplify the task requirements',
         'Check for circular dependencies in the codebase'
+      );
+      break;
+    case 'qa_ping_pong':
+      recommendations.push(
+        'QA failures are alternating between two error types',
+        'Fix one issue fully before addressing the next',
+        'Check if fixes for one issue are causing the other'
+      );
+      break;
+    case 'command_failure':
+      recommendations.push(
+        'Same command keeps failing with the same error',
+        'Manual intervention needed — the issue may be environmental',
+        'Check test/lint config for issues outside the ticket scope'
       );
       break;
   }

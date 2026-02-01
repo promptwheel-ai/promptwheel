@@ -11,6 +11,8 @@ import {
   checkSpindleLoop,
   createSpindleState,
   formatSpindleResult,
+  recordCommandFailure,
+  getFileEditWarnings,
   DEFAULT_SPINDLE_CONFIG,
   type SpindleConfig,
   type SpindleState,
@@ -424,5 +426,221 @@ describe('integration scenarios', () => {
       }
     }
     expect(aborted).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QA ping-pong detection
+// ---------------------------------------------------------------------------
+
+describe('QA ping-pong detection', () => {
+  it('detects alternating failure signatures', () => {
+    const state = createSpindleState();
+    const config: SpindleConfig = { ...DEFAULT_SPINDLE_CONFIG, maxQaPingPong: 2 };
+
+    // Record alternating failures: A, B, A, B (2 cycles = 4 sigs)
+    recordCommandFailure(state, 'npm test', 'Error in module A');
+    recordCommandFailure(state, 'npm lint', 'Lint error B');
+    recordCommandFailure(state, 'npm test', 'Error in module A');
+    recordCommandFailure(state, 'npm lint', 'Lint error B');
+
+    const result = checkSpindleLoop(state, 'output', '+diff', config);
+    expect(result.shouldAbort).toBe(true);
+    expect(result.reason).toBe('qa_ping_pong');
+    expect(result.diagnostics.pingPongPattern).toContain('Alternating');
+  });
+
+  it('does not trigger on non-alternating failures', () => {
+    const state = createSpindleState();
+    const config: SpindleConfig = { ...DEFAULT_SPINDLE_CONFIG, maxQaPingPong: 2 };
+
+    // All same failure
+    recordCommandFailure(state, 'npm test', 'Error A');
+    recordCommandFailure(state, 'npm test', 'Error A');
+    recordCommandFailure(state, 'npm test', 'Error A');
+    recordCommandFailure(state, 'npm test', 'Error A');
+
+    const result = checkSpindleLoop(state, 'different output each time', '+diff', config);
+    // Should not be qa_ping_pong (might be command_failure instead)
+    expect(result.reason).not.toBe('qa_ping_pong');
+  });
+
+  it('requires enough cycles', () => {
+    const state = createSpindleState();
+    const config: SpindleConfig = { ...DEFAULT_SPINDLE_CONFIG, maxQaPingPong: 3 };
+
+    // Only 2 alternating pairs (need 3)
+    recordCommandFailure(state, 'npm test', 'Error A');
+    recordCommandFailure(state, 'npm lint', 'Error B');
+    recordCommandFailure(state, 'npm test', 'Error A');
+    recordCommandFailure(state, 'npm lint', 'Error B');
+
+    const result = checkSpindleLoop(state, 'output', '+diff', config);
+    expect(result.reason).not.toBe('qa_ping_pong');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Command signature failure tracking
+// ---------------------------------------------------------------------------
+
+describe('command signature failure tracking', () => {
+  it('blocks when same command fails N times', () => {
+    const state = createSpindleState();
+    const config: SpindleConfig = { ...DEFAULT_SPINDLE_CONFIG, maxCommandFailures: 3 };
+
+    // Same command+error 3 times
+    recordCommandFailure(state, 'npm test', 'Module not found: foo');
+    recordCommandFailure(state, 'npm test', 'Module not found: foo');
+    recordCommandFailure(state, 'npm test', 'Module not found: foo');
+
+    const result = checkSpindleLoop(state, 'output', '+diff', config);
+    expect(result.shouldBlock).toBe(true);
+    expect(result.shouldAbort).toBe(false);
+    expect(result.reason).toBe('command_failure');
+  });
+
+  it('does not block with different errors', () => {
+    const state = createSpindleState();
+    const config: SpindleConfig = { ...DEFAULT_SPINDLE_CONFIG, maxCommandFailures: 3 };
+
+    recordCommandFailure(state, 'npm test', 'Error A');
+    recordCommandFailure(state, 'npm test', 'Error B');
+    recordCommandFailure(state, 'npm test', 'Error C');
+
+    const result = checkSpindleLoop(state, 'different output', '+diff', config);
+    expect(result.shouldBlock).toBe(false);
+    expect(result.reason).not.toBe('command_failure');
+  });
+
+  it('recordCommandFailure caps history at 20', () => {
+    const state = createSpindleState();
+    for (let i = 0; i < 25; i++) {
+      recordCommandFailure(state, `cmd-${i}`, `error-${i}`);
+    }
+    expect(state.failingCommandSignatures.length).toBe(20);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Per-file edit frequency tracking
+// ---------------------------------------------------------------------------
+
+describe('per-file edit frequency tracking', () => {
+  it('tracks file edit counts from diffs', () => {
+    const state = createSpindleState();
+    const config = DEFAULT_SPINDLE_CONFIG;
+
+    const diff = '+++ b/src/lib/foo.ts\n+const x = 1;\n+++ b/src/lib/bar.ts\n+const y = 2;';
+    checkSpindleLoop(state, 'output', diff, config);
+
+    expect(state.fileEditCounts['src/lib/foo.ts']).toBe(1);
+    expect(state.fileEditCounts['src/lib/bar.ts']).toBe(1);
+  });
+
+  it('increments counts on repeated edits', () => {
+    const state = createSpindleState();
+    const config = DEFAULT_SPINDLE_CONFIG;
+
+    const diff = '+++ b/src/lib/foo.ts\n+const x = 1;';
+    checkSpindleLoop(state, 'output 1', diff, config);
+    checkSpindleLoop(state, 'output 2', diff, config);
+    checkSpindleLoop(state, 'output 3', diff, config);
+
+    expect(state.fileEditCounts['src/lib/foo.ts']).toBe(3);
+  });
+
+  it('generates warnings when threshold exceeded', () => {
+    const state = createSpindleState();
+    state.fileEditCounts = { 'src/hot.ts': 5, 'src/cold.ts': 1 };
+
+    const warnings = getFileEditWarnings(state, 3);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('src/hot.ts');
+    expect(warnings[0]).toContain('5 times');
+  });
+
+  it('returns empty for no violations', () => {
+    const state = createSpindleState();
+    state.fileEditCounts = { 'src/a.ts': 1, 'src/b.ts': 2 };
+    expect(getFileEditWarnings(state, 3)).toEqual([]);
+  });
+
+  it('adds file churn warnings to state', () => {
+    const state = createSpindleState();
+    const config: SpindleConfig = { ...DEFAULT_SPINDLE_CONFIG, maxFileEdits: 2 };
+
+    const diff = '+++ b/src/hot.ts\n+x';
+    checkSpindleLoop(state, 'out1', diff, config);
+    checkSpindleLoop(state, 'out2', diff, config);
+
+    expect(state.warnings.some(w => w.includes('File churn'))).toBe(true);
+  });
+
+  it('caps file_edit_counts at 50 keys', () => {
+    const state = createSpindleState();
+    const config = DEFAULT_SPINDLE_CONFIG;
+
+    // Build a diff with 60 files
+    const lines = [];
+    for (let i = 0; i < 60; i++) {
+      lines.push(`+++ b/src/file${i}.ts`, `+const x${i} = 1;`);
+    }
+    checkSpindleLoop(state, 'output', lines.join('\n'), config);
+
+    expect(Object.keys(state.fileEditCounts).length).toBeLessThanOrEqual(50);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createSpindleState with new fields
+// ---------------------------------------------------------------------------
+
+describe('createSpindleState new fields', () => {
+  it('initializes new tracking fields', () => {
+    const state = createSpindleState();
+    expect(state.failingCommandSignatures).toEqual([]);
+    expect(state.fileEditCounts).toEqual({});
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatSpindleResult with new reasons
+// ---------------------------------------------------------------------------
+
+describe('formatSpindleResult new reasons', () => {
+  it('formats qa_ping_pong abort', () => {
+    const result = formatSpindleResult({
+      shouldAbort: true,
+      shouldBlock: false,
+      reason: 'qa_ping_pong',
+      confidence: 0.9,
+      diagnostics: { pingPongPattern: 'Alternating failures: abc ↔ def (3 cycles)' },
+    });
+    expect(result).toContain('qa_ping_pong');
+    expect(result).toContain('Alternating');
+  });
+
+  it('formats command_failure block', () => {
+    const result = formatSpindleResult({
+      shouldAbort: false,
+      shouldBlock: true,
+      reason: 'command_failure',
+      confidence: 0.8,
+      diagnostics: { commandSignature: 'abc123', commandFailureThreshold: 3 },
+    });
+    expect(result).toContain('blocked (needs human)');
+    expect(result).toContain('command_failure');
+    expect(result).toContain('abc123');
+  });
+
+  it('does not trigger for clean state', () => {
+    const result = formatSpindleResult({
+      shouldAbort: false,
+      shouldBlock: false,
+      confidence: 0,
+      diagnostics: {},
+    });
+    expect(result).toBe('No spindle loop detected');
   });
 });

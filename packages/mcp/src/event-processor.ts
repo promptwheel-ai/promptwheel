@@ -13,6 +13,7 @@ import { filterAndCreateTickets } from './proposals.js';
 import type { RawProposal } from './proposals.js';
 import { deriveScopePolicy, validatePlanScope } from './scope-policy.js';
 import { recordOutput, recordDiff, recordCommandFailure, recordPlanHash } from './spindle.js';
+import { addLearning, confirmLearning, extractTags } from './learnings.js';
 
 export interface ProcessResult {
   processed: boolean;
@@ -20,6 +21,8 @@ export interface ProcessResult {
   new_phase?: string;
   message: string;
 }
+
+const MAX_SCOUT_RETRIES = 2;
 
 export async function processEvent(
   run: RunManager,
@@ -49,8 +52,15 @@ export async function processEvent(
       }
 
       // Extract proposals from payload
-      const MAX_SCOUT_RETRIES = 2;
       const rawProposals = (payload['proposals'] ?? []) as RawProposal[];
+
+      // Build exploration log entry (before empty-check so retries also get logged)
+      const explorationSummary = (payload['exploration_summary'] ?? '') as string;
+      const logEntry = explorationSummary
+        ? `Attempt ${s.scout_retries + 1}: Explored ${exploredDirs.join(', ') || '(unknown)'}. Found ${rawProposals.length} proposals. ${explorationSummary}`
+        : `Attempt ${s.scout_retries + 1}: Explored ${exploredDirs.join(', ') || '(unknown)'}. Found ${rawProposals.length} proposals.`;
+      s.scout_exploration_log.push(logEntry);
+
       if (rawProposals.length === 0) {
         if (s.scout_retries < MAX_SCOUT_RETRIES) {
           s.scout_retries++;
@@ -71,13 +81,81 @@ export async function processEvent(
         };
       }
 
-      // Filter, dedup, score, create tickets
-      const result = await filterAndCreateTickets(run, db, rawProposals);
+      // Store proposals as pending for adversarial review (instead of creating tickets immediately)
+      s.pending_proposals = rawProposals;
 
       // Save proposals artifact
       run.saveArtifact(
         `${s.step_count}-scout-proposals.json`,
-        JSON.stringify({ raw: rawProposals, result }, null, 2),
+        JSON.stringify({ raw: rawProposals, pending_review: true }, null, 2),
+      );
+
+      return {
+        processed: true,
+        phase_changed: false,
+        message: `${rawProposals.length} proposals pending adversarial review`,
+      };
+    }
+
+    // -----------------------------------------------------------------
+    // Proposal review (adversarial critique pass)
+    // -----------------------------------------------------------------
+    case 'PROPOSALS_REVIEWED': {
+      if (s.phase !== 'SCOUT') {
+        return { processed: true, phase_changed: false, message: 'PROPOSALS_REVIEWED outside SCOUT phase, ignored' };
+      }
+
+      const pendingProposals = s.pending_proposals;
+      if (!pendingProposals || pendingProposals.length === 0) {
+        return { processed: true, phase_changed: false, message: 'No pending proposals to review' };
+      }
+
+      // Apply revised scores from review
+      const reviewedItems = (payload['reviewed_proposals'] ?? []) as Array<{
+        title?: string;
+        confidence?: number;
+        impact_score?: number;
+        review_note?: string;
+      }>;
+
+      // Merge reviewed scores back into pending proposals
+      for (const reviewed of reviewedItems) {
+        if (!reviewed.title) continue;
+        const match = pendingProposals.find(p => p.title === reviewed.title);
+        if (match) {
+          // Record learning if confidence lowered >20 pts
+          if (s.learnings_enabled && typeof reviewed.confidence === 'number' && typeof match.confidence === 'number') {
+            const drop = match.confidence - reviewed.confidence;
+            if (drop > 20) {
+              addLearning(run.rootPath, {
+                text: `Proposal "${reviewed.title}" had inflated confidence (${match.confidence}→${reviewed.confidence})`,
+                category: 'warning',
+                source: { type: 'review_downgrade', detail: reviewed.review_note },
+                tags: extractTags(match.files ?? match.allowed_paths ?? [], []),
+              });
+            }
+          }
+          if (typeof reviewed.confidence === 'number') match.confidence = reviewed.confidence;
+          if (typeof reviewed.impact_score === 'number') match.impact_score = reviewed.impact_score;
+        }
+      }
+
+      // Clear pending
+      s.pending_proposals = null;
+
+      // Now filter and create tickets with revised scores
+      const result = await filterAndCreateTickets(run, db, pendingProposals);
+
+      // Update exploration log with rejection info
+      const lastIdx = s.scout_exploration_log.length - 1;
+      if (lastIdx >= 0) {
+        s.scout_exploration_log[lastIdx] += ` ${result.accepted.length} accepted, ${result.rejected.length} rejected (${result.rejected.map(r => r.reason).slice(0, 3).join('; ')}).`;
+      }
+
+      // Save reviewed artifact
+      run.saveArtifact(
+        `${s.step_count}-scout-proposals-reviewed.json`,
+        JSON.stringify({ reviewed: reviewedItems, result }, null, 2),
       );
 
       if (result.created_ticket_ids.length > 0) {
@@ -87,17 +165,17 @@ export async function processEvent(
           processed: true,
           phase_changed: true,
           new_phase: 'NEXT_TICKET',
-          message: `Created ${result.created_ticket_ids.length} tickets from ${rawProposals.length} proposals (${result.rejected.length} rejected)`,
+          message: `Created ${result.created_ticket_ids.length} tickets after review (${result.rejected.length} rejected)`,
         };
       }
 
-      // All proposals rejected
+      // All proposals rejected after review
       if (s.scout_retries < MAX_SCOUT_RETRIES) {
         s.scout_retries++;
         return {
           processed: true,
           phase_changed: false,
-          message: `All ${rawProposals.length} proposals rejected (attempt ${s.scout_retries}/${MAX_SCOUT_RETRIES + 1}). Retrying with deeper analysis.`,
+          message: `All proposals rejected after review (attempt ${s.scout_retries}/${MAX_SCOUT_RETRIES + 1}). Retrying.`,
         };
       }
       run.setPhase('DONE');
@@ -105,7 +183,7 @@ export async function processEvent(
         processed: true,
         phase_changed: true,
         new_phase: 'DONE',
-        message: `All ${rawProposals.length} proposals rejected after all retries: ${result.rejected.map(r => r.reason).join('; ')}`,
+        message: `All proposals rejected after review and all retries: ${result.rejected.map(r => r.reason).join('; ')}`,
       };
     }
 
@@ -184,6 +262,15 @@ export async function processEvent(
       if (!scopeResult.valid) {
         s.plan_rejections++;
         run.appendEvent('PLAN_REJECTED', { reason: scopeResult.reason, attempt: s.plan_rejections });
+        // Record learning on plan rejection
+        if (s.learnings_enabled) {
+          addLearning(run.rootPath, {
+            text: `Plan rejected: ${scopeResult.reason}`.slice(0, 200),
+            category: 'gotcha',
+            source: { type: 'plan_rejection', detail: scopeResult.reason ?? undefined },
+            tags: extractTags(plan.files_to_touch.map(f => f.path), []),
+          });
+        }
         return {
           processed: true,
           phase_changed: false,
@@ -294,6 +381,17 @@ export async function processEvent(
       }
 
       if (status === 'failed') {
+        // Record learning on ticket failure
+        if (s.learnings_enabled) {
+          const reason = (payload['reason'] as string) ?? 'Execution failed';
+          const ticket = s.current_ticket_id ? await repos.tickets.getById(db, s.current_ticket_id) : null;
+          addLearning(run.rootPath, {
+            text: `Ticket failed on ${ticket?.title ?? 'unknown'} — ${reason}`.slice(0, 200),
+            category: 'warning',
+            source: { type: 'ticket_failure', detail: reason },
+            tags: extractTags(ticket?.allowedPaths ?? [], ticket?.verificationCommands ?? []),
+          });
+        }
         // Fail the ticket, move to next
         if (s.current_ticket_id) {
           await repos.tickets.updateStatus(db, s.current_ticket_id, 'blocked');
@@ -347,6 +445,14 @@ export async function processEvent(
         return { processed: true, phase_changed: false, message: 'QA passed outside QA phase' };
       }
 
+      // Confirm injected learnings on success
+      if (s.learnings_enabled && s.injected_learning_ids.length > 0) {
+        for (const id of s.injected_learning_ids) {
+          confirmLearning(run.rootPath, id);
+        }
+        s.injected_learning_ids = [];
+      }
+
       // Mark ticket done in DB
       if (s.current_ticket_id) {
         await repos.tickets.updateStatus(db, s.current_ticket_id, 'done');
@@ -394,6 +500,18 @@ export async function processEvent(
       s.qa_retries++;
 
       if (s.qa_retries >= 3) {
+        // Record learning on final QA failure
+        if (s.learnings_enabled) {
+          const failedCmds = (payload['failed_commands'] ?? payload['command'] ?? '') as string;
+          const errorSummary = ((payload['error'] ?? payload['output'] ?? '') as string).slice(0, 100);
+          const ticket = s.current_ticket_id ? await repos.tickets.getById(db, s.current_ticket_id) : null;
+          addLearning(run.rootPath, {
+            text: `QA fails on ${ticket?.title ?? 'unknown'} — ${errorSummary || failedCmds}`.slice(0, 200),
+            category: 'gotcha',
+            source: { type: 'qa_failure', detail: failedCmds },
+            tags: extractTags(ticket?.allowedPaths ?? [], ticket?.verificationCommands ?? []),
+          });
+        }
         // Give up on this ticket
         if (s.current_ticket_id) {
           await repos.tickets.updateStatus(db, s.current_ticket_id, 'blocked');

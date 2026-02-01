@@ -4,6 +4,9 @@
  * These match the schemas defined in docs/PLUGIN_ROADMAP.md.
  */
 
+// Re-export codebase index types for convenience
+export type { CodebaseIndex, ModuleEntry, LargeFileEntry } from './codebase-index.js';
+
 // ---------------------------------------------------------------------------
 // Phases
 // ---------------------------------------------------------------------------
@@ -137,6 +140,22 @@ export interface RunState {
 
   // Project metadata (detected at session start)
   project_metadata: ProjectMetadataSnapshot | null;
+
+  // Codebase structural index (built at session start)
+  codebase_index: import('./codebase-index.js').CodebaseIndex | null;
+
+  // Set true when code changes (ticket complete/fail) — triggers reindex on next scout cycle
+  codebase_index_dirty: boolean;
+
+  // Pending proposals awaiting adversarial review before ticket creation
+  pending_proposals: import('./proposals.js').RawProposal[] | null;
+
+  // Exploration log for better escalation context across scout retries
+  scout_exploration_log: string[];
+
+  // Cross-run learnings
+  learnings_enabled: boolean;
+  injected_learning_ids: string[];
 }
 
 export interface ProjectMetadataSnapshot {
@@ -208,6 +227,7 @@ export type EventType =
   | 'SPINDLE_ABORT'
   | 'HINT_CONSUMED'
   | 'USER_OVERRIDE'
+  | 'PROPOSALS_REVIEWED'
   | 'SESSION_END';
 
 export interface RunEvent {
@@ -229,6 +249,7 @@ export interface AdvanceConstraints {
   max_lines: number;
   required_commands: string[];
   plan_required: boolean;
+  auto_approve_patterns: string[];
 }
 
 export interface AdvanceDigest {
@@ -283,4 +304,7 @@ export interface SessionConfig {
   parallel?: number;
   min_impact_score?: number;
   scout_exclude_dirs?: string[];
+  learnings?: boolean;
+  learnings_budget?: number;
+  learnings_decay_rate?: number;
 }

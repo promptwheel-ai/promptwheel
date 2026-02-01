@@ -305,12 +305,26 @@ describe('filterAndCreateTickets — ticket creation', () => {
 // ---------------------------------------------------------------------------
 
 describe('processEvent SCOUT_OUTPUT', () => {
-  it('filters proposals and transitions to NEXT_TICKET', async () => {
+  it('stores proposals as pending for review', async () => {
     const s = run.require();
     s.phase = 'SCOUT';
 
     const result = await processEvent(run, db, 'SCOUT_OUTPUT', {
       proposals: [makeProposal({ title: 'Good proposal' })],
+    });
+
+    expect(result.phase_changed).toBe(false);
+    expect(result.message).toContain('pending adversarial review');
+    expect(s.pending_proposals).toHaveLength(1);
+  });
+
+  it('creates tickets after PROPOSALS_REVIEWED', async () => {
+    const s = run.require();
+    s.phase = 'SCOUT';
+    s.pending_proposals = [makeProposal({ title: 'Good proposal' })];
+
+    const result = await processEvent(run, db, 'PROPOSALS_REVIEWED', {
+      reviewed_proposals: [{ title: 'Good proposal', confidence: 85, impact_score: 7 }],
     });
 
     expect(result.phase_changed).toBe(true);
@@ -345,27 +359,28 @@ describe('processEvent SCOUT_OUTPUT', () => {
     expect(result.new_phase).toBe('DONE');
   });
 
-  it('retries scout when all proposals rejected and retries remaining', async () => {
+  it('retries scout when all proposals rejected after review and retries remaining', async () => {
     const s = run.require();
     s.phase = 'SCOUT';
     s.scout_retries = 0;
+    s.pending_proposals = [makeProposal({ confidence: 10, title: 'Too low' })];
 
-    const result = await processEvent(run, db, 'SCOUT_OUTPUT', {
-      proposals: [makeProposal({ confidence: 10, title: 'Too low' })],
+    const result = await processEvent(run, db, 'PROPOSALS_REVIEWED', {
+      reviewed_proposals: [{ title: 'Too low', confidence: 10 }],
     });
 
     expect(result.phase_changed).toBe(false);
     expect(s.scout_retries).toBe(1);
-    expect(result.message).toContain('Retrying');
   });
 
-  it('transitions to DONE when all proposals rejected and retries exhausted', async () => {
+  it('transitions to DONE when all proposals rejected after review and retries exhausted', async () => {
     const s = run.require();
     s.phase = 'SCOUT';
     s.scout_retries = 2;
+    s.pending_proposals = [makeProposal({ confidence: 10, title: 'Too low' })];
 
-    const result = await processEvent(run, db, 'SCOUT_OUTPUT', {
-      proposals: [makeProposal({ confidence: 10, title: 'Too low' })],
+    const result = await processEvent(run, db, 'PROPOSALS_REVIEWED', {
+      reviewed_proposals: [{ title: 'Too low', confidence: 10 }],
     });
 
     expect(result.phase_changed).toBe(true);
@@ -388,7 +403,7 @@ describe('processEvent SCOUT_OUTPUT', () => {
     expect(fs.existsSync(artifactPath)).toBe(true);
     const content = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
     expect(content.raw).toHaveLength(1);
-    expect(content.result.accepted).toHaveLength(1);
+    expect(content.pending_review).toBe(true);
   });
 
   it('ignores SCOUT_OUTPUT outside SCOUT phase', async () => {

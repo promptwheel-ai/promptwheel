@@ -23,6 +23,8 @@ import type {
 import { checkSpindle } from './spindle.js';
 import { detectProjectMetadata } from './project-metadata.js';
 import type { ProjectMetadata } from './project-metadata.js';
+import { buildCodebaseIndex } from './codebase-index.js';
+import { loadLearnings } from './learnings.js';
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -72,6 +74,11 @@ export class RunManager {
   private eventsPath: string | null = null;
 
   constructor(private readonly projectPath: string) {}
+
+  /** The project root path */
+  get rootPath(): string {
+    return this.projectPath;
+  }
 
   /** The base .blockspool directory */
   private get bsDir(): string {
@@ -146,6 +153,14 @@ export class RunManager {
       deferred_proposals: [],
 
       project_metadata: null,
+      codebase_index: null,
+      codebase_index_dirty: false,
+
+      pending_proposals: null,
+      scout_exploration_log: [],
+
+      learnings_enabled: config.learnings !== false,
+      injected_learning_ids: [],
     };
 
     // Detect project metadata (test runner, framework, etc.)
@@ -161,6 +176,17 @@ export class RunManager {
       type_checker: detectedMeta.type_checker,
       monorepo_tool: detectedMeta.monorepo_tool,
     };
+
+    // Build codebase structural index
+    this.state.codebase_index = buildCodebaseIndex(
+      this.projectPath,
+      this.state.scout_exclude_dirs,
+    );
+
+    // Apply decay to cross-run learnings (if enabled)
+    if (this.state.learnings_enabled) {
+      loadLearnings(this.projectPath, config.learnings_decay_rate);
+    }
 
     // Create run folder
     const runsDir = path.join(this.bsDir, 'runs');
@@ -243,6 +269,7 @@ export class RunManager {
   completeTicket(): void {
     const s = this.require();
     s.tickets_completed++;
+    s.codebase_index_dirty = true;
     const ticketId = s.current_ticket_id;
     s.current_ticket_id = null;
     s.current_ticket_plan = null;
@@ -256,6 +283,7 @@ export class RunManager {
   failTicket(reason: string): void {
     const s = this.require();
     s.tickets_failed++;
+    s.codebase_index_dirty = true;
     const ticketId = s.current_ticket_id;
     s.current_ticket_id = null;
     s.current_ticket_plan = null;
@@ -343,6 +371,7 @@ export class RunManager {
     if (worker) {
       s.step_count += worker.step_count;
       s.tickets_completed++;
+      s.codebase_index_dirty = true;
       delete s.ticket_workers[ticketId];
       this.persistState();
       this.appendEvent('TICKET_COMPLETED', { ticket_id: ticketId, parallel: true });
@@ -356,6 +385,7 @@ export class RunManager {
     if (worker) {
       s.step_count += worker.step_count;
       s.tickets_failed++;
+      s.codebase_index_dirty = true;
       delete s.ticket_workers[ticketId];
       this.persistState();
       this.appendEvent('TICKET_FAILED', { ticket_id: ticketId, reason, parallel: true });

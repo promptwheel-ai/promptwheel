@@ -89,12 +89,26 @@ describe('Golden Path E2E', () => {
     expect(resp.next_action).toBe('PROMPT');
     expect(resp.prompt).toContain('Scout Phase');
 
-    // 3. Inject scout output with a proposal
+    // 3. Inject scout output with a proposal (stored as pending)
     const scoutResult = await ingestEvent('SCOUT_OUTPUT', {
       proposals: [makeProposal('Remove unused import in utils.ts')],
     });
-    expect(scoutResult.phase_changed).toBe(true);
-    expect(scoutResult.new_phase).toBe('NEXT_TICKET');
+    expect(scoutResult.phase_changed).toBe(false);
+    expect(scoutResult.message).toContain('pending');
+
+    // 3b. Advance returns review prompt
+    resp = await advance(ctx());
+    expect(resp.phase).toBe('SCOUT');
+    expect(resp.prompt).toContain('Adversarial Proposal Review');
+
+    // 3c. Submit reviewed proposals
+    const reviewResult = await ingestEvent('PROPOSALS_REVIEWED', {
+      reviewed_proposals: [
+        { title: 'Remove unused import in utils.ts', confidence: 85, impact_score: 7 },
+      ],
+    });
+    expect(reviewResult.phase_changed).toBe(true);
+    expect(reviewResult.new_phase).toBe('NEXT_TICKET');
 
     // 4. Advance → NEXT_TICKET picks up ticket → PLAN
     resp = await advance(ctx());
@@ -197,6 +211,7 @@ describe('Golden Path E2E', () => {
     expect(eventTypes).toContain('SESSION_START');
     expect(eventTypes).toContain('ADVANCE_CALLED');
     expect(eventTypes).toContain('SCOUT_OUTPUT');
+    expect(eventTypes).toContain('PROPOSALS_REVIEWED');
     expect(eventTypes).toContain('PROPOSALS_FILTERED');
     expect(eventTypes).toContain('TICKETS_CREATED');
     expect(eventTypes).toContain('TICKET_ASSIGNED');

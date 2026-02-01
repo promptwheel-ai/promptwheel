@@ -136,6 +136,7 @@ export async function advanceTicketWorker(
     max_lines: policy.max_lines,
     required_commands: ticket.verificationCommands ?? [],
     plan_required: policy.plan_required,
+    auto_approve_patterns: [],
   };
 
   // Write per-ticket scope policy

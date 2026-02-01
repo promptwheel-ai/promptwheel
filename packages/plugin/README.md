@@ -4,10 +4,13 @@ Continuous codebase improvement for Claude Code. Scouts improvements, plans chan
 
 ## Installation
 
-Copy the `packages/plugin/` directory into your project, or use `--plugin-dir`:
-
 ```bash
-claude --plugin-dir /path/to/blockspool/packages/plugin
+# From the marketplace (recommended)
+claude plugin marketplace add blockspool/blockspool
+claude plugin install blockspool@blockspool
+
+# Update to latest
+claude plugin update blockspool@blockspool
 ```
 
 Or add the MCP server directly to your project's `.mcp.json`:
@@ -30,18 +33,29 @@ Or add the MCP server directly to your project's `.mcp.json`:
 
 Start an improvement session. Scouts the codebase, creates tickets, executes changes, and creates PRs.
 
-```
-/blockspool:run hours=2 formula=security-audit
-/blockspool:run deep=true
-/blockspool:run formula=test-coverage
-```
-
 **Arguments:**
+
 | Name | Description | Default |
 |------|-------------|---------|
-| `hours` | Time budget | unlimited |
-| `formula` | Recipe name | none |
-| `deep` | Architectural review mode | false |
+| `hours` | Time budget in hours | unlimited |
+| `cycles` | Number of scout-execute cycles | 1 |
+| `formula` | Recipe name (`security-audit`, `test-coverage`, `type-safety`, `cleanup`, `docs`, `docs-audit`) | none |
+| `deep` | Architectural review mode | `false` |
+| `batch_size` | Milestone batching — merge N tickets into one PR | none (individual PRs) |
+| `parallel` | Concurrent ticket execution (1-5) | 2 |
+| `min_impact_score` | Minimum impact score (1-10) to filter proposals | 3 |
+| `scope` | Directory to scan | auto-detected |
+
+**Examples:**
+
+```
+/blockspool:run                                  Single cycle
+/blockspool:run hours=4 batch_size=20            4-hour run with milestone PRs
+/blockspool:run formula=security-audit           Focus on vulnerabilities
+/blockspool:run deep=true                        Architectural review
+/blockspool:run cycles=5 parallel=3              5 cycles, 3 tickets at a time
+/blockspool:run formula=test-coverage parallel=4 Test coverage with high parallelism
+```
 
 ### `/blockspool:status`
 
@@ -58,28 +72,31 @@ Send a hint to guide the next scout cycle.
 
 ### `/blockspool:cancel`
 
-Gracefully end the current session. Displays summary.
-
-## Auth Note
-
-The plugin uses Claude Code's own authentication — no API key is needed. However, if `ANTHROPIC_API_KEY` is set in your environment, Claude Code will prefer it over your Pro/Max subscription. This can result in unexpected API charges.
-
-If you intend to use your subscription, make sure `ANTHROPIC_API_KEY` is **not** set when running Claude Code with the plugin.
+Gracefully end the current session. Displays summary of work completed.
 
 ## How It Works
 
 1. **Stop hook** prevents Claude Code from exiting while a session is active
-2. **PreToolUse hook** blocks file writes outside the ticket's allowed scope
-3. **MCP tools** provide the state machine: `advance` → execute → `ingest_event` → repeat
-4. **Formulas** customize what the scout looks for
-5. **Spindle** detects loops and aborts stuck agents
+2. **PreToolUse hook** blocks file writes outside the ticket's allowed scope (worktree-aware in parallel mode)
+3. **MCP tools** provide the state machine: `advance` -> execute -> `ingest_event` -> repeat
+4. **Parallel execution** spawns Task subagents per ticket in isolated worktrees. Each subagent gets a self-contained inline prompt — no MCP access needed by subagents.
+5. **Formulas** customize what the scout looks for
+6. **Spindle** detects loops (QA ping-pong, command failures, file churn) and aborts stuck agents
+7. **Cross-run learnings** remember failures and successes across sessions
+8. **Project detection** auto-detects test runner, framework, linter, and language for correct CLI syntax
 
 ## Hooks
 
 | Hook | Purpose |
 |------|---------|
 | `Stop` | Blocks premature exit during active sessions |
-| `PreToolUse` | Enforces scope policy on Write/Edit operations |
+| `PreToolUse` | Enforces scope policy on Write/Edit operations. In parallel mode, maps each worktree to its ticket's allowed paths. |
+
+## Auth Note
+
+The plugin uses Claude Code's own authentication — no API key is needed. However, if `ANTHROPIC_API_KEY` is set in your environment, Claude Code will prefer it over your Pro/Max subscription. This can result in unexpected API charges.
+
+If you intend to use your subscription, make sure `ANTHROPIC_API_KEY` is **not** set when running Claude Code with the plugin.
 
 ## Files
 

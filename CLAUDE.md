@@ -4,14 +4,14 @@
 
 BlockSpool is a coding tool that scouts your codebase for improvements, executes them in parallel, and creates PRs — all running locally with zero external infrastructure.
 
-## Solo Mode
+## Quick Start
 
 ```bash
-blockspool solo init                          # Initialize SQLite database
-blockspool solo auto                          # Scout + fix + PR
-blockspool solo auto --hours 8 --batch-size 30  # Long run with milestone PRs
-blockspool solo auto --continuous             # Run until stopped (Ctrl+C)
-blockspool solo nudge "focus on auth"         # Steer a running session
+blockspool init                               # Initialize SQLite database
+blockspool                                     # Scout + fix + PR (single cycle)
+blockspool --hours 8 --batch-size 30           # Long run with milestone PRs
+blockspool --continuous                        # Run until stopped (Ctrl+C)
+blockspool nudge "focus on auth"               # Steer a running session
 ```
 
 ### Features
@@ -24,24 +24,29 @@ blockspool solo nudge "focus on auth"         # Steer a running session
 - **Formulas** for repeatable recipes: `--formula security-audit`
 - **Deep mode** (`--deep`) for architectural/structural review
 - **Impact scoring** — proposals ranked by `impact x confidence`
-- **Spindle** loop detection prevents runaway agents
+- **Quality gating** — minimum impact score filter rejects low-value proposals
+- **Adversarial review** — devil's advocate scoring challenges every proposal
+- **Cross-run learnings** — remembers failures across sessions, confirms what works
+- **Codebase index** — lightweight structural index injected into scout prompts
+- **Project detection** — auto-detects test runner, framework, linter, language (10+ ecosystems)
+- **Spindle** loop detection — catches QA ping-pong, command failure loops, file churn
 - **Parallel** execution (default: 3-5 concurrent tickets, adaptive)
 - **Milestone mode** (`--batch-size N`) — batches N tickets into one milestone PR
 - **Wave scheduling** — conflict-aware partitioning prevents merge conflicts
 - **Scope enforcement** — each ticket sandboxed to `allowed_paths` with auto-expansion
 - **Rebase-retry** — rebases ticket branch on merge conflict, retries before blocking
 - **Balanced continuous mode** — deep architectural scan every 5 cycles
-- **Live steering** (`solo nudge`) — add hints mid-run, consumed in next scout cycle
+- **Live steering** (`nudge`) — add hints mid-run, consumed in next scout cycle
 - **Guidelines context** — loads CLAUDE.md (Claude) or AGENTS.md (Codex) into every prompt; auto-creates baseline if missing; re-reads every 10 cycles
 
 ## How It Works
 
 ```
-blockspool solo auto --hours 4
+blockspool --hours 4
 ```
 
 1. **Scout** — scans your codebase for improvement opportunities
-2. **Filter** — applies trust ladder, deduplication, confidence thresholds
+2. **Filter** — applies trust ladder, deduplication, impact scoring, adversarial review
 3. **Execute** — runs tickets in parallel using Claude Code CLI in isolated worktrees
 4. **QA** — runs your test/lint commands to verify changes
 5. **PR** — creates draft PRs (or merges to milestone branch)
@@ -51,10 +56,10 @@ blockspool solo auto --hours 4
 
 ```
 packages/
-├── cli/          # CLI application (blockspool solo)
+├── cli/          # CLI application
 │   ├── src/
 │   │   ├── commands/   # Command modules (solo-auto, solo-exec, etc.)
-│   │   ├── lib/        # Core logic (auto, hints, formulas, spindle, etc.)
+│   │   ├── lib/        # Core logic (auto, hints, formulas, spindle, learnings, etc.)
 │   │   ├── tui/        # Terminal UI
 │   │   └── test/       # Tests
 ├── core/         # Core types, scout, and utilities
@@ -100,7 +105,8 @@ npm run lint
 | **Formula** | A recipe for what to scout for. Built-ins: `security-audit`, `test-coverage`, `type-safety`, `cleanup`, `docs`, `deep`. User-defined formulas live in `.blockspool/formulas/`. |
 | **Deep** | Built-in formula (`--deep`) for principal-engineer-style architectural review. Auto-staggered every 5th cycle in continuous mode. |
 | **Impact Score** | 1-10 rating of how much a proposal matters. Proposals ranked by `impact x confidence`. |
-| **Spindle** | Loop detection system. Detects when an agent is spinning without progress and aborts. |
+| **Spindle** | Loop detection system. Catches QA ping-pong, command failure loops, and file churn. |
 | **Worktree** | An isolated git checkout where a ticket executes. Enables parallel execution. |
-| **Hint / Nudge** | Live guidance for a running auto session. Added via `solo nudge "text"` or stdin, consumed in the next scout cycle. |
-| **Guidelines** | Project conventions loaded from CLAUDE.md (Claude) or AGENTS.md (Codex) and injected into every prompt. Auto-created from `package.json` if missing. Re-read every 10 cycles (configurable via `auto.guidelinesRefreshCycles`). |
+| **Learnings** | Cross-run memory. Records failures and successes, injects relevant learnings into future prompts. |
+| **Hint / Nudge** | Live guidance for a running auto session. Added via `nudge "text"` or stdin, consumed in the next scout cycle. |
+| **Guidelines** | Project conventions loaded from CLAUDE.md (Claude) or AGENTS.md (Codex) and injected into every prompt. Auto-created from `package.json` if missing. Re-read every 10 cycles. |

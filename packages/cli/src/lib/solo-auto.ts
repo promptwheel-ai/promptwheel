@@ -25,7 +25,7 @@ import {
 } from './solo-config.js';
 import { pathsOverlap, runPreflightChecks } from './solo-utils.js';
 import { recordCycle, isDocsAuditDue, recordDocsAudit, deferProposal, popDeferredForScope } from './run-state.js';
-import { soloRunTicket, type RunTicketResult, type ExecutionBackend, CodexExecutionBackend } from './solo-ticket.js';
+import { soloRunTicket, runClaude, type RunTicketResult, type ExecutionBackend, CodexExecutionBackend } from './solo-ticket.js';
 import {
   createMilestoneBranch,
   mergeTicketToMilestone,
@@ -36,6 +36,20 @@ import { consumePendingHints } from './solo-hints.js';
 import { startStdinListener } from './solo-stdin.js';
 import { loadGuidelines, formatGuidelinesForPrompt } from './guidelines.js';
 import type { ProjectGuidelines, GuidelinesBackend } from './guidelines.js';
+import {
+  loadLearnings, addLearning, confirmLearning, recordAccess,
+  consolidateLearnings, formatLearningsForPrompt, selectRelevant, extractTags,
+  type Learning,
+} from './learnings.js';
+import {
+  buildCodebaseIndex, refreshCodebaseIndex, hasStructuralChanges,
+  formatIndexForPrompt, type CodebaseIndex,
+} from './codebase-index.js';
+import {
+  buildProposalReviewPrompt, parseReviewedProposals, applyReviewToProposals,
+} from './proposal-review.js';
+import { detectProjectMetadata, formatMetadataForPrompt } from './project-metadata.js';
+import { DEFAULT_AUTO_CONFIG } from './solo-config.js';
 
 /**
  * Sleep helper
@@ -231,6 +245,18 @@ export async function runAutoWorkMode(options: {
     console.log(chalk.gray(`  Guidelines loaded: ${guidelines.source}`));
   }
 
+  // Load cross-run learnings
+  const autoConf = { ...DEFAULT_AUTO_CONFIG, ...config?.auto };
+  const allLearningsWork = autoConf.learningsEnabled
+    ? loadLearnings(repoRoot, autoConf.learningsDecayRate) : [];
+  if (allLearningsWork.length > 0) {
+    console.log(chalk.gray(`  Learnings loaded: ${allLearningsWork.length}`));
+  }
+
+  // Detect project metadata
+  const projectMetaWork = detectProjectMetadata(repoRoot);
+  const metadataBlockWork = formatMetadataForPrompt(projectMetaWork) || undefined;
+
   const inFlight = new Map<string, { ticket: typeof readyTickets[0]; startTime: number }>();
   const results: Array<{ ticketId: string; title: string; result: RunTicketResult }> = [];
 
@@ -261,6 +287,18 @@ export async function runAutoWorkMode(options: {
         },
       });
 
+      // Build learnings context for this ticket
+      const relevantLearnings = autoConf.learningsEnabled
+        ? selectRelevant(allLearningsWork, {
+            paths: ticket.allowedPaths,
+            commands: ticket.verificationCommands,
+          })
+        : [];
+      const learningsBlock = formatLearningsForPrompt(relevantLearnings, autoConf.learningsBudget);
+      if (relevantLearnings.length > 0) {
+        recordAccess(repoRoot!, relevantLearnings.map(l => l.id));
+      }
+
       const result = await soloRunTicket({
         ticket,
         repoRoot: repoRoot!,
@@ -277,11 +315,19 @@ export async function runAutoWorkMode(options: {
           }
         },
         guidelinesContext: guidelines ? formatGuidelinesForPrompt(guidelines) : undefined,
+        learningsContext: learningsBlock || undefined,
+        metadataContext: metadataBlockWork,
       });
 
       if (result.success) {
         await runs.markSuccess(adapter, run.id);
         await tickets.updateStatus(adapter, ticket.id, result.prUrl ? 'in_review' : 'done');
+        // Confirm learnings that contributed to this success
+        if (autoConf.learningsEnabled && relevantLearnings.length > 0) {
+          for (const l of relevantLearnings) {
+            confirmLearning(repoRoot!, l.id);
+          }
+        }
         results.push({ ticketId: ticket.id, title: ticket.title, result });
       } else if (result.scopeExpanded) {
         await runs.markFailure(adapter, run.id, `Scope expanded: retry ${result.scopeExpanded.newRetryCount}`);
@@ -292,10 +338,35 @@ export async function runAutoWorkMode(options: {
           console.log(chalk.yellow(`↻ Scope expanded for ${ticket.id}, re-queued (retry ${result.scopeExpanded.newRetryCount})`));
         }
 
+        // Record scope violation learning
+        if (autoConf.learningsEnabled) {
+          addLearning(repoRoot!, {
+            text: `${ticket.title} failed: scope expanded`.slice(0, 200),
+            category: 'warning',
+            source: { type: 'scope_violation', detail: result.error },
+            tags: extractTags(ticket.allowedPaths, ticket.verificationCommands),
+          });
+        }
+
         results.push({ ticketId: ticket.id, title: ticket.title, result });
       } else {
         await runs.markFailure(adapter, run.id, result.error ?? 'Unknown error');
         await tickets.updateStatus(adapter, ticket.id, 'blocked');
+
+        // Record failure learning
+        if (autoConf.learningsEnabled && result.failureReason) {
+          const reason = result.error ?? result.failureReason;
+          const sourceType = result.failureReason === 'qa_failed' ? 'qa_failure' as const
+            : result.failureReason === 'scope_violation' ? 'scope_violation' as const
+            : 'ticket_failure' as const;
+          addLearning(repoRoot!, {
+            text: `${ticket.title} failed: ${reason}`.slice(0, 200),
+            category: sourceType === 'qa_failure' ? 'gotcha' : 'warning',
+            source: { type: sourceType, detail: reason },
+            tags: extractTags(ticket.allowedPaths, ticket.verificationCommands),
+          });
+        }
+
         results.push({ ticketId: ticket.id, title: ticket.title, result });
       }
     } catch (error) {
@@ -626,6 +697,31 @@ export async function runAutoMode(options: {
     console.log(chalk.gray(`  Guidelines loaded: ${guidelines.source}`));
   }
 
+  // Load cross-run learnings
+  const autoConf = { ...DEFAULT_AUTO_CONFIG, ...config?.auto };
+  let allLearnings: Learning[] = autoConf.learningsEnabled
+    ? loadLearnings(repoRoot, autoConf.learningsDecayRate) : [];
+  if (allLearnings.length > 0) {
+    console.log(chalk.gray(`  Learnings loaded: ${allLearnings.length}`));
+  }
+
+  // Build codebase index for structural awareness
+  const excludeDirs = ['node_modules', 'dist', 'build', '.git', '.blockspool', 'coverage', '__pycache__'];
+  let codebaseIndex: CodebaseIndex | null = null;
+  try {
+    codebaseIndex = buildCodebaseIndex(repoRoot, excludeDirs);
+    console.log(chalk.gray(`  Codebase index: ${codebaseIndex.modules.length} modules, ${codebaseIndex.untested_modules.length} untested, ${codebaseIndex.large_files.length} hotspots`));
+  } catch {
+    // Non-fatal — index failure shouldn't block the session
+  }
+
+  // Detect project metadata (test runner, framework, linter, etc.)
+  const projectMeta = detectProjectMetadata(repoRoot);
+  const metadataBlock = formatMetadataForPrompt(projectMeta);
+  if (projectMeta.languages.length > 0) {
+    console.log(chalk.gray(`  Project: ${projectMeta.languages.join(', ')}${projectMeta.framework ? ` / ${projectMeta.framework}` : ''}${projectMeta.test_runner ? ` / ${projectMeta.test_runner.name}` : ''}`));
+  }
+
   // Auto-prune stale state on session start (includes DB ticket cleanup)
   try {
     const { pruneAllAsync: pruneAllAsyncFn, getRetentionConfig } = await import('./retention.js');
@@ -882,7 +978,13 @@ export async function runAutoMode(options: {
       let lastProgress = '';
       const scoutPath = (milestoneMode && milestoneWorktreePath) ? milestoneWorktreePath : repoRoot;
       const guidelinesPrefix = guidelines ? formatGuidelinesForPrompt(guidelines) + '\n\n' : '';
-      const basePrompt = guidelinesPrefix + (cycleFormula?.prompt || '');
+      const learningsPrefix = autoConf.learningsEnabled
+        ? formatLearningsForPrompt(selectRelevant(allLearnings, { paths: [scope] }), autoConf.learningsBudget)
+        : '';
+      const learningsSuffix = learningsPrefix ? learningsPrefix + '\n\n' : '';
+      const indexPrefix = codebaseIndex ? formatIndexForPrompt(codebaseIndex, cycleCount) + '\n\n' : '';
+      const metadataPrefix = metadataBlock ? metadataBlock + '\n\n' : '';
+      const basePrompt = guidelinesPrefix + metadataPrefix + indexPrefix + learningsSuffix + (cycleFormula?.prompt || '');
       const effectivePrompt = hintBlock ? (basePrompt + hintBlock) : (basePrompt || undefined);
       const scoutResult = await scoutRepo(deps, {
         path: scoutPath,
@@ -928,6 +1030,49 @@ export async function runAutoMode(options: {
       }
 
       console.log(chalk.gray(`  Found ${proposals.length} potential improvements`));
+
+      // Adversarial proposal review — second-pass critique
+      if (autoConf.adversarialReview && !options.eco && proposals.length > 0) {
+        try {
+          const reviewPrompt = buildProposalReviewPrompt(proposals);
+          const reviewBackend = executionBackend ?? {
+            name: 'claude-review',
+            run: (opts: Parameters<ExecutionBackend['run']>[0]) => runClaude(opts),
+          };
+          const reviewResult = await reviewBackend.run({
+            worktreePath: (milestoneMode && milestoneWorktreePath) ? milestoneWorktreePath : repoRoot,
+            prompt: reviewPrompt,
+            timeoutMs: 120000,
+            verbose: false,
+            onProgress: () => {},
+          });
+
+          if (reviewResult.success) {
+            const reviewed = parseReviewedProposals(reviewResult.stdout);
+            if (reviewed) {
+              const before = proposals.map(p => p.confidence);
+              const revised = applyReviewToProposals(proposals, reviewed);
+              // Replace proposals array contents
+              proposals.length = 0;
+              proposals.push(...revised);
+
+              const adjustedCount = reviewed.filter((r, i) => {
+                const orig = before[i];
+                return orig !== undefined && r.confidence !== orig;
+              }).length;
+              const rejectedCount = reviewed.filter(r => r.confidence === 0).length;
+              if (adjustedCount > 0 || rejectedCount > 0) {
+                console.log(chalk.gray(`  Review: ${adjustedCount} adjusted, ${rejectedCount} rejected`));
+              }
+            }
+          }
+        } catch {
+          // Non-fatal — review failure falls through to original proposals
+          if (options.verbose) {
+            console.log(chalk.yellow(`  ⚠ Adversarial review failed, using original scores`));
+          }
+        }
+      }
 
       // Re-inject deferred proposals that now match this cycle's scope
       const deferred = popDeferredForScope(repoRoot, scope);
@@ -1113,6 +1258,18 @@ export async function runAutoMode(options: {
           metadata: { auto: true },
         });
 
+        // Build learnings context for this ticket
+        const ticketLearnings = autoConf.learningsEnabled
+          ? selectRelevant(allLearnings, {
+              paths: ticket.allowedPaths,
+              commands: ticket.verificationCommands,
+            })
+          : [];
+        const ticketLearningsBlock = formatLearningsForPrompt(ticketLearnings, autoConf.learningsBudget);
+        if (ticketLearnings.length > 0) {
+          recordAccess(repoRoot, ticketLearnings.map(l => l.id));
+        }
+
         let currentTicket = ticket;
         let currentRun = run;
         let retryCount = 0;
@@ -1138,6 +1295,8 @@ export async function runAutoMode(options: {
               },
               executionBackend,
               guidelinesContext: guidelines ? formatGuidelinesForPrompt(guidelines) : undefined,
+              learningsContext: ticketLearningsBlock || undefined,
+              metadataContext: metadataBlock || undefined,
               ...(milestoneMode && milestoneBranch ? {
                 baseBranch: milestoneBranch,
                 skipPush: true,
@@ -1170,6 +1329,12 @@ export async function runAutoMode(options: {
                 milestoneTicketSummaries.push(currentTicket.title);
                 await runs.markSuccess(adapter, currentRun.id);
                 await tickets.updateStatus(adapter, currentTicket.id, 'done');
+                // Confirm learnings on milestone success
+                if (autoConf.learningsEnabled && ticketLearnings.length > 0) {
+                  for (const l of ticketLearnings) {
+                    confirmLearning(repoRoot, l.id);
+                  }
+                }
                 console.log(chalk.green(`  ✓ Merged to milestone (${milestoneTicketCount}/${batchSize})`));
 
                 // Finalize mid-batch if full (prevents overflow when running in parallel)
@@ -1184,6 +1349,12 @@ export async function runAutoMode(options: {
 
               await runs.markSuccess(adapter, currentRun.id, { prUrl: result.prUrl });
               await tickets.updateStatus(adapter, currentTicket.id, 'done');
+              // Confirm learnings on success
+              if (autoConf.learningsEnabled && ticketLearnings.length > 0) {
+                for (const l of ticketLearnings) {
+                  confirmLearning(repoRoot, l.id);
+                }
+              }
               console.log(chalk.green(`  ✓ PR created`));
               if (result.prUrl) {
                 console.log(chalk.cyan(`    ${result.prUrl}`));
@@ -1216,6 +1387,19 @@ export async function runAutoMode(options: {
               const failReason = result.scopeExpanded
                 ? `Scope expansion failed after ${maxScopeRetries} retries`
                 : (result.error || result.failureReason || 'unknown');
+              // Record failure learning
+              if (autoConf.learningsEnabled && result.failureReason) {
+                const reason = result.error ?? result.failureReason;
+                const sourceType = result.failureReason === 'qa_failed' ? 'qa_failure' as const
+                  : result.failureReason === 'scope_violation' ? 'scope_violation' as const
+                  : 'ticket_failure' as const;
+                addLearning(repoRoot, {
+                  text: `${currentTicket.title} failed: ${reason}`.slice(0, 200),
+                  category: sourceType === 'qa_failure' ? 'gotcha' : 'warning',
+                  source: { type: sourceType, detail: reason },
+                  tags: extractTags(currentTicket.allowedPaths, currentTicket.verificationCommands),
+                });
+              }
               console.log(chalk.red(`  ✗ Failed: ${failReason}`));
               return { success: false };
             }
@@ -1305,6 +1489,24 @@ export async function runAutoMode(options: {
       recordCycle(repoRoot);
       if (isDocsAuditCycle) {
         recordDocsAudit(repoRoot);
+      }
+
+      // Periodic learnings consolidation
+      if (cycleCount % 10 === 0 && autoConf.learningsEnabled) {
+        consolidateLearnings(repoRoot);
+        allLearnings = loadLearnings(repoRoot, 0); // reload without decay
+      }
+
+      // Refresh codebase index if structure changed (cheap mtime check)
+      if (codebaseIndex && hasStructuralChanges(codebaseIndex, repoRoot)) {
+        try {
+          codebaseIndex = refreshCodebaseIndex(codebaseIndex, repoRoot, excludeDirs);
+          if (options.verbose) {
+            console.log(chalk.gray(`  Codebase index refreshed: ${codebaseIndex.modules.length} modules`));
+          }
+        } catch {
+          // Non-fatal
+        }
       }
 
       if (isContinuous && shouldContinue()) {

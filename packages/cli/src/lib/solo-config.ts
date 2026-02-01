@@ -79,6 +79,14 @@ export interface AutoConfig {
    * Examples: "docs/GUIDELINES.md", "CONVENTIONS.md", false
    */
   guidelinesPath: string | false | null;
+  /** Enable adversarial proposal review — second-pass critique before acceptance (default: true) */
+  adversarialReview: boolean;
+  /** Enable cross-run learnings (default: true) */
+  learningsEnabled: boolean;
+  /** Character budget for learnings injected into prompts (default: 2000) */
+  learningsBudget: number;
+  /** Weight decay per session (default: 3) */
+  learningsDecayRate: number;
 }
 
 /**
@@ -100,6 +108,10 @@ export const DEFAULT_AUTO_CONFIG: AutoConfig = {
   guidelinesRefreshCycles: 10,
   autoCreateGuidelines: true,
   guidelinesPath: null,
+  adversarialReview: true,
+  learningsEnabled: true,
+  learningsBudget: 2000,
+  learningsDecayRate: 3,
 };
 
 /**

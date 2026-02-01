@@ -31,9 +31,54 @@ import { loadFormula } from './formulas.js';
 import type { Formula } from './formulas.js';
 import { loadGuidelines, formatGuidelinesForPrompt } from './guidelines.js';
 import { detectProjectMetadata, formatMetadataForPrompt } from './project-metadata.js';
+import { formatIndexForPrompt, refreshCodebaseIndex, hasStructuralChanges } from './codebase-index.js';
+import { buildProposalReviewPrompt, type ValidatedProposal } from './proposals.js';
+import {
+  loadLearnings as readLearningsFromDisk,
+  selectRelevant,
+  formatLearningsForPrompt,
+  recordAccess,
+  extractTags,
+} from './learnings.js';
 
 const MAX_PLAN_REJECTIONS = 3;
 const MAX_QA_RETRIES = 3;
+const DEFAULT_LEARNINGS_BUDGET = 2000;
+
+/**
+ * Build a learnings block for prompt injection. Tracks injected IDs in state.
+ */
+function buildLearningsBlock(
+  run: RunManager,
+  contextPaths: string[],
+  contextCommands: string[],
+): string {
+  const s = run.require();
+  if (!s.learnings_enabled) return '';
+
+  const projectPath = run.rootPath;
+
+  const allLearnings = readLearningsFromDisk(projectPath, 0); // decay=0, already decayed at session start
+  if (allLearnings.length === 0) return '';
+
+  const relevant = selectRelevant(allLearnings, { paths: contextPaths, commands: contextCommands });
+  const budget = DEFAULT_LEARNINGS_BUDGET;
+  const block = formatLearningsForPrompt(relevant, budget);
+  if (!block) return '';
+
+  // Track which learnings were injected
+  const injectedIds = relevant
+    .filter(l => block.includes(l.text))
+    .map(l => l.id);
+  s.injected_learning_ids = [...new Set([...s.injected_learning_ids, ...injectedIds])];
+
+  // Record access
+  if (injectedIds.length > 0) {
+    recordAccess(projectPath, injectedIds);
+  }
+
+  return block + '\n\n';
+}
 
 export interface AdvanceContext {
   run: RunManager;
@@ -146,9 +191,59 @@ export async function advance(ctx: AdvanceContext): Promise<AdvanceResponse> {
 // Phase handlers
 // ---------------------------------------------------------------------------
 
+const SCOUT_AUTO_APPROVE = [
+  'Read(*)', 'Glob(*)', 'Grep(*)', 'Bash(ls *)', 'Bash(find *)', 'Bash(cat *)', 'Bash(head *)', 'Bash(wc *)',
+];
+
+const EXECUTE_AUTO_APPROVE = [
+  'Read(*)', 'Glob(*)', 'Grep(*)', 'Edit(*)', 'Write(*)',
+  'Bash(npm test*)', 'Bash(npx vitest*)', 'Bash(npx tsc*)', 'Bash(git diff*)', 'Bash(git status*)',
+];
+
+const QA_AUTO_APPROVE = [
+  'Read(*)', 'Bash(npm test*)', 'Bash(npx vitest*)', 'Bash(npx tsc*)',
+];
+
+const PR_AUTO_APPROVE = [
+  'Bash(git *)', 'Bash(gh pr *)',
+];
+
 async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
   const { run, db } = ctx;
   const s = run.require();
+
+  // If pending proposals exist, return adversarial review prompt
+  if (s.pending_proposals !== null) {
+    // Convert raw proposals to ValidatedProposal shape for the review prompt
+    const forReview: ValidatedProposal[] = s.pending_proposals.map(p => ({
+      category: p.category ?? 'unknown',
+      title: p.title ?? 'Untitled',
+      description: p.description ?? '',
+      acceptance_criteria: p.acceptance_criteria ?? [],
+      verification_commands: p.verification_commands ?? [],
+      allowed_paths: p.allowed_paths ?? [],
+      files: p.files ?? [],
+      confidence: p.confidence ?? 0,
+      impact_score: p.impact_score ?? 5,
+      rationale: p.rationale ?? '',
+      estimated_complexity: p.estimated_complexity ?? 'moderate',
+      risk: p.risk ?? 'medium',
+      touched_files_estimate: p.touched_files_estimate ?? 0,
+      rollback_note: p.rollback_note ?? '',
+    }));
+
+    const reviewPrompt = buildProposalReviewPrompt(forReview);
+    return promptResponse(run, 'SCOUT', reviewPrompt, 'Reviewing proposals adversarially', {
+      allowed_paths: [s.scope],
+      denied_paths: [],
+      denied_patterns: [],
+      max_files: 0,
+      max_lines: 0,
+      required_commands: [],
+      plan_required: false,
+      auto_approve_patterns: SCOUT_AUTO_APPROVE,
+    });
+  }
 
   // Check if we already have ready tickets in backlog
   const readyTickets = await repos.tickets.listByProject(
@@ -177,10 +272,30 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
   const projectMeta = detectProjectMetadata(ctx.project.rootPath);
   const metadataBlock = formatMetadataForPrompt(projectMeta) + '\n\n';
 
-  // Build escalation block if retrying after 0 proposals
-  const escalationBlock = s.scout_retries > 0 ? buildScoutEscalation(s.scout_retries) + '\n\n' : '';
+  // Refresh codebase index if structure changed (dirty flag from tickets, or external mtime check)
+  if (s.codebase_index) {
+    const needsRefresh = s.codebase_index_dirty
+      || hasStructuralChanges(s.codebase_index, ctx.project.rootPath);
+    if (needsRefresh) {
+      s.codebase_index = refreshCodebaseIndex(
+        s.codebase_index, ctx.project.rootPath, s.scout_exclude_dirs,
+      );
+      s.codebase_index_dirty = false;
+    }
+  }
 
-  const prompt = guidelinesBlock + metadataBlock + escalationBlock + buildScoutPrompt(s.scope, s.categories, s.min_confidence,
+  // Build codebase index block — use cycles + retries so retries advance the chunk
+  const chunkOffset = s.scout_cycles + s.scout_retries;
+  const indexBlock = s.codebase_index ? formatIndexForPrompt(s.codebase_index, chunkOffset) + '\n\n' : '';
+
+  // Build escalation block if retrying after 0 proposals
+  const escalationBlock = s.scout_retries > 0
+    ? buildScoutEscalation(s.scout_retries, s.scout_exploration_log, s.scouted_dirs, s.codebase_index) + '\n\n'
+    : '';
+
+  const learningsBlock = buildLearningsBlock(run, [s.scope, ...s.scouted_dirs], []);
+
+  const prompt = guidelinesBlock + metadataBlock + indexBlock + learningsBlock + escalationBlock + buildScoutPrompt(s.scope, s.categories, s.min_confidence,
     s.max_proposals_per_scout, dedupContext, formula, hints, s.eco, s.min_impact_score, s.scouted_dirs, s.scout_exclude_dirs);
 
   // Reset scout_retries at the start of a fresh cycle (non-retry entry)
@@ -197,6 +312,7 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
     max_lines: 0,
     required_commands: [],
     plan_required: false,
+    auto_approve_patterns: SCOUT_AUTO_APPROVE,
   });
 }
 
@@ -260,6 +376,7 @@ async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> 
           max_lines: policy.max_lines,
           required_commands: ticket.verificationCommands ?? [],
           plan_required: policy.plan_required,
+          auto_approve_patterns: EXECUTE_AUTO_APPROVE,
         },
         inline_prompt: '', // filled below
       });
@@ -355,6 +472,7 @@ async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> 
     max_lines: policy.max_lines,
     required_commands: ticket.verificationCommands ?? [],
     plan_required: policy.plan_required,
+    auto_approve_patterns: SCOUT_AUTO_APPROVE,
   };
 
   // Docs category: skip plan, go straight to execute
@@ -370,7 +488,7 @@ async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> 
   const prompt = buildPlanPrompt(ticket);
 
   return promptResponse(run, 'PLAN', prompt,
-    `Planning ticket: ${ticket.title}`, constraints);
+    `Planning ticket: ${ticket.title}`, { ...constraints, auto_approve_patterns: SCOUT_AUTO_APPROVE });
 }
 
 async function advancePlan(ctx: AdvanceContext): Promise<AdvanceResponse> {
@@ -416,9 +534,12 @@ async function advancePlan(ctx: AdvanceContext): Promise<AdvanceResponse> {
     maxLinesPerTicket: s.max_lines_per_ticket,
   });
 
-  const prompt = s.plan_rejections > 0
+  const learningsBlock = buildLearningsBlock(run, ticket.allowedPaths ?? [], ticket.verificationCommands ?? []);
+
+  const basePlanPrompt = s.plan_rejections > 0
     ? `Your previous commit plan was rejected. Please revise.\n\n${buildPlanPrompt(ticket)}`
     : buildPlanPrompt(ticket);
+  const prompt = learningsBlock + basePlanPrompt;
 
   return promptResponse(run, 'PLAN', prompt,
     s.plan_rejections > 0
@@ -432,6 +553,7 @@ async function advancePlan(ctx: AdvanceContext): Promise<AdvanceResponse> {
       max_lines: policy.max_lines,
       required_commands: ticket.verificationCommands ?? [],
       plan_required: policy.plan_required,
+      auto_approve_patterns: SCOUT_AUTO_APPROVE,
     });
 }
 
@@ -467,8 +589,9 @@ async function advanceExecute(ctx: AdvanceContext): Promise<AdvanceResponse> {
 
   const guidelines = loadGuidelines(ctx.project.rootPath);
   const guidelinesBlock = guidelines ? formatGuidelinesForPrompt(guidelines) + '\n\n' : '';
+  const learningsBlock = buildLearningsBlock(run, ticket.allowedPaths ?? [], ticket.verificationCommands ?? []);
 
-  const prompt = guidelinesBlock + buildExecutePrompt(ticket, s.current_ticket_plan);
+  const prompt = guidelinesBlock + learningsBlock + buildExecutePrompt(ticket, s.current_ticket_plan);
 
   return promptResponse(run, 'EXECUTE', prompt,
     `Executing ticket: ${ticket.title}`, {
@@ -479,6 +602,7 @@ async function advanceExecute(ctx: AdvanceContext): Promise<AdvanceResponse> {
       max_lines: policy.max_lines,
       required_commands: ticket.verificationCommands ?? [],
       plan_required: false,
+      auto_approve_patterns: EXECUTE_AUTO_APPROVE,
     });
 }
 
@@ -505,7 +629,8 @@ async function advanceQa(ctx: AdvanceContext): Promise<AdvanceResponse> {
     return advance(ctx);
   }
 
-  const prompt = buildQaPrompt(ticket);
+  const learningsBlock = buildLearningsBlock(run, [], ticket.verificationCommands ?? []);
+  const prompt = learningsBlock + buildQaPrompt(ticket);
 
   return promptResponse(run, 'QA', prompt,
     `Running QA for: ${ticket.title} (attempt ${s.qa_retries + 1}/${MAX_QA_RETRIES})`, {
@@ -516,6 +641,7 @@ async function advanceQa(ctx: AdvanceContext): Promise<AdvanceResponse> {
       max_lines: 0,
       required_commands: ticket.verificationCommands ?? [],
       plan_required: false,
+      auto_approve_patterns: QA_AUTO_APPROVE,
     });
 }
 
@@ -538,6 +664,7 @@ async function advancePr(ctx: AdvanceContext): Promise<AdvanceResponse> {
       max_lines: 0,
       required_commands: [],
       plan_required: false,
+      auto_approve_patterns: PR_AUTO_APPROVE,
     });
 }
 
@@ -632,6 +759,7 @@ function emptyConstraints(): AdvanceConstraints {
     max_lines: 0,
     required_commands: [],
     plan_required: false,
+    auto_approve_patterns: [],
   };
 }
 
@@ -650,20 +778,48 @@ function terminalReason(phase: Phase): string {
 // Prompt builders
 // ---------------------------------------------------------------------------
 
-function buildScoutEscalation(retryCount: number): string {
-  return [
-    '## Previous Attempt Found Nothing',
+function buildScoutEscalation(
+  retryCount: number,
+  explorationLog: string[],
+  scoutedDirs: string[],
+  codebaseIndex: import('./codebase-index.js').CodebaseIndex | null,
+): string {
+  const parts = [
+    '## Previous Attempts Found Nothing — Fresh Approach Required',
     '',
-    `Your previous scout attempt (attempt ${retryCount}) returned 0 proposals. This usually means you didn't read enough source files or explored config/boilerplate instead of business logic.`,
-    '',
-    'This time:',
-    '- Pick DIFFERENT directories/modules than your previous attempt',
-    '- Read at least 15 source files — focus on core business logic, handlers, services, and their tests',
-    '- Skip config files, lock files, and generated code',
-    '- Read files in related clusters (a module + its tests, a handler + its helpers)',
-    '- Look specifically for: missing tests, error handling gaps, security issues, performance problems',
-    '- If the codebase is genuinely well-maintained, explain which directories you analyzed and why no proposals were found',
-  ].join('\n');
+  ];
+
+  if (explorationLog.length > 0) {
+    parts.push('### What Was Already Tried');
+    for (const entry of explorationLog) {
+      parts.push(entry);
+    }
+    parts.push('');
+  }
+
+  // Suggest unexplored modules from codebase index
+  const exploredSet = new Set(scoutedDirs.map(d => d.replace(/\/$/, '')));
+  const unexplored: string[] = [];
+  if (codebaseIndex) {
+    for (const mod of codebaseIndex.modules) {
+      if (!exploredSet.has(mod.path) && !exploredSet.has(mod.path + '/')) {
+        unexplored.push(mod.path);
+      }
+    }
+  }
+
+  parts.push('### What to Do Differently');
+  parts.push('');
+  parts.push('Knowing everything from the attempts above, take a completely different angle:');
+  parts.push('- Do NOT re-read the directories listed above.');
+  if (unexplored.length > 0) {
+    parts.push(`- Try unexplored areas: ${unexplored.slice(0, 8).map(d => `\`${d}\``).join(', ')}`);
+  }
+  parts.push('- Switch categories: if you looked for bugs, look for tests. If tests, try security.');
+  parts.push('- Read at least 15 NEW source files.');
+  parts.push('- If genuinely nothing to improve, explain your analysis across all attempts.');
+
+  return parts.join('\n');
 }
 
 function buildScoutPrompt(

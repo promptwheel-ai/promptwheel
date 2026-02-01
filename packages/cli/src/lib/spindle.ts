@@ -11,6 +11,8 @@
  * jams, it spins without producing thread.
  */
 
+import { createHash } from 'node:crypto';
+
 /**
  * Configuration for Spindle loop detection
  */
@@ -35,6 +37,15 @@ export interface SpindleConfig {
 
   /** Estimated token budget before abort (default: 140000) */
   tokenBudgetAbort: number;
+
+  /** Max times the same command signature can fail before blocking (default: 3) */
+  maxCommandFailures: number;
+
+  /** Max QA ping-pong cycles (A↔B alternating failures) before abort (default: 3) */
+  maxQaPingPong: number;
+
+  /** Max edits to the same file before warning (default: 3) */
+  maxFileEdits: number;
 }
 
 /**
@@ -48,6 +59,9 @@ export const DEFAULT_SPINDLE_CONFIG: SpindleConfig = {
   verbosityThreshold: 10,
   tokenBudgetWarning: 100000,
   tokenBudgetAbort: 140000,
+  maxCommandFailures: 3,
+  maxQaPingPong: 3,
+  maxFileEdits: 3,
 };
 
 /**
@@ -74,6 +88,12 @@ export interface SpindleState {
 
   /** Total characters of actual changes (for verbosity ratio) */
   totalChangeChars: number;
+
+  /** Rolling history of failing command signatures (hashed command+error) */
+  failingCommandSignatures: string[];
+
+  /** Per-file edit counts extracted from diffs */
+  fileEditCounts: Record<string, number>;
 }
 
 /**
@@ -88,6 +108,8 @@ export function createSpindleState(): SpindleState {
     warnings: [],
     totalOutputChars: 0,
     totalChangeChars: 0,
+    failingCommandSignatures: [],
+    fileEditCounts: {},
   };
 }
 
@@ -98,8 +120,11 @@ export interface SpindleResult {
   /** Whether the agent should be aborted */
   shouldAbort: boolean;
 
+  /** Whether the ticket should be blocked (needs human intervention) instead of failed */
+  shouldBlock: boolean;
+
   /** Reason for abort if shouldAbort is true */
-  reason?: 'oscillation' | 'spinning' | 'stalling' | 'repetition' | 'token_budget';
+  reason?: 'oscillation' | 'spinning' | 'stalling' | 'repetition' | 'token_budget' | 'qa_ping_pong' | 'command_failure';
 
   /** Confidence in the detection (0-1) */
   confidence: number;
@@ -112,6 +137,10 @@ export interface SpindleResult {
     repeatedPatterns?: string[];
     verbosityRatio?: number;
     oscillationPattern?: string;
+    pingPongPattern?: string;
+    commandSignature?: string;
+    commandFailureThreshold?: number;
+    fileEditWarnings?: string[];
   };
 }
 
@@ -361,7 +390,7 @@ export function checkSpindleLoop(
 ): SpindleResult {
   // If disabled, always pass
   if (!config.enabled) {
-    return { shouldAbort: false, confidence: 0, diagnostics: {} };
+    return { shouldAbort: false, shouldBlock: false, confidence: 0, diagnostics: {} };
   }
 
   // Update state with latest data
@@ -383,6 +412,21 @@ export function checkSpindleLoop(
     if (state.diffs.length > 5) {
       state.diffs.shift();
     }
+
+    // Track per-file edit frequency
+    const editedFiles = extractFilesFromDiff(latestDiff);
+    for (const f of editedFiles) {
+      state.fileEditCounts[f] = (state.fileEditCounts[f] ?? 0) + 1;
+    }
+    // Cap file_edit_counts keys to prevent unbounded growth
+    const MAX_FILE_EDIT_KEYS = 50;
+    const editKeys = Object.keys(state.fileEditCounts);
+    if (editKeys.length > MAX_FILE_EDIT_KEYS) {
+      const sorted = Object.entries(state.fileEditCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, MAX_FILE_EDIT_KEYS);
+      state.fileEditCounts = Object.fromEntries(sorted);
+    }
   }
 
   // Track iterations without changes
@@ -396,6 +440,7 @@ export function checkSpindleLoop(
   if (state.estimatedTokens >= config.tokenBudgetAbort) {
     return {
       shouldAbort: true,
+      shouldBlock: false,
       reason: 'token_budget',
       confidence: 1.0,
       diagnostics: {
@@ -416,6 +461,7 @@ export function checkSpindleLoop(
   if (state.iterationsSinceChange >= config.maxStallIterations) {
     return {
       shouldAbort: true,
+      shouldBlock: false,
       reason: 'stalling',
       confidence: 0.9,
       diagnostics: {
@@ -430,6 +476,7 @@ export function checkSpindleLoop(
     if (oscillation.detected) {
       return {
         shouldAbort: true,
+        shouldBlock: false,
         reason: 'oscillation',
         confidence: oscillation.confidence,
         diagnostics: {
@@ -445,6 +492,7 @@ export function checkSpindleLoop(
     if (repetition.detected) {
       return {
         shouldAbort: true,
+        shouldBlock: false,
         reason: 'repetition',
         confidence: repetition.confidence,
         diagnostics: {
@@ -467,26 +515,157 @@ export function checkSpindleLoop(
     }
   }
 
+  // Check 6: QA ping-pong — alternating failure signatures
+  if (state.failingCommandSignatures.length >= config.maxQaPingPong * 2) {
+    const pp = detectQaPingPong(state.failingCommandSignatures, config.maxQaPingPong);
+    if (pp) {
+      return {
+        shouldAbort: true,
+        shouldBlock: false,
+        reason: 'qa_ping_pong',
+        confidence: 0.9,
+        diagnostics: { pingPongPattern: pp },
+      };
+    }
+  }
+
+  // Check 7: Command signature — same command fails N times → block (needs human)
+  const cmdFail = detectCommandFailure(state.failingCommandSignatures, config.maxCommandFailures);
+  if (cmdFail) {
+    return {
+      shouldAbort: false,
+      shouldBlock: true,
+      reason: 'command_failure',
+      confidence: 0.8,
+      diagnostics: { commandSignature: cmdFail, commandFailureThreshold: config.maxCommandFailures },
+    };
+  }
+
+  // Check 8: File edit frequency warnings
+  const fileWarnings = getFileEditWarnings(state, config.maxFileEdits);
+  if (fileWarnings.length > 0) {
+    for (const w of fileWarnings) {
+      const warning = `File churn: ${w}`;
+      if (!state.warnings.includes(warning)) {
+        state.warnings.push(warning);
+      }
+    }
+  }
+
   // No issues detected
   return {
     shouldAbort: false,
+    shouldBlock: false,
     confidence: 0,
     diagnostics: {
       estimatedTokens: state.estimatedTokens,
       iterationsWithoutChange: state.iterationsSinceChange,
+      ...(fileWarnings.length > 0 ? { fileEditWarnings: fileWarnings } : {}),
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// QA ping-pong detection
+// ---------------------------------------------------------------------------
+
+/** Detect alternating failure signatures: A→B→A→B pattern */
+function detectQaPingPong(sigs: string[], cycles: number): string | null {
+  if (sigs.length < cycles * 2) return null;
+
+  const recent = sigs.slice(-(cycles * 2));
+  const a = recent[0];
+  const b = recent[1];
+  if (a === b) return null;
+
+  let alternating = true;
+  for (let i = 0; i < recent.length; i++) {
+    const expected = i % 2 === 0 ? a : b;
+    if (recent[i] !== expected) {
+      alternating = false;
+      break;
+    }
+  }
+
+  if (alternating) {
+    return `Alternating failures: ${a} ↔ ${b} (${cycles} cycles)`;
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Command signature failure detection
+// ---------------------------------------------------------------------------
+
+/** Detect same command failing N times */
+function detectCommandFailure(sigs: string[], threshold: number): string | null {
+  if (sigs.length < threshold) return null;
+
+  const counts = new Map<string, number>();
+  for (const sig of sigs) {
+    counts.set(sig, (counts.get(sig) ?? 0) + 1);
+  }
+
+  for (const [sig, count] of counts) {
+    if (count >= threshold) return sig;
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// File edit frequency helpers
+// ---------------------------------------------------------------------------
+
+/** Extract file paths from a unified diff */
+function extractFilesFromDiff(diff: string): string[] {
+  const files: string[] = [];
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+++ b/')) {
+      files.push(line.slice(6));
+    }
+  }
+  return files;
+}
+
+/** Get file edit frequency warnings */
+export function getFileEditWarnings(state: SpindleState, threshold: number = 3): string[] {
+  const warnings: string[] = [];
+  for (const [file, count] of Object.entries(state.fileEditCounts)) {
+    if (count >= threshold) {
+      warnings.push(`${file} edited ${count} times`);
+    }
+  }
+  return warnings;
+}
+
+// ---------------------------------------------------------------------------
+// Command failure recording
+// ---------------------------------------------------------------------------
+
+/** Short hash for command signature tracking */
+function shortHash(s: string): string {
+  return createHash('sha256').update(s).digest('hex').slice(0, 12);
+}
+
+/** Record a failing command for spindle tracking */
+export function recordCommandFailure(state: SpindleState, command: string, error: string): void {
+  const sig = shortHash(`${command}::${error.slice(0, 200)}`);
+  state.failingCommandSignatures.push(sig);
+  if (state.failingCommandSignatures.length > 20) state.failingCommandSignatures.shift();
 }
 
 /**
  * Format Spindle result for display
  */
 export function formatSpindleResult(result: SpindleResult): string {
-  if (!result.shouldAbort) {
+  if (!result.shouldAbort && !result.shouldBlock) {
     return 'No spindle loop detected';
   }
 
-  const parts = [`Spindle loop detected: ${result.reason}`];
+  const label = result.shouldBlock ? 'Spindle blocked (needs human)' : 'Spindle loop detected';
+  const parts = [`${label}: ${result.reason}`];
   parts.push(`Confidence: ${(result.confidence * 100).toFixed(0)}%`);
 
   if (result.diagnostics.estimatedTokens) {
@@ -500,6 +679,15 @@ export function formatSpindleResult(result: SpindleResult): string {
   }
   if (result.diagnostics.repeatedPatterns?.length) {
     parts.push(`Repeated: ${result.diagnostics.repeatedPatterns.join(', ')}`);
+  }
+  if (result.diagnostics.pingPongPattern) {
+    parts.push(`Pattern: ${result.diagnostics.pingPongPattern}`);
+  }
+  if (result.diagnostics.commandSignature) {
+    parts.push(`Command signature: ${result.diagnostics.commandSignature}`);
+  }
+  if (result.diagnostics.fileEditWarnings?.length) {
+    parts.push(`File churn: ${result.diagnostics.fileEditWarnings.join(', ')}`);
   }
 
   return parts.join('\n');

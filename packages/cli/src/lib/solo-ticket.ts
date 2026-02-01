@@ -27,6 +27,8 @@ import {
   createSpindleState,
   DEFAULT_SPINDLE_CONFIG,
   formatSpindleResult,
+  recordCommandFailure,
+  getFileEditWarnings,
   type SpindleConfig,
 } from '../lib/spindle.js';
 import { createExecRunner } from '../lib/exec.js';
@@ -60,7 +62,7 @@ export type CompletionOutcome =
  * Spindle abort details for diagnostics
  */
 export interface SpindleAbortDetails {
-  trigger: 'oscillation' | 'spinning' | 'stalling' | 'repetition' | 'token_budget';
+  trigger: 'oscillation' | 'spinning' | 'stalling' | 'repetition' | 'token_budget' | 'qa_ping_pong' | 'command_failure';
   confidence: number;
   estimatedTokens: number;
   iteration: number;
@@ -141,6 +143,10 @@ export interface RunTicketOptions {
   executionBackend?: ExecutionBackend;
   /** Project guidelines context to prepend to execution prompt */
   guidelinesContext?: string;
+  /** Learnings context to prepend to execution prompt */
+  learningsContext?: string;
+  /** Project metadata context to prepend to execution prompt */
+  metadataContext?: string;
 }
 
 /**
@@ -162,11 +168,19 @@ export type StepName = typeof EXECUTE_STEPS[number]['name'];
 /**
  * Build the prompt for Claude from a ticket
  */
-export function buildTicketPrompt(ticket: NonNullable<Awaited<ReturnType<typeof tickets.getById>>>, guidelinesContext?: string): string {
+export function buildTicketPrompt(ticket: NonNullable<Awaited<ReturnType<typeof tickets.getById>>>, guidelinesContext?: string, learningsContext?: string, metadataContext?: string): string {
   const parts: string[] = [];
 
   if (guidelinesContext) {
     parts.push(guidelinesContext, '');
+  }
+
+  if (metadataContext) {
+    parts.push(metadataContext, '');
+  }
+
+  if (learningsContext) {
+    parts.push(learningsContext, '');
   }
 
   parts.push(
@@ -682,7 +696,7 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
     // Step 2: Run agent
     await markStep('agent', 'started');
 
-    const prompt = buildTicketPrompt(ticket, opts.guidelinesContext);
+    const prompt = buildTicketPrompt(ticket, opts.guidelinesContext, opts.learningsContext, opts.metadataContext);
     const execBackend: ExecutionBackend = opts.executionBackend ?? new ClaudeExecutionBackend();
 
     const claudeResult = await execBackend.run({
@@ -850,6 +864,27 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
           error: `Spindle loop detected: ${trigger} (confidence: ${(spindleCheck.confidence * 100).toFixed(0)}%)`,
           failureReason: 'spindle_abort',
           spindle: spindleDetails,
+          artifacts: { ...artifactPaths },
+        };
+        await saveRunSummary(result);
+        return result;
+      }
+
+      // Handle shouldBlock (command_failure → needs human intervention)
+      if (spindleCheck.shouldBlock) {
+        onProgress(`Spindle blocked: ${spindleCheck.reason} — needs human intervention`);
+        for (const w of getFileEditWarnings(spindleState, spindleConfig.maxFileEdits)) {
+          onProgress(`  ⚠ ${w}`);
+        }
+
+        await skipRemaining(2, `Spindle blocked: ${spindleCheck.reason}`);
+        await cleanupWorktree(repoRoot, worktreePath);
+
+        const result: RunTicketResult = {
+          success: false,
+          durationMs: Date.now() - startTime,
+          error: `Spindle blocked: ${spindleCheck.reason} (needs human intervention)`,
+          failureReason: 'spindle_abort',
           artifacts: { ...artifactPaths },
         };
         await saveRunSummary(result);
@@ -1078,6 +1113,10 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
         await skipRemaining(6, 'QA failed');
 
         const failedStep = qaResult.failedAt?.stepName ?? 'unknown step';
+
+        // Record command failure for spindle tracking
+        recordCommandFailure(spindleState, failedStep, `QA failed at ${failedStep}`);
+
         const errorParts = [`QA failed at: ${failedStep}`];
 
         const qaDetails = await getQaRunDetails(adapter, qaResult.runId);

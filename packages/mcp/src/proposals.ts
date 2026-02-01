@@ -306,6 +306,62 @@ function bigrams(s: string): Set<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Adversarial proposal review prompt
+// ---------------------------------------------------------------------------
+
+export function buildProposalReviewPrompt(proposals: ValidatedProposal[]): string {
+  const parts = [
+    '# Adversarial Proposal Review',
+    '',
+    'You previously generated the proposals below. Now review them critically as a skeptical senior engineer.',
+    'For each proposal, evaluate:',
+    '',
+    '1. **Is the confidence inflated?** Would you bet your reputation on this score?',
+    '2. **Will the verification commands actually validate the change?** Or are they too generic (e.g. just `npm test`)?',
+    '3. **Missing edge cases?** What could break that you didn\'t consider?',
+    '4. **Feasibility:** Can this actually be implemented within the file set listed, or does it require changes elsewhere?',
+    '',
+    '## Proposals to Review',
+    '',
+  ];
+
+  for (let i = 0; i < proposals.length; i++) {
+    const p = proposals[i];
+    parts.push(
+      `### ${i + 1}. ${p.title}`,
+      `- **Category:** ${p.category}`,
+      `- **Confidence:** ${p.confidence}`,
+      `- **Impact:** ${p.impact_score}/10`,
+      `- **Files:** ${p.files.join(', ') || '(none listed)'}`,
+      `- **Risk:** ${p.risk}`,
+      `- **Verification:** ${p.verification_commands.join(', ') || '(none)'}`,
+      `- **Description:** ${p.description}`,
+      '',
+    );
+  }
+
+  parts.push(
+    '## Output',
+    '',
+    'Return a `<reviewed-proposals>` XML block containing a JSON array with the same proposals,',
+    'but with revised `confidence` and `impact_score` values based on your review.',
+    'You may also add a `review_note` string field explaining any adjustments.',
+    'If a proposal is fundamentally flawed, set its confidence to 0.',
+    '',
+    '```',
+    '<reviewed-proposals>',
+    '[{ "title": "...", "confidence": <revised>, "impact_score": <revised>, "review_note": "..." }, ...]',
+    '</reviewed-proposals>',
+    '```',
+    '',
+    'Then call `blockspool_ingest_event` with type `PROPOSALS_REVIEWED` and payload:',
+    '`{ "reviewed_proposals": [...] }`',
+  );
+
+  return parts.join('\n');
+}
+
+// ---------------------------------------------------------------------------
 // Description formatter
 // ---------------------------------------------------------------------------
 

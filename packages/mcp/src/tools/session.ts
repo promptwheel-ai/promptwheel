@@ -34,6 +34,9 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
       eco: z.boolean().optional().describe('Eco mode: allow subagent delegation during scout for lower cost (default: false).'),
       parallel: z.number().optional().describe('Number of tickets to execute in parallel (default: 2, max: 5). Set to 1 for sequential mode.'),
       min_impact_score: z.number().optional().describe('Minimum impact score (1-10) for proposals to be accepted (default: 3). Filters out low-value lint/cleanup.'),
+      learnings: z.boolean().optional().describe('Enable cross-run learnings (default: true). Set false to disable.'),
+      learnings_budget: z.number().optional().describe('Max chars for learnings injected into prompts (default: 2000).'),
+      learnings_decay_rate: z.number().optional().describe('Weight decay per session load (default: 3).'),
     },
     async (params) => {
       const state = getState();
@@ -56,6 +59,9 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
         eco: params.eco,
         parallel: params.parallel,
         min_impact_score: params.min_impact_score,
+        learnings: params.learnings,
+        learnings_budget: params.learnings_budget,
+        learnings_decay_rate: params.learnings_decay_rate,
       };
 
       let formulaInfo: { name: string; description: string } | undefined;
