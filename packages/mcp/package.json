@@ -54,7 +54,7 @@
     "@blockspool/sqlite": "^0.3.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@types/minimatch": "^5.1.2",
-    "minimatch": "^9.0.5"
+    "minimatch": "^10.1.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
