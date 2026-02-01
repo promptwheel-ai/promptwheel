@@ -11,10 +11,13 @@ BlockSpool scouts your codebase for improvements, executes them in parallel, and
 ### Inside Claude Code (recommended)
 
 ```bash
-# Install the plugin (inside any Claude Code session)
+# Add the marketplace (one-time)
 /plugin marketplace add blockspool/blockspool
 
-# Then run:
+# Install the plugin
+/plugin install blockspool
+
+# Restart Claude Code, then run:
 /blockspool:run
 ```
 
@@ -107,7 +110,7 @@ Final Summary
 | **Wave Scheduling** | Detects overlapping file paths, serializes conflicting tickets |
 | **Scope Enforcement** | Each ticket is sandboxed to specific file paths |
 | **Scope Expansion** | Auto-expands for root configs, cross-package, sibling files |
-| **Deduplication** | Title similarity + git branch matching prevents duplicates |
+| **Deduplication** | Title similarity + git branch matching + temporal-decay memory prevents duplicates |
 | **Trust Ladder** | Safe categories by default (refactor, test, docs, types, perf) |
 | **Formulas** | Repeatable recipes: `--formula security-audit`, `--formula test-coverage` |
 | **Deep Mode** | Principal-engineer-level architectural review (`--deep`) |
@@ -470,7 +473,7 @@ Add a `retention` section to `.blockspool/config.json`:
 
 See [docs/COMPARISON.md](./docs/COMPARISON.md) for a detailed comparison with Gas Town, Factory.ai, Devin, and others.
 
-**TL;DR:** BlockSpool is the only tool designed for continuous codebase improvement with built-in cost control, scope enforcement, and milestone batching. Other tools either require constant steering (Gas Town), are SaaS-only (Factory, Devin), or handle only simple fixes (Sweep).
+**TL;DR:** BlockSpool is the only tool designed for continuous codebase improvement with built-in cost control, scope enforcement, milestone batching, cross-run learnings, and dedup memory. Other tools either require constant steering (Gas Town), are SaaS-only (Factory, Devin), or handle only simple fixes (Sweep).
 
 ---
 

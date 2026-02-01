@@ -27,13 +27,16 @@ BlockSpool is the only tool in category 3: purpose-built for continuous codebase
 | **Conflict-aware scheduling** | Yes (wave partitioning) | No | No | No | No | N/A | N/A | No |
 | **Scope enforcement** | Yes (allowed/forbidden paths) | No | Filesystem sandbox | No | Ticket-scoped | Task-scoped | Issue-scoped | No |
 | **Scope auto-expansion** | Yes (root configs, cross-package, siblings) | No | No | No | No | No | No | No |
-| **Deduplication** | Yes (title similarity + branch matching) | No | No | No | Unknown | Unknown | Unknown | No |
+| **Deduplication** | Yes (title similarity + branch matching + temporal-decay memory) | No | No | No | Unknown | Unknown | Unknown | No |
 | **Trust ladder** | Yes (safe/aggressive categories) | Informal (conceptual stages) | No | No | Approval workflows | Human review | PR review | No |
 | **Formulas** | Yes (built-in + custom YAML) | Yes (TOML-based) | No | 31+ skills | No | No | No | No |
 | **Deep architectural review** | Yes (`--deep`) | No | No | No | No | Partial | No | No |
 | **Impact scoring** | Yes (impact x confidence) | No | No | No | No | No | No | No |
 | **Project guidelines** | Yes (CLAUDE.md / AGENTS.md auto-loaded) | No | No | No | No | No | No | No |
 | **Loop detection** | Yes (Spindle) | No | No | No | Unknown | Unknown | No | No |
+| **Cross-run learnings** | Yes (persists failures/successes with temporal decay) | No | No | No | No | No | No | No |
+| **Dedup memory** | Yes (weighted decay, re-confirmation bumps) | No | No | No | No | No | No | No |
+| **Scout retry/escalation** | Yes (3 attempts with fresh angles) | No | No | No | No | No | No | No |
 | **Cost per 8h run** | Fraction of alternatives | High (20-30 agents) | Claude Code sub | Claude Code sub | SaaS pricing | Subscription | Free tier | Claude Code sub |
 | **Runtime** | Claude Code CLI, Codex CLI, or OpenAI API | Claude, Codex, Aider | Claude Code CLI | Claude Code CLI | Proprietary | Proprietary | GitHub Actions | Claude Code (MCP server) |
 | **Open source** | Yes (Apache 2.0) | Yes (MIT) | Yes (AGPL-3.0) | Yes (MIT) | No | No | Partial | Yes (MIT) |
@@ -59,7 +62,7 @@ BlockSpool is designed around **micro-equilibrium** — doing the most useful wo
 
 1. **Focused scope** — Each ticket is sandboxed to specific files. The agent doesn't explore the whole codebase, it works on a narrow slice.
 
-2. **Smart filtering** — Scout finds 20 proposals, dedup removes 10, trust ladder filters to 5. Only high-confidence, high-impact work gets executed.
+2. **Smart filtering** — Scout finds 20 proposals, dedup memory removes completed work, adversarial review challenges the rest, trust ladder filters to the best. Only high-confidence, high-impact work gets executed.
 
 3. **Milestone batching** — Scout scans the milestone branch, seeing prior work. No wasted cycles rediscovering things already fixed.
 
@@ -150,6 +153,9 @@ No other tool combines:
 - Proactive scouting (finds work to do)
 - Milestone batching (coherent PRs)
 - Project guidelines awareness (auto-loads CLAUDE.md / AGENTS.md into every prompt)
+- Cross-run learnings (remembers what failed, avoids repeating mistakes)
+- Dedup memory with temporal decay (never re-proposes completed work)
+- Scout retry with escalation (tries fresh angles before giving up)
 - Cost control (fraction of what alternatives cost)
 - Safety guarantees (scope enforcement, trust ladder, dedup)
 - Four ways to run: Plugin, Claude CLI, Codex CLI, or OpenAI CLI
