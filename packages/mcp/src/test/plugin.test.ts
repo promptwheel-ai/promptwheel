@@ -256,10 +256,10 @@ describe('Plugin structure', () => {
     const hooks = JSON.parse(
       fs.readFileSync(path.join(pluginDir, 'hooks', 'hooks.json'), 'utf8'),
     );
-    expect(hooks.hooks).toHaveLength(2);
-    const events = hooks.hooks.map((h: any) => h.event);
-    expect(events).toContain('Stop');
-    expect(events).toContain('PreToolUse');
+    const eventNames = Object.keys(hooks.hooks);
+    expect(eventNames).toContain('Stop');
+    expect(eventNames).toContain('PreToolUse');
+    expect(eventNames).toHaveLength(2);
   });
 
   it('has .mcp.json with blockspool server', () => {

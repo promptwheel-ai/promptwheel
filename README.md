@@ -408,7 +408,7 @@ Optional `.blockspool/config.json`:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `defaultScope` | `"src"` | Directory to scan |
+| `defaultScope` | `"**"` | Glob scope for scanning. CLI also searches `src`, `lib`, `app`, `packages`, etc. |
 | `minConfidence` | `70` | Minimum confidence threshold |
 | `maxPrs` | `3` | Max PRs per run (20 in continuous mode) |
 | `draftPrs` | `true` | Create draft PRs |

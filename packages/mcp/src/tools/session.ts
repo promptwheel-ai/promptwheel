@@ -22,7 +22,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
       formula: z.string().optional().describe('Formula name (e.g., security-audit, test-coverage).'),
       deep: z.boolean().optional().describe('Enable deep architectural review mode.'),
       continuous: z.boolean().optional().describe('Run until manually stopped.'),
-      scope: z.string().optional().describe('Glob pattern for files to scan (default: src/**).'),
+      scope: z.string().optional().describe('Glob pattern for files to scan (default: ** i.e. entire project).'),
       categories: z.array(z.string()).optional().describe('Trust ladder categories.'),
       min_confidence: z.number().optional().describe('Minimum confidence threshold (default: 70).'),
       max_proposals: z.number().optional().describe('Max proposals per scout (default: 5).'),

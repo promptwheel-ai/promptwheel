@@ -36,7 +36,7 @@ const DEFAULT_MAX_PRS = 5;
 const DEFAULT_MIN_CONFIDENCE = 70;
 const DEFAULT_MIN_IMPACT_SCORE = 3;
 const DEFAULT_MAX_PROPOSALS_PER_SCOUT = 5;
-const DEFAULT_SCOPE = 'src/**';
+const DEFAULT_SCOPE = '**';
 const DEFAULT_CATEGORIES = ['refactor', 'docs', 'test', 'perf', 'security'];
 
 function emptySpindle(): SpindleState {
