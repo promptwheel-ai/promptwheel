@@ -151,7 +151,7 @@ export function getBillingReminder(repoPath?: string): string | null {
     `│  Tickets completed this project: ${String(totalCompleted).padEnd(27)}│`,
     '│  API usage is billed per-token by your provider.            │',
     '│  Alternatives to reduce cost:                               │',
-    '│    - BlockSpool plugin (/blockspool:auto) — uses your       │',
+    '│    - BlockSpool plugin (/blockspool:run) — uses your        │',
     '│      Claude Pro/Max subscription, no API key needed         │',
     '│    - --provider codex — uses your Codex subscription        │',
     '└──────────────────────────────────────────────────────────────┘',
