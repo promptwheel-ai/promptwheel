@@ -288,7 +288,7 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
     signal,
     onProgress,
     recentlyCompletedTitles,
-    model = 'opus',
+    model,
     customPrompt,
     backend,
     protectedFiles,

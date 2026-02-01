@@ -173,7 +173,7 @@ export async function scoutRepo(
     metadata: {
       scope: opts.scope ?? 'src/**',
       maxProposals: opts.maxProposals ?? 10,
-      model: opts.model ?? 'opus',
+      model: opts.model ?? (opts.backend ? undefined : 'opus'),
     },
   });
 
@@ -193,7 +193,7 @@ export async function scoutRepo(
       maxProposals: opts.maxProposals ?? 10,
       minConfidence: opts.minConfidence ?? 50,
       projectPath: repoRoot,
-      model: opts.model ?? 'opus',
+      model: opts.model ?? (opts.backend ? undefined : 'opus'),
       timeoutMs: opts.timeoutMs ?? 120000,
       signal: opts.signal,
       recentlyCompletedTitles: recentTitles,
