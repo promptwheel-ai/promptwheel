@@ -1,14 +1,26 @@
 {
-  "hooks": [
-    {
-      "event": "Stop",
-      "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook-driver.js stop",
-      "description": "BlockSpool loop driver — blocks exit while session is active"
-    },
-    {
-      "event": "PreToolUse",
-      "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook-driver.js PreToolUse",
-      "description": "BlockSpool scope enforcement — blocks out-of-scope file writes"
-    }
-  ]
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook-driver.js stop"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook-driver.js PreToolUse"
+          }
+        ]
+      }
+    ]
+  }
 }
