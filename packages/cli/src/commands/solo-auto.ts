@@ -198,15 +198,18 @@ Examples:
 
       // Model selection for Codex
       if (needsCodex && !options.codexModel) {
+        const hasApiKey = !!process.env.CODEX_API_KEY;
         const CODEX_MODELS = [
           { key: '1', name: 'gpt-5.2-codex', desc: 'Latest (default reasoning)' },
           { key: '2', name: 'gpt-5.2-codex-high', desc: 'High reasoning effort' },
           { key: '3', name: 'gpt-5.2-codex-xhigh', desc: 'Max reasoning effort' },
-          { key: '4', name: 'gpt-5.2', desc: 'General-purpose (default reasoning)' },
-          { key: '5', name: 'gpt-5.2-high', desc: 'General-purpose, high reasoning' },
-          { key: '6', name: 'gpt-5.2-xhigh', desc: 'General-purpose, max reasoning' },
-          { key: '7', name: 'gpt-5.1-codex-mini', desc: 'Fast, cost-effective' },
-          { key: '8', name: 'gpt-5.1-codex-max', desc: 'Extended agentic tasks' },
+          { key: '4', name: 'gpt-5.1-codex-mini', desc: 'Fast, cost-effective' },
+          { key: '5', name: 'gpt-5.1-codex-max', desc: 'Extended agentic tasks' },
+          ...(hasApiKey ? [
+            { key: '6', name: 'gpt-5.2', desc: 'General-purpose (API key only)' },
+            { key: '7', name: 'gpt-5.2-high', desc: 'General-purpose, high reasoning (API key only)' },
+            { key: '8', name: 'gpt-5.2-xhigh', desc: 'General-purpose, max reasoning (API key only)' },
+          ] : []),
         ];
 
         // Check for saved model in config
