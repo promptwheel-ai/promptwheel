@@ -1,6 +1,6 @@
 {
   "name": "@blockspool/mcp",
-  "version": "0.5.16",
+  "version": "0.5.17",
   "description": "BlockSpool MCP server - stateful tool provider for Claude Code",
   "author": "BlockSpool",
   "homepage": "https://blockspool.com",
@@ -50,8 +50,8 @@
   ],
   "license": "Apache-2.0",
   "dependencies": {
-    "@blockspool/core": "^0.5.16",
-    "@blockspool/sqlite": "^0.5.16",
+    "@blockspool/core": "^0.5.17",
+    "@blockspool/sqlite": "^0.5.17",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "@types/minimatch": "^5.1.2",
     "minimatch": "^10.1.1"

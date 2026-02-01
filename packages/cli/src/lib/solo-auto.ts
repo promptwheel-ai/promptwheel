@@ -15,6 +15,7 @@ import {
 import { projects, tickets, runs } from '@blockspool/core/repos';
 import type { TicketProposal } from '@blockspool/core/scout';
 import { createGitService } from './git.js';
+import { createSpinner } from './spinner.js';
 import {
   getBlockspoolDir,
   getAdapter,
@@ -1044,6 +1045,7 @@ export async function runAutoMode(options: {
 
       const cycleSuffix = isDeepCycle ? ' 🔬 deep' : isDocsAuditCycle ? ' 📄 docs-audit' : '';
       const cycleLabel = isContinuous ? `[Cycle ${cycleCount}]${cycleSuffix} ` : 'Step 1: ';
+      const spinner = createSpinner(`Scouting ${scope}...`, 'stack');
       console.log(chalk.bold(`${cycleLabel}Scouting ${scope}...`));
 
       // Consume any pending user hints
@@ -1069,38 +1071,41 @@ export async function runAutoMode(options: {
       const dedupBlock = dedupPrefix ? dedupPrefix + '\n\n' : '';
       const basePrompt = guidelinesPrefix + metadataPrefix + indexPrefix + dedupBlock + escalationPrefix + learningsSuffix + (cycleFormula?.prompt || '');
       const effectivePrompt = hintBlock ? (basePrompt + hintBlock) : (basePrompt || undefined);
-      const scoutResult = await scoutRepo(deps, {
-        path: scoutPath,
-        scope,
-        maxProposals: 20,
-        minConfidence: Math.max((cycleFormula?.minConfidence ?? minConfidence) - 20, 30),
-        model: options.scoutBackend === 'codex' ? undefined : (options.eco ? 'sonnet' : (cycleFormula?.model ?? 'opus')),
-        customPrompt: effectivePrompt,
-        autoApprove: false,
-        backend: scoutBackend,
-        protectedFiles: ['.blockspool/**', ...(options.includeClaudeMd ? [] : ['CLAUDE.md', '.claude/**'])],
-        onProgress: (progress: ScoutProgress) => {
-          if (options.verbose) {
+      let scoutResult;
+      try {
+        scoutResult = await scoutRepo(deps, {
+          path: scoutPath,
+          scope,
+          maxProposals: 20,
+          minConfidence: Math.max((cycleFormula?.minConfidence ?? minConfidence) - 20, 30),
+          model: options.scoutBackend === 'codex' ? undefined : (options.eco ? 'sonnet' : (cycleFormula?.model ?? 'opus')),
+          customPrompt: effectivePrompt,
+          autoApprove: false,
+          backend: scoutBackend,
+          protectedFiles: ['.blockspool/**', ...(options.includeClaudeMd ? [] : ['CLAUDE.md', '.claude/**'])],
+          onProgress: (progress: ScoutProgress) => {
             const formatted = formatProgress(progress);
             if (formatted !== lastProgress) {
-              process.stdout.write(`\r  ${formatted.padEnd(70)}`);
+              spinner.update(formatted);
               lastProgress = formatted;
             }
-          }
-        },
-      });
-
-      if (options.verbose) {
-        process.stdout.write('\r' + ' '.repeat(80) + '\r');
+          },
+        });
+      } catch (scoutErr) {
+        spinner.fail('Scout failed');
+        throw scoutErr;
       }
 
       const proposals = scoutResult.proposals;
 
       if (proposals.length === 0) {
         if (scoutResult.errors.length > 0) {
+          spinner.fail('Scout encountered errors');
           for (const err of scoutResult.errors) {
             console.log(chalk.yellow(`  ⚠ ${err}`));
           }
+        } else {
+          spinner.stop();
         }
         scoutedDirs.push(scope);
         if (scoutRetries < MAX_SCOUT_RETRIES) {
@@ -1121,7 +1126,7 @@ export async function runAutoMode(options: {
         }
       }
 
-      console.log(chalk.gray(`  Found ${proposals.length} potential improvements`));
+      spinner.succeed(`Found ${proposals.length} potential improvements`);
 
       // Adversarial proposal review — second-pass critique
       if (autoConf.adversarialReview && !options.eco && proposals.length > 0) {
@@ -1352,6 +1357,7 @@ export async function runAutoMode(options: {
 
       const processOneProposal = async (proposal: typeof toProcess[0], slotLabel: string): Promise<{ success: boolean; prUrl?: string }> => {
         console.log(chalk.cyan(`[${slotLabel}] ${proposal.title}`));
+        const ticketSpinner = createSpinner(`Setting up...`, 'spool');
 
         const ticket = await tickets.create(adapter, {
           projectId: project.id,
@@ -1390,6 +1396,7 @@ export async function runAutoMode(options: {
 
         while (retryCount <= maxScopeRetries) {
           try {
+            ticketSpinner.update(`Executing: ${proposal.title}`);
             const result = await soloRunTicket({
               ticket: currentTicket,
               repoRoot,
@@ -1402,9 +1409,7 @@ export async function runAutoMode(options: {
               timeoutMs: 600000,
               verbose: options.verbose ?? false,
               onProgress: (msg) => {
-                if (options.verbose) {
-                  console.log(chalk.gray(`    ${msg}`));
-                }
+                ticketSpinner.update(msg);
               },
               executionBackend,
               guidelinesContext: guidelines ? formatGuidelinesForPrompt(guidelines) : undefined,
@@ -1424,7 +1429,7 @@ export async function runAutoMode(options: {
                   // No changes produced (e.g. no_changes_needed) — skip silently
                   await runs.markSuccess(adapter, currentRun.id);
                   await tickets.updateStatus(adapter, currentTicket.id, 'done');
-                  console.log(chalk.gray(`  — No changes needed, skipping`));
+                  ticketSpinner.stop(`— No changes needed, skipping`);
                   return { success: true };
                 }
                 const mergeResult = await mergeTicketToMilestone(
@@ -1435,7 +1440,7 @@ export async function runAutoMode(options: {
                 if (!mergeResult.success) {
                   await runs.markFailure(adapter, currentRun.id, 'Merge conflict with milestone branch');
                   await tickets.updateStatus(adapter, currentTicket.id, 'blocked');
-                  console.log(chalk.yellow(`  ⚠ Merge conflict — ticket blocked`));
+                  ticketSpinner.fail('Merge conflict — ticket blocked');
                   return { success: false };
                 }
                 milestoneTicketCount++;
@@ -1448,7 +1453,7 @@ export async function runAutoMode(options: {
                     confirmLearning(repoRoot, l.id);
                   }
                 }
-                console.log(chalk.green(`  ✓ Merged to milestone (${milestoneTicketCount}/${batchSize})`));
+                ticketSpinner.succeed(`Merged to milestone (${milestoneTicketCount}/${batchSize})`);
 
                 // Finalize mid-batch if full (prevents overflow when running in parallel)
                 if (batchSize && milestoneTicketCount >= batchSize) {
@@ -1468,17 +1473,14 @@ export async function runAutoMode(options: {
                   confirmLearning(repoRoot, l.id);
                 }
               }
-              console.log(chalk.green(`  ✓ PR created`));
+              ticketSpinner.succeed('PR created');
               if (result.prUrl) {
                 console.log(chalk.cyan(`    ${result.prUrl}`));
               }
               return { success: true, prUrl: result.prUrl };
             } else if (result.scopeExpanded && retryCount < maxScopeRetries) {
               retryCount++;
-              console.log(chalk.yellow(`  ↻ Scope expanded, retrying (${retryCount}/${maxScopeRetries})...`));
-              if (options.verbose) {
-                console.log(chalk.gray(`    Added: ${result.scopeExpanded.addedPaths.join(', ')}`));
-              }
+              ticketSpinner.update(`Scope expanded, retrying (${retryCount}/${maxScopeRetries})...`);
 
               const updatedTicket = await tickets.getById(adapter, currentTicket.id);
               if (!updatedTicket) {
@@ -1513,14 +1515,14 @@ export async function runAutoMode(options: {
                   tags: extractTags(currentTicket.allowedPaths, currentTicket.verificationCommands),
                 });
               }
-              console.log(chalk.red(`  ✗ Failed: ${failReason}`));
+              ticketSpinner.fail(`Failed: ${failReason}`);
               return { success: false };
             }
           } catch (err) {
             const errorMsg = err instanceof Error ? err.message : String(err);
             await runs.markFailure(adapter, currentRun.id, errorMsg);
             await tickets.updateStatus(adapter, currentTicket.id, 'blocked');
-            console.log(chalk.red(`  ✗ Error: ${errorMsg}`));
+            ticketSpinner.fail(`Error: ${errorMsg}`);
             return { success: false };
           }
         }
