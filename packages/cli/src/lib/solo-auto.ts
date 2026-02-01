@@ -1078,7 +1078,7 @@ export async function runAutoMode(options: {
         customPrompt: effectivePrompt,
         autoApprove: false,
         backend: scoutBackend,
-        protectedFiles: options.includeClaudeMd ? undefined : ['CLAUDE.md', '.claude/**'],
+        protectedFiles: ['.blockspool/**', ...(options.includeClaudeMd ? [] : ['CLAUDE.md', '.claude/**'])],
         onProgress: (progress: ScoutProgress) => {
           if (options.verbose) {
             const formatted = formatProgress(progress);
@@ -1359,7 +1359,7 @@ export async function runAutoMode(options: {
           description: proposal.description || proposal.title,
           priority: 2,
           allowedPaths: proposal.files,
-          forbiddenPaths: ['node_modules', '.git', 'dist', 'build'],
+          forbiddenPaths: ['node_modules', '.git', '.blockspool', 'dist', 'build'],
         });
 
         await tickets.updateStatus(adapter, ticket.id, 'in_progress');

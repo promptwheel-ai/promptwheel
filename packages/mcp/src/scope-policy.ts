@@ -26,7 +26,7 @@ export interface ScopePolicy {
 
 const ALWAYS_DENIED_PATHS = [
   '.env', '.env.*',
-  'node_modules/**', '.git/**',
+  'node_modules/**', '.git/**', '.blockspool/**',
   'dist/**', 'build/**', 'coverage/**',
   '*.lock', 'package-lock.json',
 ];
