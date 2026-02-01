@@ -19,7 +19,7 @@ claude plugin install blockspool@blockspool/blockspool
 /blockspool:run
 
 # Update to the latest version:
-claude plugin update blockspool@blockspool/blockspool
+claude plugin update blockspool@blockspool
 ```
 
 The plugin uses your Claude Code subscription — no API key needed. It scouts, executes, creates PRs, and prevents Claude from exiting until the session is done.
