@@ -9,7 +9,7 @@ Continuous codebase improvement for Claude Code. Scouts improvements, plans chan
 /plugin marketplace add blockspool/blockspool
 
 # 2. Install the plugin
-/plugin install blockspool
+/plugin install blockspool@blockspool
 
 # 3. Restart Claude Code
 
@@ -30,14 +30,14 @@ If commands don't appear after restart, check that the plugin is enabled in `~/.
 ### Updating
 
 ```bash
-/plugin update blockspool
+/plugin update blockspool@blockspool
 ```
 
 Or remove and reinstall:
 
 ```bash
-/plugin remove blockspool
-/plugin install blockspool
+/plugin remove blockspool@blockspool
+/plugin install blockspool@blockspool
 ```
 
 ### Manual MCP setup (alternative)

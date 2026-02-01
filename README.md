@@ -15,7 +15,7 @@ BlockSpool scouts your codebase for improvements, executes them in parallel, and
 /plugin marketplace add blockspool/blockspool
 
 # Install the plugin
-/plugin install blockspool
+/plugin install blockspool@blockspool
 
 # Restart Claude Code, then run:
 /blockspool:run
