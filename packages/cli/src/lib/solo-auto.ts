@@ -439,7 +439,7 @@ export async function runAutoMode(options: {
 
   const defaultMaxPrs = isContinuous ? 20 : 3;
   const maxPrs = parseInt(options.maxPrs || String(activeFormula?.maxPrs ?? defaultMaxPrs), 10);
-  const minConfidence = parseInt(options.minConfidence || String(activeFormula?.minConfidence ?? 70), 10);
+  const minConfidence = parseInt(options.minConfidence || String(activeFormula?.minConfidence ?? DEFAULT_AUTO_CONFIG.minConfidence), 10);
   const useDraft = options.draft !== false;
 
   // Milestone mode state (declared early so header can reference)
@@ -1118,13 +1118,33 @@ export async function runAutoMode(options: {
         }
       }
 
+      // Show all proposals before filtering
+      if (proposals.length > 0) {
+        console.log(chalk.gray(`  Proposals found:`));
+        for (const p of proposals) {
+          const conf = p.confidence || 50;
+          const impact = p.impact_score ?? '?';
+          const cat = p.category || 'refactor';
+          console.log(chalk.gray(`    ${cat} | ${conf}% conf | impact ${impact} | ${p.title}`));
+        }
+      }
+
       const categoryFiltered = proposals.filter((p) => {
         const category = (p.category || 'refactor').toLowerCase();
         const confidence = p.confidence || 50;
 
-        if (blockCategories.some(blocked => category.includes(blocked))) return false;
-        if (!allowCategories.some(allowed => category.includes(allowed))) return false;
-        if (confidence < minConfidence) return false;
+        if (blockCategories.some(blocked => category.includes(blocked))) {
+          console.log(chalk.gray(`  ✗ Blocked category (${category}): ${p.title}`));
+          return false;
+        }
+        if (!allowCategories.some(allowed => category.includes(allowed))) {
+          console.log(chalk.gray(`  ✗ Category not allowed (${category}): ${p.title}`));
+          return false;
+        }
+        if (confidence < minConfidence) {
+          console.log(chalk.gray(`  ✗ Low confidence (${confidence}% < ${minConfidence}%): ${p.title}`));
+          return false;
+        }
         return true;
       });
 
