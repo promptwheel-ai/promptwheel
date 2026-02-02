@@ -41,6 +41,12 @@ const CREDENTIAL_PATTERNS: RegExp[] = [
   /ghp_[a-zA-Z0-9]{36}/,                      // GitHub PAT
   /sk-[a-zA-Z0-9]{48}/,                       // OpenAI key
   /password\s*[:=]\s*['"][^'"]+/i,            // hardcoded passwords
+  /xox[bporas]-[a-zA-Z0-9-]+/,               // Slack tokens (xoxb-, xoxp-, xoxo-, xoxa-, xoxr-, xoxs-)
+  /postgres(ql)?:\/\/[^\s'"]+/i,             // PostgreSQL connection string
+  /mongodb(\+srv)?:\/\/[^\s'"]+/i,           // MongoDB connection string
+  /mysql:\/\/[^\s'"]+/i,                      // MySQL connection string
+  /eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\./, // JWT tokens (base64 header.payload.signature)
+  /(?:SECRET|TOKEN|API_?KEY|PRIVATE_?KEY)\s*[:=]\s*['"][^'"]{8,}/i, // Generic .env secret patterns
 ];
 
 // ---------------------------------------------------------------------------

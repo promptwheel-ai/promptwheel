@@ -19,6 +19,8 @@ import type {
 export * from './types.js';
 export { buildScoutPrompt, buildCategoryPrompt } from './prompt.js';
 export { runClaude, parseClaudeOutput, ClaudeScoutBackend, CodexScoutBackend, CodexMcpScoutBackend, type ScoutBackend } from './runner.js';
+export { KimiScoutBackend } from './kimi-runner.js';
+export { OpenAILocalScoutBackend } from './openai-local-runner.js';
 export { McpBatchServer } from './mcp-batch-server.js';
 export { scanFiles, batchFiles, batchFilesByTokens, estimateTokens, type ScannedFile } from './scanner.js';
 

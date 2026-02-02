@@ -16,7 +16,7 @@ import {
   DEFAULT_SPINDLE_CONFIG,
   type SpindleConfig,
   type SpindleState,
-} from '../lib/spindle.js';
+} from '../lib/spindle/index.js';
 
 describe('estimateTokens', () => {
   it('estimates tokens from text length', () => {

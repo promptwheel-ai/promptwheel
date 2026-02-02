@@ -2,6 +2,8 @@
  * Session management tools: start_session, session_status, end_session, advance, ingest_event
  */
 
+import { join } from 'node:path';
+import { unlinkSync } from 'node:fs';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { SessionManager } from '../state.js';
@@ -106,6 +108,15 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
           db: state.db,
           project: state.project,
         });
+
+        // Clean up loop-state.json on terminal responses so stop hook doesn't deadlock
+        if (response.next_action === 'STOP') {
+          try {
+            unlinkSync(join(state.projectPath, '.blockspool', 'loop-state.json'));
+          } catch {
+            // File may not exist — that's fine
+          }
+        }
 
         return {
           content: [{
@@ -212,6 +223,13 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
       try {
         const finalState = state.end();
         const durationMs = Date.now() - new Date(finalState.started_at).getTime();
+
+        // Clean up loop-state.json so the stop hook doesn't block exit
+        try {
+          unlinkSync(join(state.projectPath, '.blockspool', 'loop-state.json'));
+        } catch {
+          // File may not exist — that's fine
+        }
 
         return {
           content: [{

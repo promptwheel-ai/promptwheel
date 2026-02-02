@@ -13,7 +13,6 @@ import {
   type ScoutBackend,
 } from '@blockspool/core/services';
 import { projects, tickets, runs } from '@blockspool/core/repos';
-import type { TicketProposal } from '@blockspool/core/scout';
 import { createGitService } from './git.js';
 import { createSpinner, createBatchProgress, type BatchProgressDisplay } from './spinner.js';
 import {
@@ -25,7 +24,7 @@ import {
   createScoutDeps,
   formatProgress,
 } from './solo-config.js';
-import { pathsOverlap, runPreflightChecks } from './solo-utils.js';
+import { runPreflightChecks } from './solo-utils.js';
 import { recordCycle, isDocsAuditDue, recordDocsAudit, deferProposal, popDeferredForScope } from './run-state.js';
 import { soloRunTicket, runClaude, type RunTicketResult, type ExecutionBackend, CodexExecutionBackend } from './solo-ticket.js';
 import {
@@ -50,130 +49,18 @@ import {
 import {
   buildProposalReviewPrompt, parseReviewedProposals, applyReviewToProposals,
 } from './proposal-review.js';
-import { detectProjectMetadata, formatMetadataForPrompt } from './project-metadata.js';
+import { detectProjectMetadata, formatMetadataForPrompt } from './project-metadata/index.js';
 import { DEFAULT_AUTO_CONFIG } from './solo-config.js';
 import {
   loadDedupMemory, recordDedupEntry, recordDedupEntries, formatDedupForPrompt,
   type DedupEntry,
 } from './dedup-memory.js';
+import { sleep, normalizeTitle, titleSimilarity, isDuplicateProposal, getDeduplicationContext, getAdaptiveParallelCount } from './dedup.js';
+import { partitionIntoWaves, buildScoutEscalation } from './wave-scheduling.js';
 
-/**
- * Sleep helper
- */
-export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Normalize a title for comparison (lowercase, remove punctuation, collapse whitespace)
- */
-export function normalizeTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/**
- * Calculate simple word overlap similarity between two titles (0-1)
- */
-export function titleSimilarity(a: string, b: string): number {
-  const wordsA = new Set(normalizeTitle(a).split(' ').filter(w => w.length > 2));
-  const wordsB = new Set(normalizeTitle(b).split(' ').filter(w => w.length > 2));
-
-  if (wordsA.size === 0 || wordsB.size === 0) return 0;
-
-  let overlap = 0;
-  for (const word of wordsA) {
-    if (wordsB.has(word)) overlap++;
-  }
-
-  const union = new Set([...wordsA, ...wordsB]).size;
-  return overlap / union;
-}
-
-/**
- * Check if a proposal is a duplicate of existing tickets or open PRs
- */
-export async function isDuplicateProposal(
-  proposal: { title: string; files?: string[] },
-  existingTitles: string[],
-  openPrBranches: string[],
-  similarityThreshold = 0.6
-): Promise<{ isDuplicate: boolean; reason?: string }> {
-  const normalizedProposal = normalizeTitle(proposal.title);
-
-  for (const existing of existingTitles) {
-    if (normalizeTitle(existing) === normalizedProposal) {
-      return { isDuplicate: true, reason: `Exact match: "${existing}"` };
-    }
-  }
-
-  for (const existing of existingTitles) {
-    const sim = titleSimilarity(proposal.title, existing);
-    if (sim >= similarityThreshold) {
-      return { isDuplicate: true, reason: `Similar (${Math.round(sim * 100)}%): "${existing}"` };
-    }
-  }
-
-  for (const branch of openPrBranches) {
-    const branchTitle = branch.replace(/^blockspool\/tkt_[a-z0-9]+$/, '').replace(/-/g, ' ');
-    if (branchTitle && titleSimilarity(proposal.title, branchTitle) >= similarityThreshold) {
-      return { isDuplicate: true, reason: `Open PR branch: ${branch}` };
-    }
-  }
-
-  return { isDuplicate: false };
-}
-
-/**
- * Get existing ticket titles and open PR branches for deduplication
- */
-export async function getDeduplicationContext(
-  adapter: DatabaseAdapter,
-  projectId: string,
-  repoRoot: string
-): Promise<{ existingTitles: string[]; openPrBranches: string[] }> {
-  const allTickets = await tickets.listByProject(adapter, projectId, {
-    limit: 200,
-  });
-
-  const existingTitles = allTickets
-    .filter(t => t.status !== 'ready')
-    .map(t => t.title);
-
-  let openPrBranches: string[] = [];
-  try {
-    const result = spawnSync('git', ['branch', '-r', '--list', 'origin/blockspool/*'], {
-      cwd: repoRoot,
-      encoding: 'utf-8',
-    });
-    if (result.stdout) {
-      openPrBranches = result.stdout
-        .split('\n')
-        .map(b => b.trim().replace('origin/', ''))
-        .filter(Boolean);
-    }
-  } catch {
-    // Ignore git errors
-  }
-
-  return { existingTitles, openPrBranches };
-}
-
-/**
- * Determine adaptive parallel count based on ticket complexity.
- * When --parallel is NOT explicitly set, scale based on proposal mix.
- */
-export function getAdaptiveParallelCount(proposals: TicketProposal[]): number {
-  const heavy = proposals.filter(p => p.estimated_complexity === 'moderate' || p.estimated_complexity === 'complex').length;
-  const light = proposals.filter(p => p.estimated_complexity === 'trivial' || p.estimated_complexity === 'simple').length;
-  if (heavy === 0) return 5;       // all light → go wide
-  if (light === 0) return 2;       // all heavy → conservative
-  const ratio = light / (light + heavy);
-  return Math.max(2, Math.min(5, Math.round(2 + ratio * 3)));  // 2-5
-}
+// Re-export so existing importers don't break
+export { sleep, normalizeTitle, titleSimilarity, isDuplicateProposal, getDeduplicationContext, getAdaptiveParallelCount } from './dedup.js';
+export { partitionIntoWaves, buildScoutEscalation } from './wave-scheduling.js';
 
 /**
  * Run auto work mode - process ready tickets in parallel
@@ -458,83 +345,6 @@ export async function runAutoWorkMode(options: {
 }
 
 /**
- * Partition proposals into conflict-free waves.
- * Proposals with overlapping file paths go into separate waves
- * so they run sequentially, avoiding merge conflicts.
- */
-export function partitionIntoWaves<T extends { files: string[] }>(proposals: T[]): T[][] {
-  const waves: T[][] = [];
-
-  for (const proposal of proposals) {
-    let placed = false;
-    for (const wave of waves) {
-      const conflicts = wave.some(existing =>
-        existing.files.some(fA =>
-          proposal.files.some(fB => pathsOverlap(fA, fB))
-        )
-      );
-      if (!conflicts) {
-        wave.push(proposal);
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      waves.push([proposal]);
-    }
-  }
-
-  return waves;
-}
-
-/**
- * Build escalation prompt text for scout retries.
- * Suggests unexplored modules and fresh angles when previous attempts found nothing.
- */
-export function buildScoutEscalation(
-  retryCount: number,
-  scoutedDirs: string[],
-  codebaseIndex: CodebaseIndex | null,
-): string {
-  const parts = [
-    '## Previous Attempts Found Nothing — Fresh Approach Required',
-    '',
-  ];
-
-  if (scoutedDirs.length > 0) {
-    parts.push('### What Was Already Tried');
-    for (const dir of scoutedDirs) {
-      parts.push(`- Scouted \`${dir}\``);
-    }
-    parts.push('');
-  }
-
-  // Suggest unexplored modules from codebase index
-  const exploredSet = new Set(scoutedDirs.map(d => d.replace(/\/$/, '')));
-  const unexplored: string[] = [];
-  if (codebaseIndex) {
-    for (const mod of codebaseIndex.modules) {
-      if (!exploredSet.has(mod.path) && !exploredSet.has(mod.path + '/')) {
-        unexplored.push(mod.path);
-      }
-    }
-  }
-
-  parts.push('### What to Do Differently');
-  parts.push('');
-  parts.push('Knowing everything from the attempts above, take a completely different angle:');
-  parts.push('- Do NOT re-read the directories listed above.');
-  if (unexplored.length > 0) {
-    parts.push(`- Try unexplored areas: ${unexplored.slice(0, 8).map(d => `\`${d}\``).join(', ')}`);
-  }
-  parts.push('- Switch categories: if you looked for bugs, look for tests. If tests, try security.');
-  parts.push('- Read at least 15 NEW source files.');
-  parts.push('- If genuinely nothing to improve, explain your analysis across all attempts.');
-
-  return parts.join('\n');
-}
-
-/**
  * Run auto mode - the full "just run it" experience
  * Scout → auto-approve safe changes → run → create draft PRs
  */
@@ -559,6 +369,7 @@ export async function runAutoMode(options: {
   scoutBackend?: string;
   executeBackend?: string;
   codexModel?: string;
+  kimiModel?: string;
   codexUnsafeFullAccess?: boolean;
   includeClaudeMd?: boolean;
   batchTokenBudget?: string;
@@ -568,6 +379,9 @@ export async function runAutoMode(options: {
   docsAuditInterval?: string;
   scoutConcurrency?: string;
   codexMcp?: boolean;
+  localUrl?: string;
+  localModel?: string;
+  localMaxIterations?: string;
 }): Promise<void> {
   // Load formula if specified
   let activeFormula: import('./formulas.js').Formula | null = null;
@@ -753,9 +567,9 @@ export async function runAutoMode(options: {
 
   const adapter = await getAdapter(repoRoot);
 
-  // Determine guidelines backend based on execution/scout backend
+  // Determine guidelines backend — use whichever non-claude backend is active, or 'claude'
   const guidelinesBackend: GuidelinesBackend =
-    (options.executeBackend === 'codex' || options.scoutBackend === 'codex') ? 'codex' : 'claude';
+    [options.scoutBackend, options.executeBackend].find(b => b && b !== 'claude') ?? 'claude';
   const guidelinesOpts = {
     backend: guidelinesBackend,
     autoCreate: config?.auto?.autoCreateGuidelines !== false,
@@ -781,15 +595,19 @@ export async function runAutoMode(options: {
   const activeBackendName = options.scoutBackend ?? 'claude';
   const backendConf = activeBackendName === 'codex' ? autoConf.codex : autoConf.claude;
 
+  // Use provider defaults as final fallback
+  const { getProvider: getProviderDefaults } = await import('./providers/index.js');
+  const activeProviderDefaults = getProviderDefaults(activeBackendName);
+
   const batchTokenBudget = options.batchTokenBudget
     ? parseInt(options.batchTokenBudget, 10)
-    : (backendConf?.batchTokenBudget ?? autoConf.batchTokenBudget);
+    : (backendConf?.batchTokenBudget ?? autoConf.batchTokenBudget ?? activeProviderDefaults.defaultBatchTokenBudget);
   const scoutConcurrency = options.scoutConcurrency
     ? parseInt(options.scoutConcurrency, 10)
-    : (backendConf?.scoutConcurrency ?? autoConf.scoutConcurrency);
+    : (backendConf?.scoutConcurrency ?? autoConf.scoutConcurrency ?? activeProviderDefaults.defaultScoutConcurrency);
   const scoutTimeoutMs = options.scoutTimeout
     ? parseInt(options.scoutTimeout, 10) * 1000
-    : autoConf.scoutTimeoutMs;
+    : (autoConf.scoutTimeoutMs ?? activeProviderDefaults.defaultScoutTimeoutMs);
   const maxScoutFiles = options.maxScoutFiles
     ? parseInt(options.maxScoutFiles, 10)
     : autoConf.maxFilesPerCycle;
@@ -882,23 +700,52 @@ export async function runAutoMode(options: {
     const deps = createScoutDeps(adapter, { verbose: options.verbose });
 
     // Instantiate backends based on --scout-backend / --execute-backend
+    const { getProvider } = await import('./providers/index.js');
     let scoutBackend: ScoutBackend | undefined;
     let executionBackend: ExecutionBackend | undefined;
-    if (options.scoutBackend === 'codex') {
-      if (options.codexMcp) {
+
+    const scoutBackendName = options.scoutBackend ?? 'claude';
+    const execBackendName = options.executeBackend ?? 'claude';
+
+    // Resolve model for each backend
+    const modelForBackend = (name: string): string | undefined => {
+      if (name === 'codex') return options.codexModel;
+      if (name === 'kimi') return options.kimiModel;
+      if (name === 'openai-local') return options.localModel;
+      return undefined; // claude uses default
+    };
+
+    // Resolve API key for each backend
+    const apiKeyForBackend = (name: string): string | undefined => {
+      const provider = getProvider(name);
+      return provider.apiKeyEnvVar ? process.env[provider.apiKeyEnvVar] : undefined;
+    };
+
+    // Scout backend — codexMcp is a special variant of codex
+    if (scoutBackendName !== 'claude') {
+      if (scoutBackendName === 'codex' && options.codexMcp) {
         const { CodexMcpScoutBackend } = await import('@blockspool/core/scout');
         scoutBackend = new CodexMcpScoutBackend({ apiKey: process.env.CODEX_API_KEY, model: options.codexModel });
         console.log(chalk.cyan('  Scout: Codex MCP (persistent session)'));
       } else {
-        const { CodexScoutBackend } = await import('@blockspool/core/scout');
-        scoutBackend = new CodexScoutBackend({ apiKey: process.env.CODEX_API_KEY, model: options.codexModel });
+        const scoutProvider = getProvider(scoutBackendName);
+        scoutBackend = await scoutProvider.createScoutBackend({
+          apiKey: apiKeyForBackend(scoutBackendName),
+          model: modelForBackend(scoutBackendName),
+          baseUrl: scoutBackendName === 'openai-local' ? options.localUrl : undefined,
+        });
       }
     }
-    if (options.executeBackend === 'codex') {
-      executionBackend = new CodexExecutionBackend({
-        apiKey: process.env.CODEX_API_KEY,
-        model: options.codexModel,
+
+    // Execution backend
+    if (execBackendName !== 'claude') {
+      const execProvider = getProvider(execBackendName);
+      executionBackend = await execProvider.createExecutionBackend({
+        apiKey: apiKeyForBackend(execBackendName),
+        model: modelForBackend(execBackendName),
         unsafeBypassSandbox: options.codexUnsafeFullAccess,
+        baseUrl: execBackendName === 'openai-local' ? options.localUrl : undefined,
+        maxIterations: options.localMaxIterations ? parseInt(options.localMaxIterations, 10) : undefined,
       });
     }
 

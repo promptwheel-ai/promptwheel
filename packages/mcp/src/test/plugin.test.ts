@@ -242,13 +242,12 @@ describe('Plugin structure', () => {
       fs.readFileSync(path.join(pluginDir, '.claude-plugin', 'plugin.json'), 'utf8'),
     );
     expect(manifest.name).toBe('blockspool');
-    expect(manifest.commands).toHaveLength(4);
-    expect(manifest.hooks).toBe('./hooks/hooks.json');
+    expect(manifest.skills).toHaveLength(4);
   });
 
-  it('has all 4 command files', () => {
-    for (const cmd of ['run', 'status', 'nudge', 'cancel']) {
-      expect(fs.existsSync(path.join(pluginDir, 'commands', `${cmd}.md`))).toBe(true);
+  it('has all 4 skill directories', () => {
+    for (const skill of ['run', 'status', 'nudge', 'cancel']) {
+      expect(fs.existsSync(path.join(pluginDir, 'skills', skill))).toBe(true);
     }
   });
 

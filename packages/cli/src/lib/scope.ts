@@ -5,6 +5,9 @@
  * and don't touch forbidden paths.
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
 /**
  * Scope violation result
  */
@@ -341,6 +344,50 @@ export function analyzeViolationsForExpansion(
     expandedPaths: uniquePaths,
     addedPaths: pathsToAdd,
   };
+}
+
+/**
+ * Resolve symlinks and verify all changed files stay within the worktree root.
+ * Call this BEFORE checkScopeViolations to catch symlink-based path traversal.
+ *
+ * @param changedFiles - List of file paths that were modified (relative to worktreeRoot)
+ * @param worktreeRoot - Absolute path to the worktree root
+ * @returns Object with resolvedFiles (safe) and violations (symlinks escaping root)
+ */
+export function resolveSymlinksInScope(
+  changedFiles: string[],
+  worktreeRoot: string,
+): { resolvedFiles: string[]; violations: ScopeViolation[] } {
+  const resolvedFiles: string[] = [];
+  const violations: ScopeViolation[] = [];
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(worktreeRoot);
+  } catch {
+    // If root itself can't be resolved, skip symlink checks
+    return { resolvedFiles: changedFiles, violations: [] };
+  }
+
+  for (const file of changedFiles) {
+    const absPath = path.resolve(worktreeRoot, file);
+    try {
+      const realPath = fs.realpathSync(absPath);
+      if (!realPath.startsWith(realRoot + path.sep) && realPath !== realRoot) {
+        violations.push({
+          file,
+          violation: 'not_in_allowed',
+          pattern: `symlink escapes worktree: resolves to ${realPath}`,
+        });
+      } else {
+        resolvedFiles.push(file);
+      }
+    } catch {
+      // File doesn't exist (new file) — allow
+      resolvedFiles.push(file);
+    }
+  }
+
+  return { resolvedFiles, violations };
 }
 
 /**

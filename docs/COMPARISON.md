@@ -38,7 +38,7 @@ BlockSpool is the only tool in category 3: purpose-built for continuous codebase
 | **Dedup memory** | Yes (weighted decay, re-confirmation bumps) | No | No | No | No | No | No | No |
 | **Scout retry/escalation** | Yes (3 attempts with fresh angles) | No | No | No | No | No | No | No |
 | **Cost per 8h run** | Fraction of alternatives | High (20-30 agents) | Claude Code sub | Claude Code sub | SaaS pricing | Subscription | Free tier | Claude Code sub |
-| **Runtime** | Claude Code CLI, Codex CLI, or OpenAI API | Claude, Codex, Aider | Claude Code CLI | Claude Code CLI | Proprietary | Proprietary | GitHub Actions | Claude Code (MCP server) |
+| **Runtime** | Claude CLI, Codex CLI, Kimi CLI, or any local model (Ollama, vLLM) | Claude, Codex, Aider | Claude Code CLI | Claude Code CLI | Proprietary | Proprietary | GitHub Actions | Claude Code (MCP server) |
 | **Open source** | Yes (Apache 2.0) | Yes (MIT) | Yes (AGPL-3.0) | Yes (MIT) | No | No | Partial | Yes (MIT) |
 | **Install** | Plugin: `/blockspool:run` in Claude Code; CLI: `npm install -g` | `brew install` / `go install` | Desktop app | Claude Code plugin | SaaS | SaaS | GitHub App | `npm install` |
 
@@ -158,6 +158,6 @@ No other tool combines:
 - Scout retry with escalation (tries fresh angles before giving up)
 - Cost control (fraction of what alternatives cost)
 - Safety guarantees (scope enforcement, trust ladder, dedup)
-- Four ways to run: Plugin, Claude CLI, Codex CLI, or OpenAI CLI
+- Six ways to run: Plugin, Claude CLI, Codex CLI, Kimi CLI, Local (Ollama/vLLM), or OpenAI API
 
 The closest comparison is a developer running Claude Code manually for 8 hours — but BlockSpool does it without supervision, avoids duplicates, enforces scope, batches into clean PRs, and costs a fraction of what manual operation would.

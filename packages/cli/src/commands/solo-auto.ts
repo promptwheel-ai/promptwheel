@@ -44,6 +44,8 @@ Trust Ladder (use --aggressive for more):
 Backend Lanes:
   --claude (default):  scout + execute with Claude  (ANTHROPIC_API_KEY)
   --codex:             scout + execute with Codex   (CODEX_API_KEY or codex login)
+  --kimi:              scout + execute with Kimi    (MOONSHOT_API_KEY or kimi /login)
+  --local:             scout + execute with local   (Ollama/vLLM/SGLang/LM Studio)
   Hybrid:              --scout-backend codex         (CODEX_API_KEY + ANTHROPIC_API_KEY)
 
 Examples:
@@ -77,9 +79,11 @@ Examples:
     .option('--batch-size <n>', 'Milestone mode: merge N tickets into one PR (default: off)')
     .option('--codex', 'Use Codex for both scouting and execution (no Anthropic key needed)')
     .option('--claude', 'Use Claude for both scouting and execution (default)')
-    .option('--scout-backend <name>', 'LLM for scouting: claude | codex (default: claude)')
-    .option('--execute-backend <name>', 'LLM for execution: claude | codex (default: claude)')
+    .option('--kimi', 'Use Kimi for both scouting and execution (MOONSHOT_API_KEY)')
+    .option('--scout-backend <name>', 'LLM for scouting: claude | codex | kimi (default: claude)')
+    .option('--execute-backend <name>', 'LLM for execution: claude | codex | kimi (default: claude)')
     .option('--codex-model <model>', 'Model for Codex backend (default: codex-mini)')
+    .option('--kimi-model <model>', 'Model for Kimi backend (default: kimi-k2.5)')
     .option('--codex-unsafe-full-access', 'Use --dangerously-bypass-approvals-and-sandbox for Codex execution (requires isolated runner)')
     .option('--include-claude-md', 'Allow the scout to propose changes to CLAUDE.md and .claude/ (excluded by default)')
     .option('--batch-token-budget <n>', 'Token budget per scout batch (default: auto based on backend)')
@@ -87,6 +91,10 @@ Examples:
     .option('--max-scout-files <n>', 'Maximum files to scan per scout cycle (default: 60)')
     .option('--scout-concurrency <n>', 'Max parallel scout batches (default: auto — 4 codex, 3 claude)')
     .option('--codex-mcp', 'Use persistent MCP session for Codex scouting (experimental, requires --codex)')
+    .option('--local', 'Use a local OpenAI-compatible server (Ollama, vLLM, SGLang, LM Studio)')
+    .option('--local-url <url>', 'Base URL for local server (default: http://localhost:11434/v1)')
+    .option('--local-model <model>', 'Model name for local server (required with --local)')
+    .option('--local-max-iterations <n>', 'Max agentic loop iterations for local backend (default: 20)')
     .option('--no-docs-audit', 'Disable automatic docs-audit cycles')
     .option('--docs-audit-interval <n>', 'Run docs-audit every N cycles (default: 3)')
     .action(async (mode: string | undefined, options: {
@@ -110,9 +118,11 @@ Examples:
       batchSize?: string;
       codex?: boolean;
       claude?: boolean;
+      kimi?: boolean;
       scoutBackend?: string;
       executeBackend?: string;
       codexModel?: string;
+      kimiModel?: string;
       codexUnsafeFullAccess?: boolean;
       includeClaudeMd?: boolean;
       batchTokenBudget?: string;
@@ -122,32 +132,55 @@ Examples:
       docsAuditInterval?: string;
       scoutConcurrency?: string;
       codexMcp?: boolean;
+      local?: boolean;
+      localUrl?: string;
+      localModel?: string;
+      localMaxIterations?: string;
     }) => {
       if (options.deep && !options.formula) {
         options.formula = 'deep';
       }
 
-      // --codex / --claude shorthands expand to both backends
-      if (options.codex && options.claude) {
-        console.error(chalk.red('✗ Cannot use --codex and --claude together'));
+      // --codex / --claude / --kimi shorthands expand to both backends
+      const { isValidProvider, getProviderNames, getProvider } = await import('../lib/providers/index.js');
+
+      const shorthands = [options.codex && 'codex', options.claude && 'claude', options.kimi && 'kimi', options.local && 'local'].filter(Boolean);
+      if (shorthands.length > 1) {
+        console.error(chalk.red(`✗ Cannot combine ${shorthands.map(s => `--${s}`).join(' and ')}`));
         process.exit(1);
       }
       if (options.codex) {
         options.scoutBackend = options.scoutBackend ?? 'codex';
         options.executeBackend = options.executeBackend ?? 'codex';
       }
+      if (options.kimi) {
+        options.scoutBackend = options.scoutBackend ?? 'kimi';
+        options.executeBackend = options.executeBackend ?? 'kimi';
+      }
+      if (options.local) {
+        if (!options.localModel) {
+          console.error(chalk.red('✗ --local-model is required when using --local'));
+          console.error(chalk.gray('  Example: blockspool --local --local-model kimi-k2.5'));
+          process.exit(1);
+        }
+        options.scoutBackend = options.scoutBackend ?? 'openai-local';
+        options.executeBackend = options.executeBackend ?? 'openai-local';
+        console.log(chalk.yellow('⚠ Local provider has no sandbox — worktree isolation + QA gating provides safety'));
+      }
 
       const scoutBackendName = options.scoutBackend ?? 'claude';
       const executeBackendName = options.executeBackend ?? 'claude';
       const needsClaude = scoutBackendName === 'claude' || executeBackendName === 'claude';
       const needsCodex = scoutBackendName === 'codex' || executeBackendName === 'codex';
+      const needsKimi = scoutBackendName === 'kimi' || executeBackendName === 'kimi';
+      const needsLocal = scoutBackendName === 'openai-local' || executeBackendName === 'openai-local';
       const insideClaudeCode = process.env.CLAUDECODE === '1';
 
       // Validate backend names
       for (const [flag, value] of [['--scout-backend', scoutBackendName], ['--execute-backend', executeBackendName]] as const) {
-        if (value !== 'claude' && value !== 'codex') {
+        if (!isValidProvider(value)) {
           console.error(chalk.red(`✗ Invalid ${flag}: ${value}`));
-          console.error(chalk.gray('  Valid values: claude, codex'));
+          console.error(chalk.gray(`  Valid values: ${getProviderNames().join(', ')}`));
           process.exit(1);
         }
       }
@@ -204,6 +237,22 @@ Examples:
             process.exit(1);
           }
         }
+      }
+
+      // Auth: Kimi lane
+      if (needsKimi) {
+        if (process.env.MOONSHOT_API_KEY) {
+          // Good — env var present
+        } else {
+          // No API key — assume kimi CLI has stored credentials from /login
+          console.log(chalk.yellow('⚠ MOONSHOT_API_KEY not set — using kimi CLI stored credentials'));
+          console.log(chalk.gray('  If auth fails, set MOONSHOT_API_KEY or run: kimi → /login'));
+        }
+      }
+
+      // Model selection for Kimi
+      if (needsKimi && !options.kimiModel) {
+        options.kimiModel = 'kimi-k2.5';
       }
 
       // Model selection for Codex
@@ -291,20 +340,17 @@ Examples:
       }
 
       // Print auth summary
+      const describeAuth = (backendName: string): string => {
+        const prov = getProvider(backendName);
+        if (prov.apiKeyEnvVar && process.env[prov.apiKeyEnvVar]) return `${prov.apiKeyEnvVar} (env)`;
+        if (prov.altAuth) return prov.altAuth;
+        return prov.apiKeyEnvVar ? `${prov.apiKeyEnvVar} (env)` : 'none';
+      };
       if (scoutBackendName === executeBackendName) {
-        const authSource = scoutBackendName === 'claude'
-          ? 'ANTHROPIC_API_KEY (env)'
-          : (process.env.CODEX_API_KEY ? 'CODEX_API_KEY (env)' : 'codex login');
-        console.log(chalk.gray(`Auth: ${authSource}`));
+        console.log(chalk.gray(`Auth: ${describeAuth(scoutBackendName)}`));
       } else {
-        const scoutAuth = scoutBackendName === 'claude'
-          ? 'ANTHROPIC_API_KEY (env)'
-          : (process.env.CODEX_API_KEY ? 'CODEX_API_KEY (env)' : 'codex login');
-        const execAuth = executeBackendName === 'claude'
-          ? 'ANTHROPIC_API_KEY (env)'
-          : (process.env.CODEX_API_KEY ? 'CODEX_API_KEY (env)' : 'codex login');
-        console.log(chalk.gray(`Auth (scout):   ${scoutAuth}`));
-        console.log(chalk.gray(`Auth (execute): ${execAuth}`));
+        console.log(chalk.gray(`Auth (scout):   ${describeAuth(scoutBackendName)}`));
+        console.log(chalk.gray(`Auth (execute): ${describeAuth(executeBackendName)}`));
       }
 
       // Warn about unsafe flag
@@ -348,9 +394,13 @@ Examples:
           scoutBackend: scoutBackendName,
           executeBackend: executeBackendName,
           codexModel: options.codexModel,
+          kimiModel: options.kimiModel,
           codexUnsafeFullAccess: options.codexUnsafeFullAccess,
           scoutConcurrency: options.scoutConcurrency,
           codexMcp: options.codexMcp,
+          localUrl: options.localUrl,
+          localModel: options.localModel,
+          localMaxIterations: options.localMaxIterations,
         });
         return;
       }

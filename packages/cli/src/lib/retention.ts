@@ -29,6 +29,7 @@ export interface PruneReport {
   deferredProposalsRemoved: number;
   completedTicketsRemoved: number;
   mergedBranchesRemoved: number;
+  staleWorktreesRemoved: number;
   totalPruned: number;
 }
 
@@ -41,6 +42,7 @@ function emptyReport(): PruneReport {
     deferredProposalsRemoved: 0,
     completedTicketsRemoved: 0,
     mergedBranchesRemoved: 0,
+    staleWorktreesRemoved: 0,
     totalPruned: 0,
   };
 }
@@ -301,6 +303,74 @@ export function pruneMergedBranches(
 }
 
 // =============================================================================
+// Stale worktree cleanup
+// =============================================================================
+
+/**
+ * Remove orphaned worktrees that have no associated running process.
+ * Uses `git worktree list` to find stale entries and `git worktree remove --force`.
+ */
+export function pruneStaleWorktrees(repoRoot: string, dryRun = false): number {
+  try {
+    const worktreesDir = path.join(repoRoot, '.blockspool', 'worktrees');
+    if (!fs.existsSync(worktreesDir)) return 0;
+
+    const entries = fs.readdirSync(worktreesDir).filter(e => {
+      const fullPath = path.join(worktreesDir, e);
+      return fs.statSync(fullPath).isDirectory();
+    });
+
+    if (entries.length === 0) return 0;
+
+    // Get list of worktrees git knows about
+    const listResult = spawnSync('git', ['worktree', 'list', '--porcelain'], {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+    });
+    const gitWorktrees = new Set(
+      (listResult.stdout ?? '').split('\n')
+        .filter(l => l.startsWith('worktree '))
+        .map(l => l.replace('worktree ', '').trim()),
+    );
+
+    let removed = 0;
+    for (const entry of entries) {
+      // Skip _milestone — that's managed by solo-git
+      if (entry === '_milestone') continue;
+
+      const worktreePath = path.join(worktreesDir, entry);
+
+      // Check if git still tracks this worktree with a lock file
+      // If git doesn't know about it, it's a leftover directory
+      const isTracked = gitWorktrees.has(path.resolve(worktreePath));
+
+      if (!dryRun) {
+        try {
+          if (isTracked) {
+            spawnSync('git', ['worktree', 'remove', '--force', worktreePath], {
+              cwd: repoRoot,
+              encoding: 'utf-8',
+            });
+          } else {
+            // Not a git worktree anymore — just remove the directory
+            fs.rmSync(worktreePath, { recursive: true, force: true });
+          }
+          removed++;
+        } catch {
+          // Individual removal failure is non-fatal
+        }
+      } else {
+        removed++;
+      }
+    }
+
+    return removed;
+  } catch {
+    return 0;
+  }
+}
+
+// =============================================================================
 // Main prune (sync — file-system only)
 // =============================================================================
 
@@ -316,6 +386,7 @@ export function pruneAll(
   report.artifactsRemoved = pruneArtifacts(repoRoot, config.maxArtifactsPerRun, dryRun);
   report.spoolArchivesRemoved = pruneSpoolArchives(repoRoot, config.maxSpoolArchives, dryRun);
   report.deferredProposalsRemoved = pruneDeferredProposals(repoRoot, config.maxDeferredProposals, dryRun);
+  report.staleWorktreesRemoved = pruneStaleWorktrees(repoRoot, dryRun);
   // Branch pruning is NOT run here — only via explicit `blockspool prune`
 
   report.totalPruned =
@@ -323,7 +394,8 @@ export function pruneAll(
     report.historyLinesRemoved +
     report.artifactsRemoved +
     report.spoolArchivesRemoved +
-    report.deferredProposalsRemoved;
+    report.deferredProposalsRemoved +
+    report.staleWorktreesRemoved;
 
   return report;
 }
@@ -373,6 +445,9 @@ export function formatPruneReport(report: PruneReport, dryRun = false): string {
   }
   if (report.mergedBranchesRemoved > 0) {
     lines.push(`  ${prefix} ${report.mergedBranchesRemoved} merged branch(es)`);
+  }
+  if (report.staleWorktreesRemoved > 0) {
+    lines.push(`  ${prefix} ${report.staleWorktreesRemoved} stale worktree(s)`);
   }
 
   if (lines.length === 0) {

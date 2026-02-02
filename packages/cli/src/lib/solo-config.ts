@@ -11,7 +11,7 @@ import type { ScoutDeps, ScoutProgress } from '@blockspool/core/services';
 import type { TicketProposal, ProposalCategory } from '@blockspool/core/scout';
 import { createGitService } from './git.js';
 import { createLogger } from './logger.js';
-import type { SpindleConfig } from './spindle.js';
+import type { SpindleConfig } from './spindle/index.js';
 
 /**
  * Retention configuration — caps on unbounded state accumulation.
@@ -98,6 +98,8 @@ export interface AutoConfig {
   /** Per-backend overrides */
   claude?: { scoutConcurrency?: number; batchTokenBudget?: number };
   codex?: { scoutConcurrency?: number; batchTokenBudget?: number };
+  kimi?: { scoutConcurrency?: number; batchTokenBudget?: number; scoutTimeoutMs?: number };
+  local?: { scoutConcurrency?: number; batchTokenBudget?: number; scoutTimeoutMs?: number; maxIterations?: number };
 }
 
 /**

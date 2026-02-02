@@ -18,7 +18,7 @@ export interface ProjectGuidelines {
   loadedAt: number;
 }
 
-export type GuidelinesBackend = 'claude' | 'codex';
+export type GuidelinesBackend = string;
 
 /**
  * Search paths by backend, in priority order.
@@ -66,9 +66,17 @@ export function loadGuidelines(
     return readGuidelinesFile(repoRoot, customPath);
   }
 
-  // Default search: primary paths then fallback
-  const primaryPaths = backend === 'codex' ? CODEX_PATHS : CLAUDE_PATHS;
-  const fallbackPaths = backend === 'codex' ? CLAUDE_PATHS : CODEX_PATHS;
+  // Default search: primary paths by backend, then fallback
+  const BACKEND_PATHS: Record<string, string[]> = {
+    claude: CLAUDE_PATHS,
+    codex: CODEX_PATHS,
+    kimi: ['KIMI.md'],
+    'openai-local': ['CLAUDE.md'],
+  };
+  const primaryPaths = BACKEND_PATHS[backend] ?? CLAUDE_PATHS;
+  // Fallback: try all other known paths
+  const allPaths = [...new Set([...CLAUDE_PATHS, ...CODEX_PATHS, ...Object.values(BACKEND_PATHS).flat()])];
+  const fallbackPaths = allPaths.filter(p => !primaryPaths.includes(p));
 
   const result = searchPaths(repoRoot, primaryPaths) ?? searchPaths(repoRoot, fallbackPaths);
   if (result) return result;
@@ -134,7 +142,11 @@ function createBaselineGuidelines(
   repoRoot: string,
   backend: GuidelinesBackend,
 ): ProjectGuidelines | null {
-  const filename = backend === 'codex' ? 'AGENTS.md' : 'CLAUDE.md';
+  const BACKEND_FILENAMES: Record<string, string> = {
+    codex: 'AGENTS.md',
+    kimi: 'KIMI.md',
+  };
+  const filename = BACKEND_FILENAMES[backend] ?? 'CLAUDE.md';
   const fullPath = path.join(repoRoot, filename);
 
   // Don't overwrite existing files

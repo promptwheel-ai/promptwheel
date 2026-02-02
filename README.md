@@ -39,19 +39,27 @@ blockspool --hours 8 --batch-size 30
 # Or run with Codex (no Anthropic key needed)
 codex login
 blockspool --codex --hours 8 --batch-size 30
+
+# Or run with Kimi
+blockspool --kimi --kimi-model kimi-k2.5
+
+# Or run with local models (Ollama, vLLM, etc. — completely free)
+blockspool --local --local-model qwen2.5-coder
 ```
 
 Come back to 5 milestone PRs containing 50+ improvements.
 
 ---
 
-## Four Ways to Run
+## Six Ways to Run
 
 | Route | Auth | Best for |
 |-------|------|----------|
 | **Plugin** (`/blockspool:run`) | Claude Code subscription | Interactive use, no API key setup |
 | **CLI + Claude** (`blockspool`) | `ANTHROPIC_API_KEY` | CI, cron jobs, long runs |
-| **CLI + Codex** (`blockspool --codex`) | `codex login` (or `CODEX_API_KEY`) | No Anthropic key, Codex-native teams |
+| **CLI + Codex** (`blockspool --codex`) | `codex login` or `CODEX_API_KEY` | No Anthropic key, Codex-native teams |
+| **CLI + Kimi** (`blockspool --kimi`) | `kimi /login` or `MOONSHOT_API_KEY` | Kimi-native teams |
+| **CLI + Local** (`blockspool --local`) | None (local server) | Ollama, vLLM, SGLang, LM Studio |
 | **CLI + OpenAI** (`blockspool-run --provider openai`) | `OPENAI_API_KEY` | OpenAI-native teams |
 
 ### Codex model availability
@@ -70,6 +78,40 @@ BlockSpool uses the official `codex exec` CLI. Not all models are available with
 These restrictions are enforced by OpenAI's Codex CLI, not BlockSpool. If your saved model becomes incompatible (e.g., you switch from API key to `codex login`), BlockSpool will prompt you to re-select.
 
 To change your saved model: `blockspool --codex --codex-model <name>`
+
+### Kimi
+
+```bash
+# Login via OAuth (one-time, opens browser)
+kimi   # then type /login inside the session
+
+# Run with Kimi
+blockspool --kimi --kimi-model kimi-k2.5
+
+# Or use an API key instead
+export MOONSHOT_API_KEY=...
+blockspool --kimi
+```
+
+### Local models (Ollama, vLLM, SGLang, LM Studio)
+
+Run with any OpenAI-compatible local server. The local backend uses an **agentic tool-use loop** — the LLM gets `read_file`, `write_file`, and `run_command` tools and iterates until done.
+
+```bash
+# Start Ollama (or any OpenAI-compatible server)
+ollama serve
+
+# Run with a local model
+blockspool --local --local-model qwen2.5-coder
+
+# Custom server URL (default: http://localhost:11434/v1)
+blockspool --local --local-model deepseek-coder-v2 --local-url http://localhost:8080/v1
+
+# Limit agentic loop iterations (default: 20)
+blockspool --local --local-model qwen2.5-coder --local-max-iterations 10
+```
+
+No API key needed — runs entirely on your machine.
 
 ### Hybrid mode
 
@@ -134,7 +176,10 @@ Final Summary
 | **Impact Scoring** | Proposals ranked by `impact x confidence`, not confidence alone |
 | **Quality Gating** | Minimum impact score filter (default: 3) rejects low-value lint/cleanup proposals |
 | **Project Detection** | Auto-detects test runner (vitest, jest, pytest, cargo test, go test, rspec, etc.), framework, linter, language, and monorepo tool — ensures correct CLI syntax in prompts |
-| **Spindle** | Loop detection prevents runaway agents |
+| **Spindle** | Loop detection prevents runaway agents. Detects oscillation, repetition, QA ping-pong, command failures, file churn, and time-based stalling (30min default) |
+| **Symlink Safety** | Resolves symlinks before scope checks — blocks symlink-based path traversal out of worktrees |
+| **Credential Detection** | Blocks writes containing AWS keys, PEM keys, GitHub PATs, Slack tokens, DB connection strings, JWTs, and `.env` secrets |
+| **Auto-Prune** | Cleans up stale worktrees, run folders, history, artifacts, and archives on every session start |
 | **Guidelines Context** | Loads CLAUDE.md (Claude) or AGENTS.md (Codex) into every prompt; auto-creates baseline if missing |
 
 ---
@@ -370,6 +415,8 @@ prompt: |
   - Claude Code (for the plugin)
   - `ANTHROPIC_API_KEY` (for CLI + Claude)
   - `codex login` or `CODEX_API_KEY` (for CLI + Codex)
+  - `kimi /login` or `MOONSHOT_API_KEY` (for CLI + Kimi)
+  - A local OpenAI-compatible server (for CLI + Local — no key needed)
 
 ---
 
@@ -452,7 +499,7 @@ BlockSpool accumulates state over time (run folders, history, artifacts). The re
 
 ### Auto-prune
 
-On every `blockspool` session start, stale items are pruned automatically: run folders, history, artifacts, spool archives, deferred proposals, and completed tickets.
+On every `blockspool` session start, stale items are pruned automatically: run folders, history, artifacts, spool archives, deferred proposals, completed tickets, and orphaned worktrees.
 
 ### Manual prune
 
@@ -514,9 +561,11 @@ BlockSpool adds:
 
 ### Can I use it without an API key?
 
-Yes — two ways:
+Yes — four ways:
 1. **Plugin** (`/blockspool:run`): Uses your Claude Code subscription directly
 2. **Codex CLI** (`blockspool --codex`): Uses `codex login` (OAuth, no API key env var needed)
+3. **Kimi CLI** (`blockspool --kimi`): Uses `kimi /login` (OAuth, opens browser)
+4. **Local** (`blockspool --local --local-model <name>`): Runs against Ollama or any local server — completely free
 
 ### Why can't I use `gpt-5.2-codex-high` with `codex login`?
 
@@ -538,9 +587,13 @@ Run `blockspool --codex --codex-model <name>`. If your saved model is no longer 
 - Failed tickets are automatically **blocked**, not merged
 - Trust ladder limits to safe categories
 
+### Can I use local models like Qwen, DeepSeek, or Llama?
+
+Yes. `blockspool --local --local-model <name>` works with any OpenAI-compatible server (Ollama, vLLM, SGLang, LM Studio). The local backend gives the LLM `read_file`, `write_file`, and `run_command` tools so it can iteratively explore and modify code. Quality depends on the model — larger coding models (Qwen 2.5 Coder 32B, DeepSeek Coder V2) work best.
+
 ### How much does it cost?
 
-BlockSpool is free and open source. It uses your existing Claude Code subscription, Anthropic API key, or Codex credentials. API costs depend on your codebase size, run duration, and provider pricing.
+BlockSpool is free and open source. It uses your existing Claude Code subscription, Anthropic API key, or Codex/Kimi credentials. API costs depend on your codebase size, run duration, and provider pricing. The local backend (`--local`) is completely free.
 
 ### What are formulas?
 
@@ -561,6 +614,6 @@ Apache 2.0 - See [LICENSE](./LICENSE)
 ---
 
 <p align="center">
-  <b>BlockSpool v0.5.21</b><br>
+  <b>BlockSpool v0.5.23</b><br>
   <i>Set it. Forget it. Merge the PRs.</i>
 </p>
