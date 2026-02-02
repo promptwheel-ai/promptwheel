@@ -85,6 +85,8 @@ Examples:
     .option('--batch-token-budget <n>', 'Token budget per scout batch (default: auto based on backend)')
     .option('--scout-timeout <seconds>', 'Timeout per scout batch in seconds (default: auto — 300s codex, 120s claude)')
     .option('--max-scout-files <n>', 'Maximum files to scan per scout cycle (default: 60)')
+    .option('--scout-concurrency <n>', 'Max parallel scout batches (default: auto — 4 codex, 3 claude)')
+    .option('--codex-mcp', 'Use persistent MCP session for Codex scouting (experimental, requires --codex)')
     .option('--no-docs-audit', 'Disable automatic docs-audit cycles')
     .option('--docs-audit-interval <n>', 'Run docs-audit every N cycles (default: 3)')
     .action(async (mode: string | undefined, options: {
@@ -118,6 +120,8 @@ Examples:
       maxScoutFiles?: string;
       docsAudit?: boolean;
       docsAuditInterval?: string;
+      scoutConcurrency?: string;
+      codexMcp?: boolean;
     }) => {
       if (options.deep && !options.formula) {
         options.formula = 'deep';
@@ -345,6 +349,8 @@ Examples:
           executeBackend: executeBackendName,
           codexModel: options.codexModel,
           codexUnsafeFullAccess: options.codexUnsafeFullAccess,
+          scoutConcurrency: options.scoutConcurrency,
+          codexMcp: options.codexMcp,
         });
         return;
       }

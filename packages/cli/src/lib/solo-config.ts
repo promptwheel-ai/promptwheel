@@ -93,6 +93,11 @@ export interface AutoConfig {
   scoutTimeoutMs?: number;
   /** Maximum files to scan per scout cycle (default: 60) */
   maxFilesPerCycle?: number;
+  /** Max parallel scout batches (default: auto — 4 for codex, 3 for claude) */
+  scoutConcurrency?: number;
+  /** Per-backend overrides */
+  claude?: { scoutConcurrency?: number; batchTokenBudget?: number };
+  codex?: { scoutConcurrency?: number; batchTokenBudget?: number };
 }
 
 /**
@@ -359,8 +364,9 @@ export function formatProgress(progress: ScoutProgress): string {
       return chalk.gray(progress.message || 'Scanning files...');
     case 'analyzing':
       return chalk.gray(
-        `Analyzing (${progress.filesScanned}/${progress.totalFiles} files, ` +
-        `${progress.proposalsFound} proposals)`
+        progress.message
+          ? `${progress.message} (${progress.filesScanned}/${progress.totalFiles} files, ${progress.proposalsFound} proposals)`
+          : `Analyzing (${progress.filesScanned}/${progress.totalFiles} files, ${progress.proposalsFound} proposals)`
       );
     case 'storing':
       return chalk.gray(progress.message || 'Storing results...');

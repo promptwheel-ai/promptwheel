@@ -566,6 +566,8 @@ export async function runAutoMode(options: {
   maxScoutFiles?: string;
   docsAudit?: boolean;
   docsAuditInterval?: string;
+  scoutConcurrency?: string;
+  codexMcp?: boolean;
 }): Promise<void> {
   // Load formula if specified
   let activeFormula: import('./formulas.js').Formula | null = null;
@@ -775,9 +777,16 @@ export async function runAutoMode(options: {
     console.log(chalk.gray(`  Learnings loaded: ${allLearnings.length}`));
   }
 
+  // Resolve per-backend settings: CLI flag > auto.<backend>.<setting> > auto.<setting> > hardcoded default
+  const activeBackendName = options.scoutBackend ?? 'claude';
+  const backendConf = activeBackendName === 'codex' ? autoConf.codex : autoConf.claude;
+
   const batchTokenBudget = options.batchTokenBudget
     ? parseInt(options.batchTokenBudget, 10)
-    : autoConf.batchTokenBudget;
+    : (backendConf?.batchTokenBudget ?? autoConf.batchTokenBudget);
+  const scoutConcurrency = options.scoutConcurrency
+    ? parseInt(options.scoutConcurrency, 10)
+    : (backendConf?.scoutConcurrency ?? autoConf.scoutConcurrency);
   const scoutTimeoutMs = options.scoutTimeout
     ? parseInt(options.scoutTimeout, 10) * 1000
     : autoConf.scoutTimeoutMs;
@@ -876,8 +885,14 @@ export async function runAutoMode(options: {
     let scoutBackend: ScoutBackend | undefined;
     let executionBackend: ExecutionBackend | undefined;
     if (options.scoutBackend === 'codex') {
-      const { CodexScoutBackend } = await import('@blockspool/core/scout');
-      scoutBackend = new CodexScoutBackend({ apiKey: process.env.CODEX_API_KEY, model: options.codexModel });
+      if (options.codexMcp) {
+        const { CodexMcpScoutBackend } = await import('@blockspool/core/scout');
+        scoutBackend = new CodexMcpScoutBackend({ apiKey: process.env.CODEX_API_KEY, model: options.codexModel });
+        console.log(chalk.cyan('  Scout: Codex MCP (persistent session)'));
+      } else {
+        const { CodexScoutBackend } = await import('@blockspool/core/scout');
+        scoutBackend = new CodexScoutBackend({ apiKey: process.env.CODEX_API_KEY, model: options.codexModel });
+      }
     }
     if (options.executeBackend === 'codex') {
       executionBackend = new CodexExecutionBackend({
@@ -1099,6 +1114,7 @@ export async function runAutoMode(options: {
           batchTokenBudget,
           timeoutMs: scoutTimeoutMs,
           maxFiles: maxScoutFiles,
+          scoutConcurrency,
           onProgress: (progress: ScoutProgress) => {
             const formatted = formatProgress(progress);
             if (formatted !== lastProgress) {

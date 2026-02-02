@@ -18,7 +18,8 @@ import type {
 
 export * from './types.js';
 export { buildScoutPrompt, buildCategoryPrompt } from './prompt.js';
-export { runClaude, parseClaudeOutput, ClaudeScoutBackend, CodexScoutBackend, type ScoutBackend } from './runner.js';
+export { runClaude, parseClaudeOutput, ClaudeScoutBackend, CodexScoutBackend, CodexMcpScoutBackend, type ScoutBackend } from './runner.js';
+export { McpBatchServer } from './mcp-batch-server.js';
 export { scanFiles, batchFiles, batchFilesByTokens, estimateTokens, type ScannedFile } from './scanner.js';
 
 /**
@@ -292,6 +293,7 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
     customPrompt,
     backend,
     protectedFiles,
+    scoutConcurrency,
   } = options;
 
   const scoutBackend: ScoutBackend = backend ?? new ClaudeScoutBackend();
@@ -349,87 +351,139 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
     const batches = batchFilesByTokens(files, budget);
     const maxBatches = Math.min(batches.length, 20); // Cap at 20 batches
 
-    let filesProcessed = 0;
-    for (let i = 0; i < maxBatches; i++) {
-      // Check for cancellation
-      if (signal?.aborted) {
-        errors.push('Scan aborted by user');
-        break;
-      }
-
-      // Check if we have enough proposals
-      if (proposals.length >= maxProposals) {
-        break;
-      }
-
-      const batch = batches[i];
-      report({
-        phase: 'analyzing',
-        filesScanned: filesProcessed,
-        totalFiles: files.length,
-        proposalsFound: proposals.length,
-        currentBatch: i + 1,
-        totalBatches: maxBatches,
-        currentFile: batch[0]?.path,
-      });
-      filesProcessed += batch.length;
-
-      // Build prompt for this batch
-      const prompt = buildScoutPrompt({
-        files: batch.map(f => ({ path: f.path, content: f.content })),
-        scope,
-        types,
-        excludeTypes,
-        maxProposals: Math.min(5, maxProposals - proposals.length),
-        minConfidence,
-        recentlyCompletedTitles,
-        customPrompt,
-        protectedFiles,
-      });
-
-      // Run scout backend
-      const result = await scoutBackend.run({
-        prompt,
-        cwd: projectPath,
-        timeoutMs,
-        model,
-        signal,
-      });
-
+    // Helper to process a single batch result
+    const processBatchResult = (result: import('./runner.js').RunnerResult, batchIndex: number) => {
       if (!result.success) {
-        errors.push(`Batch ${i + 1} failed: ${result.error}`);
-        continue;
+        errors.push(`Batch ${batchIndex + 1} failed: ${result.error}`);
+        return;
       }
 
-      // Parse output
       const parsed = parseClaudeOutput<{ proposals: Record<string, unknown>[] }>(result.output);
       if (!parsed?.proposals) {
-        errors.push(`Batch ${i + 1}: Failed to parse output`);
-        continue;
+        errors.push(`Batch ${batchIndex + 1}: Failed to parse output`);
+        return;
       }
 
-      // Normalize and filter proposals
       for (const raw of parsed.proposals) {
         const proposal = normalizeProposal(raw, types?.[0]);
         if (!proposal) continue;
 
-        // Apply category filters
         if (types?.length && !types.includes(proposal.category)) continue;
         if (excludeTypes?.length && excludeTypes.includes(proposal.category)) continue;
-
-        // Apply confidence filter
         if (proposal.confidence < minConfidence) continue;
 
-        // Check for duplicates (by title similarity)
         const isDuplicate = proposals.some(
           p => p.title.toLowerCase() === proposal.title.toLowerCase()
         );
         if (isDuplicate) continue;
 
         proposals.push(proposal);
-
         if (proposals.length >= maxProposals) break;
       }
+    };
+
+    // Build all prompts upfront
+    const batchSlice = batches.slice(0, maxBatches);
+    const allPrompts = batchSlice.map(batch =>
+      buildScoutPrompt({
+        files: batch.map(f => ({ path: f.path, content: f.content })),
+        scope,
+        types,
+        excludeTypes,
+        maxProposals: Math.min(5, maxProposals),
+        minConfidence,
+        recentlyCompletedTitles,
+        customPrompt,
+        protectedFiles,
+      })
+    );
+
+    // Optimization 2 path: if backend supports runAll(), use single session
+    if (scoutBackend.runAll) {
+      let filesProcessed = 0;
+      for (const batch of batchSlice) filesProcessed += batch.length;
+      report({
+        phase: 'analyzing',
+        filesScanned: filesProcessed,
+        totalFiles: files.length,
+        proposalsFound: 0,
+        currentBatch: 1,
+        totalBatches: maxBatches,
+      });
+
+      const allOptions = allPrompts.map(prompt => ({ prompt, cwd: projectPath, timeoutMs, model, signal }));
+      const results = await scoutBackend.runAll(allOptions);
+      for (let i = 0; i < results.length; i++) {
+        processBatchResult(results[i], i);
+      }
+    } else {
+      // Optimization 1: parallel semaphore-gated batch loop
+      const concurrency = scoutConcurrency ?? (scoutBackend.name === 'codex' ? 4 : 3);
+
+      let permits = concurrency;
+      const waiting: Array<() => void> = [];
+      const acquire = async () => {
+        if (permits > 0) { permits--; return; }
+        return new Promise<void>(r => { waiting.push(r); });
+      };
+      const release = () => {
+        if (waiting.length > 0) waiting.shift()!(); else permits++;
+      };
+
+      // Pre-compute cumulative file counts per batch for accurate progress
+      const cumulativeFiles: number[] = [];
+      let cumSum = 0;
+      for (const batch of batchSlice) {
+        cumSum += batch.length;
+        cumulativeFiles.push(cumSum);
+      }
+
+      let batchesCompleted = 0;
+      let batchesStarted = 0;
+
+      const tasks = batchSlice.map(async (batch, i) => {
+        await acquire();
+        try {
+          if (signal?.aborted || proposals.length >= maxProposals) return;
+
+          batchesStarted++;
+          report({
+            phase: 'analyzing',
+            filesScanned: cumulativeFiles[Math.min(batchesCompleted, batchSlice.length - 1)],
+            totalFiles: files.length,
+            proposalsFound: proposals.length,
+            currentBatch: batchesStarted,
+            totalBatches: maxBatches,
+            currentFile: batch[0]?.path,
+          });
+
+          const result = await scoutBackend.run({
+            prompt: allPrompts[i],
+            cwd: projectPath,
+            timeoutMs,
+            model,
+            signal,
+          });
+
+          // JS is single-threaded between awaits — safe to mutate proposals
+          batchesCompleted++;
+          processBatchResult(result, i);
+
+          // Update progress after batch completes
+          report({
+            phase: 'analyzing',
+            filesScanned: cumulativeFiles[Math.min(batchesCompleted, batchSlice.length - 1)],
+            totalFiles: files.length,
+            proposalsFound: proposals.length,
+            currentBatch: batchesCompleted,
+            totalBatches: maxBatches,
+          });
+        } finally {
+          release();
+        }
+      });
+
+      await Promise.allSettled(tasks);
     }
 
     // Sort proposals by impact * confidence (descending)

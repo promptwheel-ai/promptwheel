@@ -91,6 +91,8 @@ export interface ScoutRepoOptions {
   batchTokenBudget?: number;
   /** Maximum files to scan per cycle (default: 60) */
   maxFiles?: number;
+  /** Max parallel scout batches (default: auto — 4 for codex, 3 for claude) */
+  scoutConcurrency?: number;
 }
 
 /**
@@ -206,6 +208,7 @@ export async function scoutRepo(
       protectedFiles: opts.protectedFiles,
       batchTokenBudget: opts.batchTokenBudget,
       maxFiles: opts.maxFiles,
+      scoutConcurrency: opts.scoutConcurrency,
       onProgress: (p) => {
         report({
           phase: 'analyzing',

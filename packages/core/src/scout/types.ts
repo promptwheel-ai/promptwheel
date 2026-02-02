@@ -80,6 +80,8 @@ export interface ScoutOptions {
   batchTokenBudget?: number;
   /** Maximum files to scan per cycle (default: 60) */
   maxFiles?: number;
+  /** Max parallel scout batches (default: auto — 4 for codex, 3 for claude) */
+  scoutConcurrency?: number;
 }
 
 /**

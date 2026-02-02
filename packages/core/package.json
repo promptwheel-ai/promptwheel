@@ -1,6 +1,6 @@
 {
   "name": "@blockspool/core",
-  "version": "0.5.19",
+  "version": "0.5.20",
   "description": "Core business logic and database adapter interface for BlockSpool",
   "author": "BlockSpool",
   "homepage": "https://blockspool.com",
@@ -56,6 +56,9 @@
     "adapter"
   ],
   "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
   "devDependencies": {
     "typescript": "^5.7.3"
   }
