@@ -64,7 +64,7 @@ ${categoryFilter}
 ## Categories
 
 - **refactor**: Code quality, readability, maintainability improvements (DRY violations, dead code, over-engineering, inconsistent patterns)
-- **fix**: Bug fixes, incorrect logic, broken edge cases (NOT writing new tests — that is always "test")
+- **fix**: Bug fixes, incorrect logic, broken edge cases
 - **cleanup**: Dead code removal, unused imports, bloat reduction
 - **types**: Type safety improvements, missing types, type narrowing
 - **perf**: Performance optimizations, algorithmic improvements
@@ -88,10 +88,6 @@ ${categoryFilter}
 
 3. Generate at most ${maxProposals} proposals, prioritized by impact.
 
-4. CATEGORY HONESTY: Any proposal that creates new test files (.test.ts, .spec.ts)
-   or whose primary goal is adding test coverage MUST use category "test" — never
-   disguise test-writing as "fix", "refactor", or any other category. Mislabeled
-   proposals will be automatically reclassified and may be filtered out.
 ${protectedNote}${strategicFocus}${recentContext}
 
 ## Files to Analyze

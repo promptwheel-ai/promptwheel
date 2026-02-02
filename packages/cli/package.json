@@ -1,6 +1,6 @@
 {
   "name": "@blockspool/cli",
-  "version": "0.5.30",
+  "version": "0.5.31",
   "description": "BlockSpool CLI - Continuous codebase improvement tool",
   "author": "BlockSpool",
   "homepage": "https://blockspool.com",
@@ -50,8 +50,8 @@
   ],
   "license": "Apache-2.0",
   "dependencies": {
-    "@blockspool/core": "^0.5.30",
-    "@blockspool/sqlite": "^0.5.30",
+    "@blockspool/core": "^0.5.31",
+    "@blockspool/sqlite": "^0.5.31",
     "chalk": "^5.3.0",
     "commander": "^14.0.3",
     "neo-blessed": "^0.2.0"

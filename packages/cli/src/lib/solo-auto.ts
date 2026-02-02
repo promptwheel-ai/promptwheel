@@ -97,24 +97,6 @@ function balanceProposals<T extends { category: string; impact_score?: number | 
 }
 
 /**
- * Detect test proposals disguised under other categories.
- * If the title/files clearly indicate writing new tests, it's a test proposal.
- */
-function looksLikeTestProposal(p: { title?: string; description?: string; files?: string[]; allowed_paths?: string[] }): boolean {
-  const title = (p.title || '').toLowerCase();
-  const files = [...(p.files || []), ...(p.allowed_paths || [])];
-
-  // Title signals: "add tests for", "write tests", "test coverage", "unit tests for", etc.
-  if (/\b(add|write|create|implement|missing)\b.*\btests?\b/i.test(title)) return true;
-  if (/\btests?\s+(for|coverage)\b/i.test(title)) return true;
-
-  // All files are test files
-  if (files.length > 0 && files.every(f => /\.(test|spec)\.[jt]sx?$/.test(f) || f.includes('__tests__'))) return true;
-
-  return false;
-}
-
-/**
  * Run auto work mode - process ready tickets in parallel
  */
 export async function runAutoWorkMode(options: {
@@ -523,8 +505,8 @@ export async function runAutoMode(options: {
     const block = formula?.categories
       ? []
       : options.safe
-        ? ['deps', 'auth', 'config', 'migration', 'security', 'fix', 'cleanup', ...(options.tests ? [] : ['test'])]
-        : ['deps', 'auth', 'config', 'migration', ...(options.tests ? [] : ['test'])];
+        ? ['deps', 'auth', 'config', 'migration', 'security', 'fix', 'cleanup']
+        : ['deps', 'auth', 'config', 'migration'];
     return { allow, block };
   };
 
@@ -1187,14 +1169,6 @@ export async function runAutoMode(options: {
           const impact = p.impact_score ?? '?';
           const cat = p.category || 'refactor';
           console.log(chalk.gray(`    ${cat} | ${conf}% conf | impact ${impact} | ${p.title}`));
-        }
-      }
-
-      // Re-classify test proposals disguised as other categories
-      for (const p of proposals) {
-        if (p.category && p.category !== 'test' && looksLikeTestProposal(p)) {
-          console.log(chalk.gray(`  ↻ Re-classified as test (was ${p.category}): ${p.title}`));
-          p.category = 'test';
         }
       }
 

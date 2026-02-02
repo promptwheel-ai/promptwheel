@@ -97,13 +97,6 @@ export async function filterAndCreateTickets(
   }
   s.deferred_proposals = stillDeferred;
 
-  // Step 0b: Re-classify test proposals disguised as other categories
-  for (const raw of rawProposals) {
-    if (raw.category && raw.category !== 'test' && looksLikeTestProposal(raw)) {
-      raw.category = 'test';
-    }
-  }
-
   // Step 1: Schema validation
   const valid: ValidatedProposal[] = [];
   for (const raw of rawProposals) {
@@ -320,18 +313,6 @@ export function titleSimilarity(a: string, b: string): number {
 
   const union = bigramsA.size + bigramsB.size - intersection;
   return union === 0 ? 0 : intersection / union;
-}
-
-/**
- * Detect test proposals disguised under other categories.
- */
-function looksLikeTestProposal(p: { title?: string; description?: string; files?: string[]; allowed_paths?: string[] }): boolean {
-  const title = (p.title || '').toLowerCase();
-  const files = [...(p.files || []), ...(p.allowed_paths || [])];
-  if (/\b(add|write|create|implement|missing)\b.*\btests?\b/i.test(title)) return true;
-  if (/\btests?\s+(for|coverage)\b/i.test(title)) return true;
-  if (files.length > 0 && files.every(f => /\.(test|spec)\.[jt]sx?$/.test(f) || f.includes('__tests__'))) return true;
-  return false;
 }
 
 function bigrams(s: string): Set<string> {

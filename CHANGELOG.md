@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Removed `--min-confidence` CLI flag and `minConfidence` config default (field kept for backwards compatibility with existing config files).
 - Impact score filter remains as the quality gate for proposals.
 - **Filter breakdown in rejection messages** — when all proposals are rejected, shows per-filter counts (e.g., "No proposals approved (5 out of scope, 2 blocked by category)") instead of the opaque "No proposals passed trust filter".
+- **Removed test proposal paranoia layers** — deleted `looksLikeTestProposal()` reclassification from CLI and MCP, removed "CATEGORY HONESTY" section from scout prompt. Category allow/block list is sufficient — if a test sneaks through labeled as "refactor" it either works or fails QA. Reduces complexity from 5 test-suppression layers to 2 (category gate + maxTestRatio).
 
 ## [0.3.3] - 2026-01-31
 
