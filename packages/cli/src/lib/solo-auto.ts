@@ -15,7 +15,7 @@ import {
 import { projects, tickets, runs } from '@blockspool/core/repos';
 import type { TicketProposal } from '@blockspool/core/scout';
 import { createGitService } from './git.js';
-import { createSpinner } from './spinner.js';
+import { createSpinner, createBatchProgress, type BatchProgressDisplay } from './spinner.js';
 import {
   getBlockspoolDir,
   getAdapter,
@@ -1084,6 +1084,7 @@ export async function runAutoMode(options: {
       }
 
       let lastProgress = '';
+      const batchProgressRef: { current: BatchProgressDisplay | null } = { current: null };
       const scoutPath = (milestoneMode && milestoneWorktreePath) ? milestoneWorktreePath : repoRoot;
       const guidelinesPrefix = guidelines ? formatGuidelinesForPrompt(guidelines) + '\n\n' : '';
       const learningsPrefix = autoConf.learningsEnabled
@@ -1116,16 +1117,32 @@ export async function runAutoMode(options: {
           maxFiles: maxScoutFiles,
           scoutConcurrency,
           onProgress: (progress: ScoutProgress) => {
-            const formatted = formatProgress(progress);
-            if (formatted !== lastProgress) {
-              spinner.update(formatted);
-              lastProgress = formatted;
+            // Switch to multi-line display when batch statuses arrive
+            if (progress.batchStatuses && progress.totalBatches && progress.totalBatches > 1) {
+              if (!batchProgressRef.current) {
+                spinner.stop(); // clear single-line spinner
+                batchProgressRef.current = createBatchProgress(progress.totalBatches);
+              }
+              batchProgressRef.current.update(progress.batchStatuses, progress.proposalsFound ?? 0);
+            } else {
+              const formatted = formatProgress(progress);
+              if (formatted !== lastProgress) {
+                spinner.update(formatted);
+                lastProgress = formatted;
+              }
             }
           },
         });
       } catch (scoutErr) {
+        batchProgressRef.current?.stop();
         spinner.fail('Scout failed');
         throw scoutErr;
+      }
+
+      // Clean up batch progress display
+      if (batchProgressRef.current) {
+        const count = scoutResult.proposals.length;
+        batchProgressRef.current.stop(chalk.green(`Scouting complete — ${count} proposal${count !== 1 ? 's' : ''} found`));
       }
 
       const proposals = scoutResult.proposals;

@@ -98,6 +98,15 @@ export interface ScoutRepoOptions {
 /**
  * Scout progress
  */
+export interface BatchStatus {
+  index: number;
+  status: 'waiting' | 'running' | 'done' | 'failed';
+  proposals?: number;
+  startedAt?: number;
+  durationMs?: number;
+  error?: string;
+}
+
 export interface ScoutProgress {
   phase: 'init' | 'scanning' | 'analyzing' | 'storing' | 'complete';
   filesScanned?: number;
@@ -105,6 +114,9 @@ export interface ScoutProgress {
   proposalsFound?: number;
   ticketsCreated?: number;
   message?: string;
+  /** Per-batch status for multi-line display */
+  batchStatuses?: BatchStatus[];
+  totalBatches?: number;
 }
 
 /**
@@ -216,6 +228,8 @@ export async function scoutRepo(
           totalFiles: p.totalFiles,
           proposalsFound: p.proposalsFound,
           message: `Analyzing batch ${p.currentBatch}/${p.totalBatches}`,
+          batchStatuses: p.batchStatuses,
+          totalBatches: p.totalBatches,
         });
       },
     });

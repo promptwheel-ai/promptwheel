@@ -59,6 +59,118 @@ function formatElapsedCompact(ms: number): string {
 /**
  * Create and start a block spinner
  */
+/**
+ * Multi-line batch progress display — shows each batch on its own line
+ */
+export interface BatchProgressDisplay {
+  /** Update batch statuses */
+  update(statuses: Array<{ index: number; status: 'waiting' | 'running' | 'done' | 'failed'; proposals?: number; durationMs?: number; error?: string }>, totalProposals: number): void;
+  /** Stop and clear all lines */
+  stop(finalMessage?: string): void;
+}
+
+export function createBatchProgress(totalBatches: number): BatchProgressDisplay {
+  const isInteractive = process.stderr.isTTY;
+  const frames = FRAME_SETS.stack;
+  let frameIndex = 0;
+  let interval: ReturnType<typeof setInterval> | null = null;
+  let linesRendered = 0;
+  let currentStatuses: Array<{ index: number; status: string; proposals?: number; durationMs?: number; error?: string }> = [];
+  let currentTotalProposals = 0;
+  const startedAt = Date.now();
+  const loggedBatches = new Set<number>();
+
+  const render = () => {
+    if (!isInteractive) return;
+
+    // Move cursor up to overwrite previous lines
+    if (linesRendered > 0) {
+      process.stderr.write(`\x1b[${linesRendered}A`);
+    }
+
+    const frame = frames[frameIndex % frames.length];
+    frameIndex++;
+
+    const lines: string[] = [];
+
+    // Header line
+    const elapsed = formatElapsedCompact(Date.now() - startedAt);
+    lines.push(`  ${chalk.cyan(frame)} Scouting ${totalBatches} batches ${chalk.gray(`(${currentTotalProposals} proposals, ${elapsed})`)}`);
+
+    // Per-batch lines
+    for (let i = 0; i < totalBatches; i++) {
+      const s = currentStatuses.find(b => b.index === i);
+      const dur = s?.durationMs ? formatElapsedCompact(s.durationMs) : (s?.status === 'running' ? formatElapsedCompact(Date.now() - startedAt) : '');
+      const durStr = dur ? chalk.gray(` (${dur})`) : '';
+
+      if (!s || s.status === 'waiting') {
+        lines.push(chalk.gray(`    ○ Batch ${i + 1}  waiting`));
+      } else if (s.status === 'running') {
+        lines.push(`    ${chalk.cyan(frame)} Batch ${i + 1}  ${chalk.cyan('analyzing...')}${durStr}`);
+      } else if (s.status === 'done') {
+        const pStr = s.proposals ? `${s.proposals} proposal${s.proposals !== 1 ? 's' : ''}` : 'no proposals';
+        lines.push(`    ${chalk.green('█')} Batch ${i + 1}  ${chalk.green(pStr)}${durStr}`);
+      } else if (s.status === 'failed') {
+        lines.push(`    ${chalk.red('█')} Batch ${i + 1}  ${chalk.red('failed')}${durStr}`);
+      }
+    }
+
+    // Write all lines, clear to end of each line
+    for (const line of lines) {
+      process.stderr.write(`${line}\x1b[K\n`);
+    }
+    linesRendered = lines.length;
+  };
+
+  // Initial render
+  if (isInteractive) {
+    currentStatuses = Array.from({ length: totalBatches }, (_, i) => ({ index: i, status: 'waiting' }));
+    render();
+    interval = setInterval(render, 120);
+  }
+
+  const clear = () => {
+    if (interval) {
+      clearInterval(interval);
+      interval = null;
+    }
+    if (isInteractive && linesRendered > 0) {
+      process.stderr.write(`\x1b[${linesRendered}A`);
+      for (let i = 0; i < linesRendered; i++) {
+        process.stderr.write(`\x1b[K\n`);
+      }
+      process.stderr.write(`\x1b[${linesRendered}A`);
+      linesRendered = 0;
+    }
+  };
+
+  return {
+    update(statuses, totalProposals) {
+      currentStatuses = statuses;
+      currentTotalProposals = totalProposals;
+      if (!isInteractive) {
+        // Non-interactive: log completed batches once
+        for (const s of statuses) {
+          if ((s.status === 'done' || s.status === 'failed') && !loggedBatches.has(s.index)) {
+            loggedBatches.add(s.index);
+            const dur = s.durationMs ? ` (${formatElapsedCompact(s.durationMs)})` : '';
+            process.stderr.write(`  Batch ${s.index + 1}: ${s.status}${s.proposals ? ` — ${s.proposals} proposals` : ''}${dur}\n`);
+          }
+        }
+      }
+    },
+    stop(finalMessage?: string) {
+      clear();
+      if (finalMessage) {
+        process.stderr.write(`  ${finalMessage}\n`);
+      }
+    },
+  };
+}
+
+/**
+ * Create and start a block spinner
+ */
 export function createSpinner(message: string, style: SpinnerStyle = 'stack'): BlockSpinner {
   const frames = FRAME_SETS[style];
   let frameIndex = 0;

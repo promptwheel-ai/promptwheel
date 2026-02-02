@@ -439,23 +439,31 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
       }
 
       let batchesCompleted = 0;
-      let batchesStarted = 0;
+
+      // Per-batch status tracking for multi-line display
+      const batchStatuses: Array<{ index: number; status: 'waiting' | 'running' | 'done' | 'failed'; proposals?: number; startedAt?: number; durationMs?: number; error?: string }> =
+        batchSlice.map((_, i) => ({ index: i, status: 'waiting' as const }));
+
+      const emitProgress = () => {
+        report({
+          phase: 'analyzing',
+          filesScanned: cumulativeFiles[Math.min(batchesCompleted, batchSlice.length - 1)] ?? 0,
+          totalFiles: files.length,
+          proposalsFound: proposals.length,
+          batchStatuses: [...batchStatuses],
+          totalBatches: maxBatches,
+        });
+      };
+
+      emitProgress();
 
       const tasks = batchSlice.map(async (batch, i) => {
         await acquire();
         try {
           if (signal?.aborted || proposals.length >= maxProposals) return;
 
-          batchesStarted++;
-          report({
-            phase: 'analyzing',
-            filesScanned: cumulativeFiles[Math.min(batchesCompleted, batchSlice.length - 1)],
-            totalFiles: files.length,
-            proposalsFound: proposals.length,
-            currentBatch: batchesStarted,
-            totalBatches: maxBatches,
-            currentFile: batch[0]?.path,
-          });
+          batchStatuses[i] = { index: i, status: 'running', startedAt: Date.now() };
+          emitProgress();
 
           const result = await scoutBackend.run({
             prompt: allPrompts[i],
@@ -466,18 +474,17 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
           });
 
           // JS is single-threaded between awaits — safe to mutate proposals
+          const beforeCount = proposals.length;
           batchesCompleted++;
           processBatchResult(result, i);
+          const batchProposals = proposals.length - beforeCount;
 
-          // Update progress after batch completes
-          report({
-            phase: 'analyzing',
-            filesScanned: cumulativeFiles[Math.min(batchesCompleted, batchSlice.length - 1)],
-            totalFiles: files.length,
-            proposalsFound: proposals.length,
-            currentBatch: batchesCompleted,
-            totalBatches: maxBatches,
-          });
+          if (result.success) {
+            batchStatuses[i] = { index: i, status: 'done', proposals: batchProposals, durationMs: Date.now() - (batchStatuses[i].startedAt ?? Date.now()) };
+          } else {
+            batchStatuses[i] = { index: i, status: 'failed', error: result.error, durationMs: Date.now() - (batchStatuses[i].startedAt ?? Date.now()) };
+          }
+          emitProgress();
         } finally {
           release();
         }

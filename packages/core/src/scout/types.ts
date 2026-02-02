@@ -87,6 +87,15 @@ export interface ScoutOptions {
 /**
  * Progress update during scanning
  */
+export interface BatchStatus {
+  index: number;
+  status: 'waiting' | 'running' | 'done' | 'failed';
+  proposals?: number;
+  startedAt?: number;
+  durationMs?: number;
+  error?: string;
+}
+
 export interface ScoutProgress {
   /** Current phase */
   phase: 'discovering' | 'analyzing' | 'generating' | 'complete';
@@ -102,6 +111,8 @@ export interface ScoutProgress {
   totalBatches: number;
   /** Current file being processed */
   currentFile?: string;
+  /** Per-batch status for multi-line display */
+  batchStatuses?: BatchStatus[];
 }
 
 /**
