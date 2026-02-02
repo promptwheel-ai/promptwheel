@@ -499,7 +499,7 @@ export function formatIndexForPrompt(index: CodebaseIndex, scoutCycle: number): 
 
   if (untested_modules.length > 0) {
     parts.push('');
-    parts.push('### Untested Modules (high-value scout targets)');
+    parts.push('### Untested Modules (context only — do NOT prioritize writing tests for these)');
     parts.push(untested_modules.map(m => m + '/').join(', '));
   }
 
