@@ -83,6 +83,8 @@ Examples:
     .option('--codex-unsafe-full-access', 'Use --dangerously-bypass-approvals-and-sandbox for Codex execution (requires isolated runner)')
     .option('--include-claude-md', 'Allow the scout to propose changes to CLAUDE.md and .claude/ (excluded by default)')
     .option('--batch-token-budget <n>', 'Token budget per scout batch (default: auto based on backend)')
+    .option('--scout-timeout <seconds>', 'Timeout per scout batch in seconds (default: auto — 300s codex, 120s claude)')
+    .option('--max-scout-files <n>', 'Maximum files to scan per scout cycle (default: 60)')
     .option('--no-docs-audit', 'Disable automatic docs-audit cycles')
     .option('--docs-audit-interval <n>', 'Run docs-audit every N cycles (default: 3)')
     .action(async (mode: string | undefined, options: {
@@ -112,6 +114,8 @@ Examples:
       codexUnsafeFullAccess?: boolean;
       includeClaudeMd?: boolean;
       batchTokenBudget?: string;
+      scoutTimeout?: string;
+      maxScoutFiles?: string;
       docsAudit?: boolean;
       docsAuditInterval?: string;
     }) => {

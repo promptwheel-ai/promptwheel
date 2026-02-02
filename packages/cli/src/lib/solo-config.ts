@@ -89,6 +89,10 @@ export interface AutoConfig {
   learningsDecayRate: number;
   /** Token budget per scout batch (default: auto based on backend — 20k codex, 10k claude) */
   batchTokenBudget?: number;
+  /** Timeout per scout batch in ms (default: auto — 300s codex, 120s claude) */
+  scoutTimeoutMs?: number;
+  /** Maximum files to scan per scout cycle (default: 60) */
+  maxFilesPerCycle?: number;
 }
 
 /**

@@ -89,6 +89,8 @@ export interface ScoutRepoOptions {
   protectedFiles?: string[];
   /** Token budget per scout batch (default: auto based on backend) */
   batchTokenBudget?: number;
+  /** Maximum files to scan per cycle (default: 60) */
+  maxFiles?: number;
 }
 
 /**
@@ -203,6 +205,7 @@ export async function scoutRepo(
       backend: opts.backend,
       protectedFiles: opts.protectedFiles,
       batchTokenBudget: opts.batchTokenBudget,
+      maxFiles: opts.maxFiles,
       onProgress: (p) => {
         report({
           phase: 'analyzing',

@@ -78,6 +78,8 @@ export interface ScoutOptions {
   protectedFiles?: string[];
   /** Token budget per batch (default: auto based on backend) */
   batchTokenBudget?: number;
+  /** Maximum files to scan per cycle (default: 60) */
+  maxFiles?: number;
 }
 
 /**

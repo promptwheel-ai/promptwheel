@@ -412,7 +412,9 @@ Optional `.blockspool/config.json`:
     "guidelinesPath": null,
     "minImpactScore": 3,
     "pluginParallel": 2,
-    "batchTokenBudget": 20000
+    "batchTokenBudget": 20000,
+    "scoutTimeoutMs": 300000,
+    "maxFilesPerCycle": 60
   },
   "retention": {
     "maxRuns": 50,
@@ -439,6 +441,8 @@ Optional `.blockspool/config.json`:
 | `minImpactScore` | `3` | Minimum impact score (1-10) for proposals. Filters out low-value lint/cleanup. |
 | `pluginParallel` | `2` | Number of parallel tickets in plugin mode (max: 5). Set to 1 for sequential. |
 | `batchTokenBudget` | auto | Token budget per scout batch. Default: 20k (Codex), 10k (Claude). Higher = fewer batches, faster scouting. |
+| `scoutTimeoutMs` | auto | Timeout per scout batch in ms. Default: 300000 (Codex), 120000 (Claude). |
+| `maxFilesPerCycle` | `60` | Maximum files scanned per scout cycle. Increase for large repos with `--continuous`. |
 
 ---
 

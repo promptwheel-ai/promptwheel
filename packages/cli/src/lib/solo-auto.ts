@@ -562,6 +562,8 @@ export async function runAutoMode(options: {
   codexUnsafeFullAccess?: boolean;
   includeClaudeMd?: boolean;
   batchTokenBudget?: string;
+  scoutTimeout?: string;
+  maxScoutFiles?: string;
   docsAudit?: boolean;
   docsAuditInterval?: string;
 }): Promise<void> {
@@ -776,6 +778,12 @@ export async function runAutoMode(options: {
   const batchTokenBudget = options.batchTokenBudget
     ? parseInt(options.batchTokenBudget, 10)
     : autoConf.batchTokenBudget;
+  const scoutTimeoutMs = options.scoutTimeout
+    ? parseInt(options.scoutTimeout, 10) * 1000
+    : autoConf.scoutTimeoutMs;
+  const maxScoutFiles = options.maxScoutFiles
+    ? parseInt(options.maxScoutFiles, 10)
+    : autoConf.maxFilesPerCycle;
 
   // Load dedup memory (with decay)
   let dedupMemory: DedupEntry[] = loadDedupMemory(repoRoot);
@@ -1089,6 +1097,8 @@ export async function runAutoMode(options: {
           backend: scoutBackend,
           protectedFiles: ['.blockspool/**', ...(options.includeClaudeMd ? [] : ['CLAUDE.md', '.claude/**'])],
           batchTokenBudget,
+          timeoutMs: scoutTimeoutMs,
+          maxFiles: maxScoutFiles,
           onProgress: (progress: ScoutProgress) => {
             const formatted = formatProgress(progress);
             if (formatted !== lastProgress) {

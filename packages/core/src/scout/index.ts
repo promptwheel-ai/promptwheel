@@ -324,7 +324,7 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
       cwd: projectPath,
       include: [scope],
       exclude,
-      maxFiles: 60, // Limit to avoid huge prompts
+      maxFiles: options.maxFiles ?? 60,
     });
 
     if (files.length === 0) {
