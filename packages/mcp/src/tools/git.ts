@@ -13,10 +13,16 @@ export function registerGitTools(server: McpServer, getState: () => SessionManag
     'blockspool_git_setup',
     'Create/checkout a branch for the current ticket. Returns branch name. Use after completing a ticket to prepare for PR creation.',
     {
-      ticketId: z.string().describe('The ticket ID to create a branch for.'),
+      ticketId: z.string().optional().describe('The ticket ID to create a branch for.'),
+      ticket_id: z.string().optional().describe('Alias for ticketId.'),
       baseBranch: z.string().optional().describe('Base branch to branch from (default: main).'),
+      base_branch: z.string().optional().describe('Alias for baseBranch.'),
     },
-    async (params) => {
+    async (raw) => {
+      const params = {
+        ticketId: (raw.ticketId ?? raw.ticket_id)!,
+        baseBranch: raw.baseBranch ?? raw.base_branch,
+      };
       const state = getState();
       state.requireActive(); // ensure session is active
 

@@ -71,10 +71,16 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
     'blockspool_validate_scope',
     'Before committing, send the list of changed files. BlockSpool checks scope enforcement.',
     {
-      ticketId: z.string().describe('The ticket ID being worked on.'),
-      changedFiles: z.array(z.string()).describe('List of file paths that were modified.'),
+      ticketId: z.string().optional().describe('The ticket ID being worked on.'),
+      ticket_id: z.string().optional().describe('Alias for ticketId.'),
+      changedFiles: z.array(z.string()).optional().describe('List of file paths that were modified.'),
+      changed_files: z.array(z.string()).optional().describe('Alias for changedFiles.'),
     },
-    async (params) => {
+    async (raw) => {
+      const params = {
+        ticketId: (raw.ticketId ?? raw.ticket_id)!,
+        changedFiles: (raw.changedFiles ?? raw.changed_files)!,
+      };
       const state = getState();
       state.requireActive();
 
@@ -143,11 +149,18 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
     'blockspool_complete_ticket',
     'Mark a ticket as done. BlockSpool runs QA commands to verify, then records success.',
     {
-      ticketId: z.string().describe('The ticket ID to complete.'),
-      runId: z.string().describe('The run ID from next_ticket.'),
+      ticketId: z.string().optional().describe('The ticket ID to complete.'),
+      ticket_id: z.string().optional().describe('Alias for ticketId.'),
+      runId: z.string().optional().describe('The run ID from next_ticket.'),
+      run_id: z.string().optional().describe('Alias for runId.'),
       summary: z.string().optional().describe('Brief summary of changes made.'),
     },
-    async (params) => {
+    async (raw) => {
+      const params = {
+        ticketId: (raw.ticketId ?? raw.ticket_id)!,
+        runId: (raw.runId ?? raw.run_id)!,
+        summary: raw.summary,
+      };
       const state = getState();
       state.requireActive();
 
@@ -230,11 +243,18 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
     'blockspool_fail_ticket',
     'Mark a ticket as failed with a reason.',
     {
-      ticketId: z.string().describe('The ticket ID that failed.'),
-      runId: z.string().describe('The run ID from next_ticket.'),
-      reason: z.string().describe('Why the ticket failed.'),
+      ticketId: z.string().optional().describe('The ticket ID that failed.'),
+      ticket_id: z.string().optional().describe('Alias for ticketId.'),
+      runId: z.string().optional().describe('The run ID from next_ticket.'),
+      run_id: z.string().optional().describe('Alias for runId.'),
+      reason: z.string().optional().describe('Why the ticket failed.'),
     },
-    async (params) => {
+    async (raw) => {
+      const params = {
+        ticketId: (raw.ticketId ?? raw.ticket_id)!,
+        runId: (raw.runId ?? raw.run_id)!,
+        reason: raw.reason ?? 'Unknown failure',
+      };
       const state = getState();
       state.requireActive();
 
