@@ -63,6 +63,35 @@ export { sleep, normalizeTitle, titleSimilarity, isDuplicateProposal, getDedupli
 export { partitionIntoWaves, buildScoutEscalation } from './wave-scheduling.js';
 
 /**
+ * Balance proposals so test proposals don't dominate the batch.
+ * Keeps at most floor(total * maxTestRatio) test proposals (highest impact first).
+ * If there aren't enough non-test proposals to fill, allows more tests.
+ */
+function balanceProposals<T extends { category: string; impact_score?: number | null }>(
+  proposals: T[],
+  maxTestRatio: number,
+): T[] {
+  const tests = proposals.filter(p => (p.category || '').toLowerCase() === 'test');
+  const nonTests = proposals.filter(p => (p.category || '').toLowerCase() !== 'test');
+
+  const total = proposals.length;
+  const maxTests = Math.floor(total * maxTestRatio);
+
+  if (tests.length <= maxTests) return proposals;
+
+  // Sort tests by impact descending, keep only the top N
+  const sortedTests = [...tests].sort(
+    (a, b) => (b.impact_score ?? 5) - (a.impact_score ?? 5),
+  );
+
+  // Allow more tests if there aren't enough non-tests to fill the batch
+  const allowedTests = Math.max(maxTests, total - nonTests.length);
+  const keptTests = sortedTests.slice(0, allowedTests);
+
+  return [...nonTests, ...keptTests];
+}
+
+/**
  * Run auto work mode - process ready tickets in parallel
  */
 export async function runAutoWorkMode(options: {
@@ -1155,6 +1184,12 @@ export async function runAutoMode(options: {
         dedupMemory = loadDedupMemory(repoRoot);
       }
 
+      // Balance test vs non-test proposals
+      const maxTestRatio = autoConf.maxTestRatio ?? 0.4;
+      const balanced = balanceProposals(approvedProposals, maxTestRatio);
+      approvedProposals.length = 0;
+      approvedProposals.push(...balanced);
+
       if (approvedProposals.length === 0) {
         const reason = duplicateCount > 0
           ? `No new proposals (${duplicateCount} duplicates filtered)`
@@ -1311,6 +1346,7 @@ export async function runAutoMode(options: {
               guidelinesContext: guidelines ? formatGuidelinesForPrompt(guidelines) : undefined,
               learningsContext: ticketLearningsBlock || undefined,
               metadataContext: metadataBlock || undefined,
+              qaRetryWithTestFix: ['refactor', 'perf', 'types'].includes(proposal.category),
               ...(milestoneMode && milestoneBranch ? {
                 baseBranch: milestoneBranch,
                 skipPush: true,

@@ -89,6 +89,10 @@ ${categoryFilter}
    - Prefer "npm test" for test categories
 
 3. Generate at most ${maxProposals} proposals, prioritized by impact.
+
+4. Diversify across categories. Aim for a balanced mix — do not generate
+   more than 2 test proposals per batch. Prioritize refactors and performance
+   improvements. Tests should complement code changes, not dominate.
 ${protectedNote}${strategicFocus}${recentContext}
 
 ## Files to Analyze

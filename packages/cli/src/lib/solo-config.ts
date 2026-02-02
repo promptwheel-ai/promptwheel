@@ -95,6 +95,8 @@ export interface AutoConfig {
   maxFilesPerCycle?: number;
   /** Max parallel scout batches (default: auto — 4 for codex, 3 for claude) */
   scoutConcurrency?: number;
+  /** Max fraction of test proposals per batch (default 0.4) */
+  maxTestRatio?: number;
   /** Per-backend overrides */
   claude?: { scoutConcurrency?: number; batchTokenBudget?: number };
   codex?: { scoutConcurrency?: number; batchTokenBudget?: number };
@@ -108,7 +110,7 @@ export interface AutoConfig {
 export const DEFAULT_AUTO_CONFIG: AutoConfig = {
   allowCategories: ['refactor', 'test', 'docs', 'types', 'perf'],
   blockCategories: ['security', 'deps', 'auth', 'config', 'migration'],
-  minConfidence: 70,
+  minConfidence: 55,
   maxPrs: 3,
   maxFilesPerTicket: 10,
   maxLinesPerTicket: 300,

@@ -147,6 +147,8 @@ export interface RunTicketOptions {
   learningsContext?: string;
   /** Project metadata context to prepend to execution prompt */
   metadataContext?: string;
+  /** If true, retry QA failures by expanding scope to include test files and fixing them */
+  qaRetryWithTestFix?: boolean;
 }
 
 /**
@@ -232,6 +234,42 @@ export { ClaudeExecutionBackend, runClaude, CodexExecutionBackend, KimiExecution
 
 
 
+
+/**
+ * Check if a QA failure is a test failure (vitest/jest/pytest etc.)
+ */
+function isTestFailure(failedStepName: string | undefined): boolean {
+  if (!failedStepName) return false;
+  const lower = failedStepName.toLowerCase();
+  return /test|vitest|jest|pytest|mocha|karma/.test(lower);
+}
+
+/**
+ * Extract test file paths from QA error output
+ */
+function extractTestFilesFromQaOutput(output: string): string[] {
+  const files = new Set<string>();
+  // Match common test file path patterns
+  const patterns = [
+    // vitest/jest: "FAIL src/foo.test.ts" or "❌ src/foo.test.ts"
+    /(?:FAIL|❌|✗)\s+([^\s]+\.(?:test|spec)\.[jt]sx?)/gi,
+    // General file paths ending in .test.* or .spec.*
+    /([a-zA-Z0-9_/.\\-]+\.(?:test|spec)\.[jt]sx?)/g,
+    // Python test files
+    /([a-zA-Z0-9_/.\\-]+test_[a-zA-Z0-9_]+\.py)/g,
+    // __tests__ directory files
+    /([a-zA-Z0-9_/.\\-]+\/__tests__\/[^\s]+\.[jt]sx?)/g,
+  ];
+
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(output)) !== null) {
+      files.add(match[1]);
+    }
+  }
+
+  return [...files];
+}
 
 /**
  * Execute a ticket in isolation with step tracking
@@ -871,18 +909,156 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
           }
         }
 
-        errorParts.push('');
-        errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
-        errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
+        // QA retry with test-fix scope expansion
+        const failedStepName = qaResult.failedAt?.stepName;
+        if (opts.qaRetryWithTestFix && isTestFailure(failedStepName)) {
+          onProgress('QA test failure — retrying with test files in scope...');
 
-        const result = {
-          success: false,
-          branchName,
-          durationMs: Date.now() - startTime,
-          error: errorParts.join('\n'),
-        };
-        await saveRunSummary(result);
-        return result;
+          // Gather error output for test file extraction
+          let qaErrorOutput = '';
+          if (qaDetails) {
+            const failedStepInfo = qaDetails.steps.find(
+              s => s.name === failedStepName && s.status === 'failed'
+            );
+            if (failedStepInfo) {
+              qaErrorOutput = (failedStepInfo.stderrTail || '') + '\n' + (failedStepInfo.stdoutTail || '');
+            }
+          }
+
+          const testFiles = extractTestFilesFromQaOutput(qaErrorOutput);
+          if (testFiles.length > 0) {
+            // Expand allowed_paths to include the test files
+            const expandedPaths = [...new Set([...ticket.allowedPaths, ...testFiles])];
+
+            const retryPrompt = [
+              `Your changes broke these tests. Fix the tests to match the new behavior. Do NOT revert your changes.`,
+              '',
+              'Failed test files:',
+              ...testFiles.map(f => `- ${f}`),
+              '',
+              'Error output:',
+              qaErrorOutput.slice(-2000),
+            ].join('\n');
+
+            const fullRetryPrompt = buildTicketPrompt(
+              { ...ticket, allowedPaths: expandedPaths } as typeof ticket,
+              opts.guidelinesContext,
+              opts.learningsContext,
+              opts.metadataContext,
+            ) + '\n\n' + retryPrompt;
+
+            try {
+              const retryResult = await execBackend.run({
+                worktreePath,
+                prompt: fullRetryPrompt,
+                timeoutMs,
+                verbose,
+                onProgress: verbose ? onProgress : () => {},
+              });
+
+              if (retryResult.success) {
+                // Re-commit
+                await gitExec('git add -A', { cwd: worktreePath });
+                try {
+                  await gitExec(
+                    `git commit -m "fix: update tests for ${ticket.title.replace(/"/g, '\\"')}"`,
+                    { cwd: worktreePath },
+                  );
+                } catch {
+                  // No new changes to commit — that's fine
+                }
+
+                // Re-run QA
+                const retryQaResult = await runQa(
+                  { db: adapter, exec, logger },
+                  { projectId: project.id, repoRoot: worktreePath, config: qaConfig },
+                );
+
+                if (retryQaResult.status === 'success') {
+                  onProgress('QA retry succeeded after fixing tests');
+                  await markStep('qa', 'success', { metadata: { qaRunId: retryQaResult.runId, qaRetried: true } });
+                  // Fall through to push/PR steps below
+                } else {
+                  // Second failure — give up
+                  errorParts.push('');
+                  errorParts.push('(QA retry with test-fix also failed)');
+                  errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
+                  errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
+
+                  const result = {
+                    success: false,
+                    branchName,
+                    durationMs: Date.now() - startTime,
+                    error: errorParts.join('\n'),
+                    failureReason: 'qa_failed' as FailureReason,
+                  };
+                  await saveRunSummary(result);
+                  return result;
+                }
+              } else {
+                // Agent retry failed
+                errorParts.push('');
+                errorParts.push('(QA retry agent execution failed)');
+                errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
+                errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
+
+                const result = {
+                  success: false,
+                  branchName,
+                  durationMs: Date.now() - startTime,
+                  error: errorParts.join('\n'),
+                  failureReason: 'qa_failed' as FailureReason,
+                };
+                await saveRunSummary(result);
+                return result;
+              }
+            } catch {
+              // Retry mechanism failed — fall through to original error
+              errorParts.push('');
+              errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
+              errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
+
+              const result = {
+                success: false,
+                branchName,
+                durationMs: Date.now() - startTime,
+                error: errorParts.join('\n'),
+                failureReason: 'qa_failed' as FailureReason,
+              };
+              await saveRunSummary(result);
+              return result;
+            }
+          } else {
+            // No test files found — can't retry
+            errorParts.push('');
+            errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
+            errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
+
+            const result = {
+              success: false,
+              branchName,
+              durationMs: Date.now() - startTime,
+              error: errorParts.join('\n'),
+              failureReason: 'qa_failed' as FailureReason,
+            };
+            await saveRunSummary(result);
+            return result;
+          }
+        } else {
+          errorParts.push('');
+          errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
+          errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
+
+          const result = {
+            success: false,
+            branchName,
+            durationMs: Date.now() - startTime,
+            error: errorParts.join('\n'),
+            failureReason: 'qa_failed' as FailureReason,
+          };
+          await saveRunSummary(result);
+          return result;
+        }
       }
 
       await markStep('qa', 'success', { metadata: { qaRunId: qaResult.runId } });

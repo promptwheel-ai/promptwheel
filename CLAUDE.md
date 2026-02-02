@@ -38,6 +38,8 @@ blockspool nudge "focus on auth"               # Steer a running session
 - **Balanced continuous mode** — deep architectural scan every 5 cycles
 - **Live steering** (`nudge`) — add hints mid-run, consumed in next scout cycle
 - **Guidelines context** — loads CLAUDE.md (Claude) or AGENTS.md (Codex) into every prompt; auto-creates baseline if missing; re-reads every 10 cycles
+- **Scout diversification** — caps test proposals per batch (`maxTestRatio`, default 0.4) to ensure a balanced mix of refactors, perf, and tests
+- **QA retry with test fix** — when a refactor/perf/types ticket breaks tests, retries once with test files in scope
 
 ## How It Works
 

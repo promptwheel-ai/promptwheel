@@ -181,6 +181,8 @@ Final Summary
 | **Credential Detection** | Blocks writes containing AWS keys, PEM keys, GitHub PATs, Slack tokens, DB connection strings, JWTs, and `.env` secrets |
 | **Auto-Prune** | Cleans up stale worktrees, run folders, history, artifacts, and archives on every session start |
 | **Guidelines Context** | Loads CLAUDE.md (Claude) or AGENTS.md (Codex) into every prompt; auto-creates baseline if missing |
+| **Scout Diversification** | Balances proposal categories — caps test proposals per batch (`maxTestRatio`, default 0.4) so refactors and perf improvements aren't crowded out |
+| **QA Retry with Test Fix** | When a refactor/perf/types ticket breaks tests, automatically retries once — expanding scope to include test files and fixing them without reverting changes |
 
 ---
 
@@ -447,7 +449,8 @@ Optional `.blockspool/config.json`:
 {
   "auto": {
     "defaultScope": "src",
-    "minConfidence": 70,
+    "minConfidence": 55,
+    "maxTestRatio": 0.4,
     "maxPrs": 20,
     "draftPrs": true,
     "docsAudit": true,
@@ -475,7 +478,8 @@ Optional `.blockspool/config.json`:
 | Field | Default | Description |
 |-------|---------|-------------|
 | `defaultScope` | `"**"` | Glob scope for scanning. CLI also searches `src`, `lib`, `app`, `packages`, etc. |
-| `minConfidence` | `70` | Minimum confidence threshold |
+| `minConfidence` | `55` | Minimum confidence threshold |
+| `maxTestRatio` | `0.4` | Max fraction of test proposals per batch. Prevents test-heavy batches; remaining slots go to refactors/perf. |
 | `maxPrs` | `3` | Max PRs per run (20 in continuous mode) |
 | `draftPrs` | `true` | Create draft PRs |
 | `docsAudit` | `true` | Set `false` to disable auto docs-audit |
@@ -586,6 +590,11 @@ Run `blockspool --codex --codex-model <name>`. If your saved model is no longer 
 - Only touches files in scoped directories
 - Failed tickets are automatically **blocked**, not merged
 - Trust ladder limits to safe categories
+- **QA retry with test fix** — if a refactor breaks tests, BlockSpool retries once by expanding scope to include test files and fixing them (without reverting the refactor)
+
+### Why does it keep generating mostly test proposals?
+
+Earlier versions could produce test-heavy batches. v0.5.24 adds **scout diversification** — the scout prompt limits test proposals to 2 per batch, and `maxTestRatio` (default 0.4) enforces a category balance at the filter layer. Refactors and perf improvements get priority.
 
 ### Can I use local models like Qwen, DeepSeek, or Llama?
 
@@ -614,6 +623,6 @@ Apache 2.0 - See [LICENSE](./LICENSE)
 ---
 
 <p align="center">
-  <b>BlockSpool v0.5.23</b><br>
+  <b>BlockSpool v0.5.24</b><br>
   <i>Set it. Forget it. Merge the PRs.</i>
 </p>
