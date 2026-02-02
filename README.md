@@ -134,7 +134,7 @@ BlockSpool Auto
 
   Mode: Continuous (Ctrl+C to stop gracefully)
   Time budget: 8 hours (until 6:00 AM)
-  Categories: refactor, test, docs, types, perf
+  Categories: refactor, docs, types, perf, security, fix, cleanup
   PRs: ready-for-review
   Milestone mode: batch size 10
 
@@ -181,7 +181,7 @@ Final Summary
 | **Credential Detection** | Blocks writes containing AWS keys, PEM keys, GitHub PATs, Slack tokens, DB connection strings, JWTs, and `.env` secrets |
 | **Auto-Prune** | Cleans up stale worktrees, run folders, history, artifacts, and archives on every session start |
 | **Guidelines Context** | Loads CLAUDE.md (Claude) or AGENTS.md (Codex) into every prompt; auto-creates baseline if missing |
-| **Scout Diversification** | Balances proposal categories — caps test proposals per batch (`maxTestRatio`, default 0.4) so refactors and perf improvements aren't crowded out |
+| **Scout Diversification** | Test proposals excluded by default (`--tests` to opt in); when enabled, hard-capped by `maxTestRatio` (default 0.4) |
 | **QA Retry with Test Fix** | When a refactor/perf/types ticket breaks tests, automatically retries once — expanding scope to include test files and fixing them without reverting changes |
 
 ---
@@ -564,7 +564,7 @@ BlockSpool adds:
 - **Milestone batching** (coherent PRs, not 50 tiny ones)
 - **Parallel execution** with conflict-aware scheduling
 - **Deduplication** (won't recreate similar work)
-- **Trust ladder** (all categories by default, `--safe` to restrict)
+- **Trust ladder** (tests excluded by default; `--tests` to include; `--safe` to restrict)
 - **Scope enforcement** (sandboxes each ticket to specific paths)
 
 ### Can I use it without an API key?
@@ -593,12 +593,12 @@ Run `blockspool --codex --codex-model <name>`. If your saved model is no longer 
 - All changes are **draft PRs** by default
 - Only touches files in scoped directories
 - Failed tickets are automatically **blocked**, not merged
-- Trust ladder controls approved categories (all by default, `--safe` to restrict)
+- Trust ladder controls approved categories (tests opt-in via `--tests`, `--safe` to restrict)
 - **QA retry with test fix** — if a refactor breaks tests, BlockSpool retries once by expanding scope to include test files and fixing them (without reverting the refactor)
 
 ### Why does it keep generating mostly test proposals?
 
-Earlier versions could produce test-heavy batches. v0.5.27 adds **scout diversification** — the scout prompt limits test proposals to 2 per batch, and `maxTestRatio` (default 0.4) enforces a category balance at the filter layer. Refactors and perf improvements get priority.
+Test proposals are excluded by default. Use `blockspool --tests` to opt in, or `--formula test-coverage` for a dedicated test-writing run. When tests are enabled, the scout prompt limits them to 1 per batch and `maxTestRatio` (default 0.4) hard-caps them at the filter layer.
 
 ### Can I use local models like Qwen, DeepSeek, or Llama?
 
