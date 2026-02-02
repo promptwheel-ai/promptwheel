@@ -465,7 +465,6 @@ export async function runAutoMode(options: {
   const batchSize = options.batchSize ? parseInt(options.batchSize, 10) : undefined;
   const milestoneMode = batchSize !== undefined && batchSize > 0;
 
-  const defaultScopes = ['src', 'lib', 'packages', 'app', 'tests', 'scripts'];
   const userScope = options.scope || activeFormula?.scope;
   let scopeIndex = 0;
 
@@ -715,14 +714,24 @@ export async function runAutoMode(options: {
 
   const getNextScope = (): string => {
     if (userScope) return userScope;
-    // First cycle: broad scan. Subsequent cycles: rotate through subdirectories for depth.
+    // First cycle: broad scan. Subsequent cycles: dive into specific modules from the codebase index.
     if (scopeIndex === 0) {
       scopeIndex++;
       return '**';
     }
-    const scope = defaultScopes[(scopeIndex - 1) % defaultScopes.length];
+    // Use codebase index modules sorted by file count (largest first) for deeper scans
+    const modulePaths = codebaseIndex?.modules
+      ?.filter(m => m.purpose !== 'tests' && m.purpose !== 'config')
+      ?.sort((a, b) => b.file_count - a.file_count)
+      ?.map(m => m.path + '/**') ?? [];
+    if (modulePaths.length > 0) {
+      const scope = modulePaths[(scopeIndex - 1) % modulePaths.length];
+      scopeIndex++;
+      return scope;
+    }
+    // Fallback: re-scan broad
     scopeIndex++;
-    return scope;
+    return '**';
   };
 
   const shouldContinue = (): boolean => {
