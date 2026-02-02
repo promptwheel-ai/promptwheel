@@ -594,7 +594,7 @@ Run `blockspool --codex --codex-model <name>`. If your saved model is no longer 
 
 ### Why does it keep generating mostly test proposals?
 
-Earlier versions could produce test-heavy batches. v0.5.24 adds **scout diversification** — the scout prompt limits test proposals to 2 per batch, and `maxTestRatio` (default 0.4) enforces a category balance at the filter layer. Refactors and perf improvements get priority.
+Earlier versions could produce test-heavy batches. v0.5.25 adds **scout diversification** — the scout prompt limits test proposals to 2 per batch, and `maxTestRatio` (default 0.4) enforces a category balance at the filter layer. Refactors and perf improvements get priority.
 
 ### Can I use local models like Qwen, DeepSeek, or Llama?
 
@@ -623,6 +623,6 @@ Apache 2.0 - See [LICENSE](./LICENSE)
 ---
 
 <p align="center">
-  <b>BlockSpool v0.5.24</b><br>
+  <b>BlockSpool v0.5.25</b><br>
   <i>Set it. Forget it. Merge the PRs.</i>
 </p>
