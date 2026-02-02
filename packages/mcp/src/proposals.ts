@@ -197,7 +197,15 @@ export async function filterAndCreateTickets(
     .sort((a, b) => b.score - a.score)
     .slice(0, s.max_proposals_per_scout);
 
-  const accepted = scored.map(s => s.proposal);
+  // Step 5b: Balance test vs non-test proposals (maxTestRatio = 0.4)
+  const MAX_TEST_RATIO = 0.4;
+  const scoredProposals = scored.map(s => s.proposal);
+  const testProposals = scoredProposals.filter(p => (p.category || '').toLowerCase() === 'test');
+  const nonTestProposals = scoredProposals.filter(p => (p.category || '').toLowerCase() !== 'test');
+  const maxTests = Math.floor(scoredProposals.length * MAX_TEST_RATIO);
+  const accepted = testProposals.length <= maxTests
+    ? scoredProposals
+    : [...nonTestProposals, ...testProposals.slice(0, Math.max(maxTests, scoredProposals.length - nonTestProposals.length))];
 
   // Step 6: Create tickets
   const ticketInputs = accepted.map(p => ({
