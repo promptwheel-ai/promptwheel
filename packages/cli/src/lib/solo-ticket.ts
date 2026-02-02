@@ -149,6 +149,10 @@ export interface RunTicketOptions {
   metadataContext?: string;
   /** If true, retry QA failures by expanding scope to include test files and fixing them */
   qaRetryWithTestFix?: boolean;
+  /** Scout confidence score (0-100) — used to add planning preamble for complex changes */
+  confidence?: number;
+  /** Estimated complexity from scout — used to add planning preamble */
+  complexity?: string;
 }
 
 /**
@@ -170,8 +174,24 @@ export type StepName = typeof EXECUTE_STEPS[number]['name'];
 /**
  * Build the prompt for Claude from a ticket
  */
-export function buildTicketPrompt(ticket: NonNullable<Awaited<ReturnType<typeof tickets.getById>>>, guidelinesContext?: string, learningsContext?: string, metadataContext?: string): string {
+export function buildTicketPrompt(ticket: NonNullable<Awaited<ReturnType<typeof tickets.getById>>>, guidelinesContext?: string, learningsContext?: string, metadataContext?: string, opts?: { confidence?: number; complexity?: string }): string {
   const parts: string[] = [];
+
+  // Planning preamble for uncertain or complex changes
+  const confidence = opts?.confidence;
+  const complexity = opts?.complexity;
+  if ((confidence !== undefined && confidence < 50) || complexity === 'moderate' || complexity === 'complex') {
+    parts.push(
+      '## Approach — This is a complex change',
+      '',
+      `The automated analysis flagged this as uncertain (confidence: ${confidence ?? '?'}%). Before writing code:`,
+      '1. Read all relevant files to understand the full context',
+      '2. Identify all touch points and potential side effects',
+      '3. Write out your implementation plan before making changes',
+      '4. Implement incrementally, verifying at each step',
+      '',
+    );
+  }
 
   if (guidelinesContext) {
     parts.push(guidelinesContext, '');
@@ -464,7 +484,7 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
     // Step 2: Run agent
     await markStep('agent', 'started');
 
-    const prompt = buildTicketPrompt(ticket, opts.guidelinesContext, opts.learningsContext, opts.metadataContext);
+    const prompt = buildTicketPrompt(ticket, opts.guidelinesContext, opts.learningsContext, opts.metadataContext, { confidence: opts.confidence, complexity: opts.complexity });
     const execBackend: ExecutionBackend = opts.executionBackend ?? new ClaudeExecutionBackend();
 
     const claudeResult = await execBackend.run({

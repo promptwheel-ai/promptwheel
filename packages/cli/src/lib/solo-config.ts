@@ -110,7 +110,7 @@ export interface AutoConfig {
 export const DEFAULT_AUTO_CONFIG: AutoConfig = {
   allowCategories: ['refactor', 'docs', 'types', 'perf', 'security', 'fix', 'cleanup'],
   blockCategories: ['deps', 'auth', 'config', 'migration'],
-  minConfidence: 55,
+  minConfidence: 0,
   maxPrs: 3,
   maxFilesPerTicket: 10,
   maxLinesPerTicket: 300,

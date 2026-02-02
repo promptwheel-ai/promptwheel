@@ -190,7 +190,7 @@ Final Summary
 
 1. **Scout** — Analyzes your codebase for improvement opportunities
 2. **Propose** — Creates tickets with confidence and impact scores
-3. **Filter** — Auto-approves based on category, confidence, and dedup
+3. **Filter** — Auto-approves based on category, impact score, and dedup
 4. **Execute** — Runs in isolated git worktrees (parallel)
 5. **Merge** — Merges ticket branch into milestone branch (conflict-aware scheduling)
 6. **PR** — Creates one milestone PR per batch
@@ -401,7 +401,7 @@ prompt: |
 | `description` | What the formula does |
 | `categories` | Proposal types: `security`, `test`, `types`, `refactor`, `perf`, `docs`, `cleanup` |
 | `scope` | Directory to scan (default: `src`) |
-| `min_confidence` | Minimum confidence threshold 0-100 |
+| `min_confidence` | Confidence hint for scout (low values trigger planning preamble during execution) |
 | `max_prs` | Max PRs to create |
 | `exclude` | Glob patterns to skip (e.g., `CLAUDE.md`, `vendor/**`) |
 | `prompt` | Instructions for the scout |
@@ -453,7 +453,6 @@ Optional `.blockspool/config.json`:
 {
   "auto": {
     "defaultScope": "src",
-    "minConfidence": 55,
     "maxTestRatio": 0.4,
     "maxPrs": 20,
     "draftPrs": true,
@@ -482,7 +481,6 @@ Optional `.blockspool/config.json`:
 | Field | Default | Description |
 |-------|---------|-------------|
 | `defaultScope` | `"**"` | Glob scope for scanning. CLI also searches `src`, `lib`, `app`, `packages`, etc. |
-| `minConfidence` | `55` | Minimum confidence threshold |
 | `maxTestRatio` | `0.4` | Max fraction of test proposals per batch. Prevents test-heavy batches; remaining slots go to refactors/perf. |
 | `maxPrs` | `3` | Max PRs per run (20 in continuous mode) |
 | `draftPrs` | `true` | Create draft PRs |
@@ -627,6 +625,6 @@ Apache 2.0 - See [LICENSE](./LICENSE)
 ---
 
 <p align="center">
-  <b>BlockSpool v0.5.28</b><br>
+  <b>BlockSpool v0.5.29</b><br>
   <i>Set it. Forget it. Merge the PRs.</i>
 </p>

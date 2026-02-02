@@ -98,14 +98,14 @@ Terminal states: DONE, BLOCKED_NEEDS_HUMAN, FAILED_BUDGET, FAILED_VALIDATION, FA
 
 Built-in formulas customize scout behavior:
 
-| Formula | Description | Categories | Confidence |
-|---------|-------------|------------|------------|
-| `security-audit` | OWASP vulnerabilities | security | 80 |
-| `test-coverage` | Missing unit tests | test | 70 |
-| `type-safety` | Remove any/unknown | types | 75 |
-| `cleanup` | Dead code, unused imports | refactor | 85 |
-| `deep` | Architecture review | refactor, perf, security | 60 |
-| `docs` | Missing JSDoc | docs | 70 |
+| Formula | Description | Categories |
+|---------|-------------|------------|
+| `security-audit` | OWASP vulnerabilities | security |
+| `test-coverage` | Missing unit tests | test |
+| `type-safety` | Remove any/unknown | types |
+| `cleanup` | Dead code, unused imports | refactor |
+| `deep` | Architecture review | refactor, perf, security |
+| `docs` | Missing JSDoc | docs |
 
 ### Custom Formulas
 
@@ -114,7 +114,7 @@ Create `.blockspool/formulas/<name>.yaml`:
 ```yaml
 description: Find and fix error handling issues
 categories: [refactor, security]
-min_confidence: 75
+min_confidence: 75  # hint only — does not filter proposals
 risk_tolerance: medium
 prompt: |
   Find functions with missing error handling.

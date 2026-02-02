@@ -336,8 +336,8 @@ describe('DEFAULT_AUTO_CONFIG', () => {
     expect(DEFAULT_AUTO_CONFIG.blockCategories).not.toContain('security');
   });
 
-  it('has minConfidence of 55', () => {
-    expect(DEFAULT_AUTO_CONFIG.minConfidence).toBe(55);
+  it('has minConfidence of 0', () => {
+    expect(DEFAULT_AUTO_CONFIG.minConfidence).toBe(0);
   });
 
   it('has maxPrs of 3', () => {

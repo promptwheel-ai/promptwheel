@@ -63,7 +63,6 @@ Examples:
     .option('--dry-run', 'Show what would be done without making changes')
     .option('--scope <path>', 'Directory to scout (default: src, rotates in continuous mode)')
     .option('--max-prs <n>', 'Maximum PRs to create (default: 3, or 20 in continuous mode)')
-    .option('--min-confidence <n>', 'Minimum confidence for auto-approve (default: 55)')
     .option('--safe', 'Restrict to safe categories only (refactor, docs, types, perf)')
     .option('--tests', 'Include test proposals (excluded by default)')
     .option('--no-draft', 'Create regular PRs instead of drafts')

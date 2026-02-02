@@ -173,7 +173,7 @@ describe('PROPOSALS_REVIEWED creates tickets from reviewed proposals', () => {
     expect(s.pending_proposals).toBeNull();
   });
 
-  it('filters out proposals whose confidence was lowered below threshold', async () => {
+  it('filters out proposals whose impact was lowered below threshold', async () => {
     const s = run.require();
     s.phase = 'SCOUT';
     s.pending_proposals = [
@@ -184,13 +184,13 @@ describe('PROPOSALS_REVIEWED creates tickets from reviewed proposals', () => {
     const result = await processEvent(run, db, 'PROPOSALS_REVIEWED', {
       reviewed_proposals: [
         { title: 'Will survive', confidence: 80, impact_score: 7 },
-        { title: 'Will be filtered', confidence: 30, impact_score: 2 }, // below min_confidence=70
+        { title: 'Will be filtered', confidence: 30, impact_score: 1 }, // below min_impact=3
       ],
     });
 
     expect(result.phase_changed).toBe(true);
     expect(result.new_phase).toBe('NEXT_TICKET');
-    // Only 1 ticket created (the other was filtered)
+    // Only 1 ticket created (the other was filtered by impact score)
     expect(result.message).toContain('Created 1');
   });
 
@@ -199,12 +199,13 @@ describe('PROPOSALS_REVIEWED creates tickets from reviewed proposals', () => {
     s.phase = 'SCOUT';
     s.scout_retries = 0;
     s.pending_proposals = [
-      makeProposal({ title: 'Weak proposal', confidence: 85 }),
+      makeProposal({ title: 'Weak proposal', confidence: 85, impact_score: 5 }),
     ];
 
+    // Use low impact score to trigger rejection (confidence no longer filters)
     const result = await processEvent(run, db, 'PROPOSALS_REVIEWED', {
       reviewed_proposals: [
-        { title: 'Weak proposal', confidence: 10 }, // lowered below threshold
+        { title: 'Weak proposal', confidence: 10, impact_score: 1 }, // below min_impact=3
       ],
     });
 

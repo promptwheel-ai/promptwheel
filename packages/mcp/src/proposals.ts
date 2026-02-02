@@ -115,16 +115,8 @@ export async function filterAndCreateTickets(
     valid.push(normalizeProposal(raw));
   }
 
-  // Step 2: Confidence filter
-  const afterConfidence = valid.filter(p => {
-    if (p.confidence < s.min_confidence) {
-      rejected.push({ proposal: p, reason: `Confidence ${p.confidence} below min ${s.min_confidence}` });
-      return false;
-    }
-    return true;
-  });
-
-  // Step 2b: Impact score filter
+  // Step 2: Impact score filter (confidence filter removed — confidence is now an execution hint, not a gate)
+  const afterConfidence = valid; // pass-through for backwards compat with event logging
   const minImpact = s.min_impact_score ?? 3;
   const afterImpact = afterConfidence.filter(p => {
     const impact = p.impact_score ?? 5;
@@ -224,6 +216,10 @@ export async function filterAndCreateTickets(
     category: p.category as TicketCategory,
     allowedPaths: p.allowed_paths,
     verificationCommands: p.verification_commands,
+    metadata: {
+      scoutConfidence: p.confidence,
+      estimatedComplexity: p.estimated_complexity,
+    },
   }));
 
   let createdIds: string[] = [];

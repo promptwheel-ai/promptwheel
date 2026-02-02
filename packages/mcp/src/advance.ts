@@ -1046,8 +1046,27 @@ function buildQaPrompt(ticket: { title: string; verificationCommands: string[] }
   ].join('\n');
 }
 
+function buildPlanningPreamble(ticket: { metadata?: Record<string, unknown> | null }): string {
+  const meta = ticket.metadata as Record<string, unknown> | null | undefined;
+  const confidence = typeof meta?.scoutConfidence === 'number' ? meta.scoutConfidence : undefined;
+  const complexity = typeof meta?.estimatedComplexity === 'string' ? meta.estimatedComplexity : undefined;
+  if ((confidence !== undefined && confidence < 50) || complexity === 'moderate' || complexity === 'complex') {
+    return [
+      '## Approach — This is a complex change',
+      '',
+      `The automated analysis flagged this as uncertain (confidence: ${confidence ?? '?'}%). Before writing code:`,
+      '1. Read all relevant files to understand the full context',
+      '2. Identify all touch points and potential side effects',
+      '3. Write out your implementation plan before making changes',
+      '4. Implement incrementally, verifying at each step',
+      '',
+    ].join('\n') + '\n';
+  }
+  return '';
+}
+
 function buildInlineTicketPrompt(
-  ticket: { id: string; title: string; description: string | null; allowedPaths: string[]; verificationCommands: string[] },
+  ticket: { id: string; title: string; description: string | null; allowedPaths: string[]; verificationCommands: string[]; metadata?: Record<string, unknown> | null },
   constraints: AdvanceConstraints,
   guidelinesBlock: string,
   metadataBlock: string,
@@ -1061,9 +1080,12 @@ function buildInlineTicketPrompt(
     ? constraints.required_commands.map(c => `\`\`\`bash\n${c}\n\`\`\``).join('\n')
     : '```bash\nnpm test\n```';
 
+  const planningPreamble = buildPlanningPreamble(ticket);
+
   return [
     `# BlockSpool Ticket: ${ticket.title}`,
     '',
+    planningPreamble,
     guidelinesBlock,
     metadataBlock,
     ticket.description ?? '',

@@ -124,17 +124,17 @@ describe('filterAndCreateTickets — schema validation', () => {
 // Confidence filter
 // ---------------------------------------------------------------------------
 
-describe('filterAndCreateTickets — confidence filter', () => {
-  it('rejects proposals below min_confidence', async () => {
+describe('filterAndCreateTickets — confidence filter (removed)', () => {
+  it('accepts proposals regardless of confidence (confidence is now an execution hint)', async () => {
     const result = await filterAndCreateTickets(run, db, [
       makeProposal({ confidence: 50, title: 'Low confidence' }),
     ]);
 
-    expect(result.accepted).toHaveLength(0);
-    expect(result.rejected.some(r => r.reason.includes('Confidence'))).toBe(true);
+    expect(result.accepted).toHaveLength(1);
+    expect(result.rejected.some(r => r.reason.includes('Confidence'))).toBe(false);
   });
 
-  it('accepts proposals at min_confidence', async () => {
+  it('accepts proposals at any confidence level', async () => {
     const result = await filterAndCreateTickets(run, db, [
       makeProposal({ confidence: 70, title: 'At threshold' }),
     ]);
@@ -245,7 +245,7 @@ describe('filterAndCreateTickets — cap and scoring', () => {
         title,
         confidence: 80 + i,
         impact_score: 5 + (i % 5),
-        category: i % 2 === 0 ? 'refactor' : 'test',
+        category: 'refactor',
       }),
     );
 
@@ -363,10 +363,11 @@ describe('processEvent SCOUT_OUTPUT', () => {
     const s = run.require();
     s.phase = 'SCOUT';
     s.scout_retries = 0;
-    s.pending_proposals = [makeProposal({ confidence: 10, title: 'Too low' })];
+    // Use low impact score (below min_impact=3) to trigger rejection, since confidence no longer filters
+    s.pending_proposals = [makeProposal({ impact_score: 1, title: 'Too low impact' })];
 
     const result = await processEvent(run, db, 'PROPOSALS_REVIEWED', {
-      reviewed_proposals: [{ title: 'Too low', confidence: 10 }],
+      reviewed_proposals: [{ title: 'Too low impact', confidence: 85, impact_score: 1 }],
     });
 
     expect(result.phase_changed).toBe(false);
@@ -377,10 +378,11 @@ describe('processEvent SCOUT_OUTPUT', () => {
     const s = run.require();
     s.phase = 'SCOUT';
     s.scout_retries = 2;
-    s.pending_proposals = [makeProposal({ confidence: 10, title: 'Too low' })];
+    // Use low impact score to trigger rejection
+    s.pending_proposals = [makeProposal({ impact_score: 1, title: 'Too low impact' })];
 
     const result = await processEvent(run, db, 'PROPOSALS_REVIEWED', {
-      reviewed_proposals: [{ title: 'Too low', confidence: 10 }],
+      reviewed_proposals: [{ title: 'Too low impact', confidence: 85, impact_score: 1 }],
     });
 
     expect(result.phase_changed).toBe(true);

@@ -569,7 +569,6 @@ export async function runAutoMode(options: {
   }
   console.log(chalk.gray(`  Scope: ${userScope || (isContinuous ? 'rotating' : 'auto')}`));
   console.log(chalk.gray(`  Max PRs: ${maxPrs}`));
-  console.log(chalk.gray(`  Min confidence: ${minConfidence}%`));
   console.log(chalk.gray(`  Categories: ${initialCategories.allow.join(', ')}`));
   console.log(chalk.gray(`  Draft PRs: ${useDraft ? 'yes' : 'no'}`));
   if (milestoneMode) {
@@ -1033,7 +1032,7 @@ export async function runAutoMode(options: {
           path: scoutPath,
           scope,
           maxProposals: 20,
-          minConfidence: Math.max((cycleFormula?.minConfidence ?? minConfidence) - 20, 30),
+          minConfidence: 20,
           model: options.scoutBackend === 'codex' ? undefined : (options.eco ? 'sonnet' : (cycleFormula?.model ?? 'opus')),
           customPrompt: effectivePrompt,
           autoApprove: false,
@@ -1209,10 +1208,6 @@ export async function runAutoMode(options: {
         }
         if (!allowCategories.some(allowed => category.includes(allowed))) {
           console.log(chalk.gray(`  ✗ Category not allowed (${category}): ${p.title}`));
-          return false;
-        }
-        if (confidence < minConfidence) {
-          console.log(chalk.gray(`  ✗ Low confidence (${confidence}% < ${minConfidence}%): ${p.title}`));
           return false;
         }
         return true;
@@ -1435,6 +1430,8 @@ export async function runAutoMode(options: {
               learningsContext: ticketLearningsBlock || undefined,
               metadataContext: metadataBlock || undefined,
               qaRetryWithTestFix: ['refactor', 'perf', 'types'].includes(proposal.category),
+              confidence: proposal.confidence,
+              complexity: proposal.estimated_complexity,
               ...(milestoneMode && milestoneBranch ? {
                 baseBranch: milestoneBranch,
                 skipPush: true,
