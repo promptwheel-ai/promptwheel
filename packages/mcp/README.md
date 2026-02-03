@@ -175,4 +175,4 @@ The advance engine automatically loads project guidelines and prepends them to s
 - **Codex runs** search for `AGENTS.md` first, then fall back to `CLAUDE.md`
 - Loaded fresh on every `advance()` call (MCP sessions are stateless between calls)
 - Wrapped in `<project-guidelines>` XML tags
-- Truncated to 4000 characters if needed
+- Full file content injected (no truncation)

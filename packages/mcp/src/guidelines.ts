@@ -22,7 +22,6 @@ const CLAUDE_PATHS = ['CLAUDE.md'];
 
 const CODEX_PATHS = ['AGENTS.md'];
 
-const MAX_CHARS = 4000;
 
 export interface GuidelinesOptions {
   backend?: GuidelinesBackend;
@@ -51,10 +50,7 @@ function readGuidelinesFile(repoRoot: string, rel: string): ProjectGuidelines | 
   const full = path.join(repoRoot, rel);
   if (!fs.existsSync(full)) return null;
   try {
-    let content = fs.readFileSync(full, 'utf-8');
-    if (content.length > MAX_CHARS) {
-      content = content.slice(0, MAX_CHARS) + '\n\n[truncated]';
-    }
+    const content = fs.readFileSync(full, 'utf-8');
     return { content, source: rel, loadedAt: Date.now() };
   } catch {
     return null;

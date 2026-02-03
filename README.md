@@ -352,7 +352,7 @@ blockspool --no-docs-audit
 blockspool --formula docs-audit
 ```
 
-**Guidelines context injection:** BlockSpool automatically loads your project guidelines and injects them into every scout and execution prompt, so agents follow your conventions. For Claude runs it searches for `CLAUDE.md`; for Codex runs it searches for `AGENTS.md`. If the preferred file isn't found, it falls back to the other. If neither exists, a baseline is auto-generated from your `package.json` (disable with `"autoCreateGuidelines": false`). The file is re-read periodically during long runs (default: every 10 cycles) to pick up edits. Content is truncated to 4000 chars if needed.
+**Guidelines context injection:** BlockSpool automatically loads your project guidelines and injects them into every scout and execution prompt, so agents follow your conventions. For Claude runs it searches for `CLAUDE.md`; for Codex runs it searches for `AGENTS.md`. If the preferred file isn't found, it falls back to the other. If neither exists, a baseline is auto-generated from your `package.json` (disable with `"autoCreateGuidelines": false`). The file is re-read periodically during long runs (default: every 10 cycles) to pick up edits. The full file content is injected without truncation.
 
 | Backend | Primary | Fallback |
 |---------|---------|----------|
