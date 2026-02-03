@@ -28,7 +28,7 @@ program.addCommand(soloCommand);
 
 // Detect if argv[2] is a known solo subcommand name — if so, lift it.
 // Otherwise, treat everything as flags for `auto`.
-const knownSubs = new Set(soloCommand.commands.map(c => c.name()));
+const knownSubs = new Set(soloCommand.commands.flatMap(c => [c.name(), ...c.aliases()]));
 const firstArg = process.argv[2];
 const isSubcommand = firstArg && knownSubs.has(firstArg) && firstArg !== 'solo';
 

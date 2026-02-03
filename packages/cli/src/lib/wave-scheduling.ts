@@ -2,25 +2,32 @@
  * Wave scheduling utilities for conflict-free parallel execution.
  */
 
-import { pathsOverlap } from './solo-utils.js';
+import { pathsOverlap, directoriesOverlap } from './solo-utils.js';
 import type { CodebaseIndex } from './codebase-index.js';
+import type { SectorState } from './sectors.js';
 
 /**
  * Partition proposals into conflict-free waves.
  * Proposals with overlapping file paths go into separate waves
  * so they run sequentially, avoiding merge conflicts.
  */
-export function partitionIntoWaves<T extends { files: string[] }>(proposals: T[]): T[][] {
+export function partitionIntoWaves<T extends { files: string[]; category?: string }>(proposals: T[]): T[][] {
   const waves: T[][] = [];
 
   for (const proposal of proposals) {
     let placed = false;
     for (const wave of waves) {
-      const conflicts = wave.some(existing =>
-        existing.files.some(fA =>
+      const conflicts = wave.some(existing => {
+        // Direct file path overlap
+        if (existing.files.some(fA =>
           proposal.files.some(fB => pathsOverlap(fA, fB))
-        )
-      );
+        )) return true;
+        // Semantic: same category + overlapping directories
+        if (existing.category && proposal.category
+            && existing.category === proposal.category
+            && directoriesOverlap(existing.files, proposal.files)) return true;
+        return false;
+      });
       if (!conflicts) {
         wave.push(proposal);
         placed = true;
@@ -43,6 +50,7 @@ export function buildScoutEscalation(
   retryCount: number,
   scoutedDirs: string[],
   codebaseIndex: CodebaseIndex | null,
+  sectorState?: SectorState,
 ): string {
   const parts = [
     '## Previous Attempts Found Nothing — Fresh Approach Required',
@@ -66,6 +74,23 @@ export function buildScoutEscalation(
         unexplored.push(mod.path);
       }
     }
+  }
+
+  // Sort unexplored by sector history when available
+  if (sectorState && unexplored.length > 0) {
+    const sectorByPath = new Map(sectorState.sectors.map(s => [s.path, s]));
+    unexplored.sort((a, b) => {
+      const sa = sectorByPath.get(a);
+      const sb = sectorByPath.get(b);
+      // Fewer scans first
+      const scanA = sa?.scanCount ?? 0;
+      const scanB = sb?.scanCount ?? 0;
+      if (scanA !== scanB) return scanA - scanB;
+      // Higher yield first
+      const yieldA = sa?.proposalYield ?? 0;
+      const yieldB = sb?.proposalYield ?? 0;
+      return yieldB - yieldA;
+    });
   }
 
   parts.push('### What to Do Differently');

@@ -35,7 +35,7 @@ export interface TicketOutcome {
   id: string;
   title: string;
   category?: string;
-  status: 'completed' | 'failed' | 'spindle_abort' | 'skipped';
+  status: 'completed' | 'failed' | 'spindle_abort' | 'skipped' | 'no_changes';
   prUrl?: string;
   durationMs?: number;
   error?: string;

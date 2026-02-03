@@ -84,6 +84,20 @@ export interface ScoutOptions {
   scoutConcurrency?: number;
   /** Module groups for dependency-aware batching. When provided, files are grouped by module instead of arbitrary token packing. */
   moduleGroups?: import('./scanner.js').ModuleGroup[];
+  /** Coverage context passed through to the scout prompt */
+  coverageContext?: {
+    sectorPath: string;
+    scannedSectors: number;
+    totalSectors: number;
+    percent: number;
+    sectorPercent: number;
+    classificationConfidence: string;
+    scanCount: number;
+    proposalYield: number;
+    sectorSummary?: string;
+    sectorDifficulty?: 'easy' | 'moderate' | 'hard';
+    sectorCategoryAffinity?: { boost: string[]; suppress: string[] };
+  };
 }
 
 /**
@@ -131,6 +145,8 @@ export interface ScoutResult {
   scannedFiles: number;
   /** Total scan duration in ms */
   scanDurationMs: number;
+  /** Sector reclassification suggested by the LLM */
+  sectorReclassification?: { production?: boolean; confidence?: string };
 }
 
 /**

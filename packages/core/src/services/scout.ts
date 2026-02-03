@@ -96,6 +96,20 @@ export interface ScoutRepoOptions {
   scoutConcurrency?: number;
   /** Module groups for dependency-aware batching */
   moduleGroups?: import('../scout/scanner.js').ModuleGroup[];
+  /** Coverage context passed through to the scout prompt */
+  coverageContext?: {
+    sectorPath: string;
+    scannedSectors: number;
+    totalSectors: number;
+    percent: number;
+    sectorPercent: number;
+    classificationConfidence: string;
+    scanCount: number;
+    proposalYield: number;
+    sectorSummary?: string;
+    sectorDifficulty?: 'easy' | 'moderate' | 'hard';
+    sectorCategoryAffinity?: { boost: string[]; suppress: string[] };
+  };
 }
 
 /**
@@ -134,6 +148,7 @@ export interface ScoutRepoResult {
   errors: string[];
   scannedFiles: number;
   durationMs: number;
+  sectorReclassification?: { production?: boolean; confidence?: string };
 }
 
 /**
@@ -225,6 +240,7 @@ export async function scoutRepo(
       maxFiles: opts.maxFiles,
       scoutConcurrency: opts.scoutConcurrency,
       moduleGroups: opts.moduleGroups,
+      coverageContext: opts.coverageContext,
       onProgress: (p) => {
         report({
           phase: 'analyzing',
@@ -298,6 +314,7 @@ export async function scoutRepo(
       errors: scanResult.errors,
       scannedFiles: scanResult.scannedFiles,
       durationMs: Date.now() - startTime,
+      sectorReclassification: scanResult.sectorReclassification,
     };
 
   } catch (error) {

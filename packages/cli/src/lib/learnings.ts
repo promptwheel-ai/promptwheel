@@ -57,6 +57,8 @@ export interface Learning {
       | 'review_downgrade'
       | 'plan_rejection'
       | 'scope_violation'
+      | 'reviewer_feedback'
+      | 'cross_sector_pattern'
       | 'manual';
     detail?: string;
   };
@@ -218,6 +220,14 @@ export function consolidateLearnings(projectRoot: string): void {
     for (let j = i + 1; j < learnings.length; j++) {
       if (merged.has(j)) continue;
       if (titleSimilarity(learnings[i].text, learnings[j].text) >= SIMILARITY_MERGE_THRESHOLD) {
+        // Guard: don't merge across different source types
+        if (learnings[i].source.type !== learnings[j].source.type) continue;
+        // Guard: don't merge different failure types
+        const ftI = learnings[i].tags.find(t => t.startsWith('failureType:'));
+        const ftJ = learnings[j].tags.find(t => t.startsWith('failureType:'));
+        if (ftI && ftJ && ftI !== ftJ) continue;
+        // Guard: don't merge frequently accessed learnings
+        if (learnings[i].access_count >= 3 || learnings[j].access_count >= 3) continue;
         // Merge j into i (keep higher weight)
         if (learnings[j].weight > learnings[i].weight) {
           learnings[i].weight = learnings[j].weight;
@@ -233,6 +243,8 @@ export function consolidateLearnings(projectRoot: string): void {
   }
 
   const result = learnings.filter((_, idx) => !merged.has(idx));
+  // Guard: if consolidation was too aggressive, skip the write
+  if (result.length < Math.ceil(CONSOLIDATION_THRESHOLD * 0.4)) return;
   writeLearnings(projectRoot, result);
 }
 
@@ -263,26 +275,77 @@ export function formatLearningsForPrompt(learnings: Learning[], budget: number =
   return header + lines.join('\n') + footer;
 }
 
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'that', 'this', 'with', 'from', 'are', 'was', 'were',
+  'been', 'have', 'has', 'had', 'not', 'but', 'all', 'can', 'her', 'his',
+  'its', 'may', 'new', 'now', 'old', 'see', 'way', 'who', 'did', 'get',
+  'let', 'say', 'she', 'too', 'use', 'add', 'fix', 'run', 'set', 'try',
+  'import', 'export', 'function', 'const', 'return', 'type', 'interface',
+  'class', 'async', 'await', 'string', 'number', 'boolean', 'null', 'undefined',
+  'file', 'files', 'code', 'should', 'would', 'could',
+]);
+
+/**
+ * Extract top keywords from text for fuzzy matching.
+ */
+export function extractKeywords(text: string): string[] {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter(w => w.length > 2 && !STOPWORDS.has(w));
+  const unique = [...new Set(words)];
+  // Sort by length descending (longer words are more specific)
+  unique.sort((a, b) => b.length - a.length);
+  return unique.slice(0, 5);
+}
+
 /**
  * Select learnings relevant to the current context.
  * Scores by tag overlap × weight.
  */
-export function selectRelevant(learnings: Learning[], context: { paths?: string[]; commands?: string[] }): Learning[] {
+export function selectRelevant(
+  learnings: Learning[],
+  context: { paths?: string[]; commands?: string[]; titleHint?: string },
+  opts?: { maxResults?: number },
+): Learning[] {
   const contextTags = extractTags(context.paths ?? [], context.commands ?? []);
   if (contextTags.length === 0) return learnings;
 
-  const contextTagSet = new Set(contextTags);
+  const contextPathTags = contextTags.filter(t => t.startsWith('path:'));
+  const contextCmdTags = new Set(contextTags.filter(t => t.startsWith('cmd:')));
+  const hasCommands = (context.commands?.length ?? 0) > 0;
 
   const scored = learnings.map(l => {
     let tagScore = 0;
     for (const t of l.tags) {
-      if (contextTagSet.has(t)) tagScore += 20;
+      if (t.startsWith('path:')) {
+        const lPath = t.slice(5);
+        if (contextPathTags.some(ct => ct.slice(5) === lPath)) { tagScore += 30; continue; }
+        if (contextPathTags.some(ct => ct.slice(5).startsWith(lPath + '/') || lPath.startsWith(ct.slice(5) + '/'))) { tagScore += 15; continue; }
+      } else if (t.startsWith('cmd:') && contextCmdTags.has(t)) {
+        tagScore += 10;
+      } else if (t.startsWith('failureType:') && contextCmdTags.size > 0) {
+        tagScore += 5;
+      }
+    }
+    if (context.titleHint) {
+      const hintLower = context.titleHint.toLowerCase();
+      for (const kw of extractKeywords(l.text)) {
+        if (hintLower.includes(kw)) tagScore += 3;
+      }
+    }
+    if (l.category === 'gotcha' && hasCommands) tagScore += 10;
+    if (l.last_confirmed_at) {
+      const age = Date.now() - new Date(l.last_confirmed_at).getTime();
+      if (age < 3 * 24 * 60 * 60 * 1000) tagScore += 5;
     }
     return { learning: l, score: tagScore + l.weight };
   });
 
   scored.sort((a, b) => b.score - a.score);
-  return scored.map(s => s.learning);
+  const max = opts?.maxResults ?? 15;
+  return scored.slice(0, max).map(s => s.learning);
 }
 
 /**

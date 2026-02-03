@@ -299,6 +299,7 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
     backend,
     protectedFiles,
     scoutConcurrency,
+    coverageContext,
   } = options;
 
   const scoutBackend: ScoutBackend = backend ?? new ClaudeScoutBackend();
@@ -358,6 +359,9 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
       : batchFilesByTokens(files, budget);
     const maxBatches = Math.min(batches.length, 20); // Cap at 20 batches
 
+    // Track last-seen sector reclassification across batches
+    let lastSectorReclassification: { production?: boolean; confidence?: string } | undefined;
+
     // Helper to process a single batch result
     const processBatchResult = (result: import('./runner.js').RunnerResult, batchIndex: number) => {
       if (!result.success) {
@@ -365,7 +369,13 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
         return;
       }
 
-      const parsed = parseClaudeOutput<{ proposals: Record<string, unknown>[] }>(result.output);
+      const parsed = parseClaudeOutput<{ proposals: Record<string, unknown>[]; sector_reclassification?: { production?: boolean; confidence?: string } }>(result.output);
+
+      // Capture sector reclassification if present
+      if (parsed?.sector_reclassification) {
+        lastSectorReclassification = parsed.sector_reclassification;
+      }
+
       if (!parsed?.proposals) {
         errors.push(`Batch ${batchIndex + 1}: Failed to parse output`);
         return;
@@ -402,6 +412,7 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
         recentlyCompletedTitles,
         customPrompt,
         protectedFiles,
+        coverageContext,
       })
     );
 
@@ -523,6 +534,7 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
       errors,
       scannedFiles: files.length,
       scanDurationMs: Date.now() - startTime,
+      sectorReclassification: lastSectorReclassification,
     };
 
   } catch (error) {

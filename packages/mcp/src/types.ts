@@ -126,6 +126,12 @@ export interface RunState {
   parallel: number;
   ticket_workers: Record<string, TicketWorkerState>;
 
+  // Coverage
+  sectors_scanned: number;
+  sectors_total: number;
+  files_scanned: number;
+  files_total: number;
+
   // Spindle
   spindle: SpindleState;
 
@@ -156,6 +162,10 @@ export interface RunState {
   // Cross-run learnings
   learnings_enabled: boolean;
   injected_learning_ids: string[];
+
+  // Sector rotation
+  selected_sector_path?: string;
+  current_sector_path?: string;
 }
 
 export interface ProjectMetadataSnapshot {

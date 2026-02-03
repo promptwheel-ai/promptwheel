@@ -278,6 +278,19 @@ export function pathsOverlap(pathA: string, pathB: string): boolean {
 }
 
 /**
+ * Check if two sets of file paths share directories above a threshold.
+ * Used for semantic conflict detection in wave scheduling.
+ */
+export function directoriesOverlap(pathsA: string[], pathsB: string[], threshold = 0.3): boolean {
+  const dirsA = new Set(pathsA.map(p => p.replace(/\/[^/]+$/, '') || '.'));
+  const dirsB = new Set(pathsB.map(p => p.replace(/\/[^/]+$/, '') || '.'));
+  if (dirsA.size === 0 || dirsB.size === 0) return false;
+  let n = 0;
+  for (const d of dirsA) { if (dirsB.has(d)) n++; }
+  return (n / Math.min(dirsA.size, dirsB.size)) >= threshold;
+}
+
+/**
  * Find in-progress tickets that have overlapping allowed_paths with the given ticket
  */
 export async function findConflictingTickets(

@@ -289,7 +289,7 @@ describe('formatMetadataForPrompt', () => {
 
 describe('integration with buildTicketPrompt', () => {
   it('buildTicketPrompt accepts metadataContext parameter', async () => {
-    const { buildTicketPrompt } = await import('../lib/solo-ticket.js');
+    const { buildTicketPrompt } = await import('../lib/solo-prompt-builder.js');
 
     const ticket = {
       id: 'test-1',

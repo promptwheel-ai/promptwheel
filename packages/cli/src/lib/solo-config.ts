@@ -97,6 +97,14 @@ export interface AutoConfig {
   scoutConcurrency?: number;
   /** Max fraction of test proposals per batch (default 0.4) */
   maxTestRatio?: number;
+  /** Per-category ticket timeouts in ms (e.g. { test: 300000, refactor: 600000 }) */
+  categoryTimeouts?: Record<string, number>;
+  /** Delivery mode: how completed work is shipped */
+  deliveryMode?: 'direct' | 'pr' | 'auto-merge';
+  /** Branch name for direct mode (default: 'blockspool') */
+  directBranch?: string;
+  /** End-of-session action for direct mode: pr | merge | none (default: 'pr') */
+  directFinalize?: 'pr' | 'merge' | 'none';
   /** Per-backend overrides */
   claude?: { scoutConcurrency?: number; batchTokenBudget?: number };
   codex?: { scoutConcurrency?: number; batchTokenBudget?: number };

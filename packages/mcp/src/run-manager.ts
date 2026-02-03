@@ -147,6 +147,11 @@ export class RunManager {
       parallel: Math.min(Math.max(config.parallel ?? 2, 1), 5),
       ticket_workers: {},
 
+      sectors_scanned: 0,
+      sectors_total: 0,
+      files_scanned: 0,
+      files_total: 0,
+
       spindle: emptySpindle(),
       recent_intent_hashes: [],
       scouted_dirs: [],
@@ -182,6 +187,52 @@ export class RunManager {
       this.projectPath,
       this.state.scout_exclude_dirs,
     );
+
+    // Seed coverage from sectors.json if it exists
+    try {
+      const sectorsPath = path.join(this.bsDir, 'sectors.json');
+      if (fs.existsSync(sectorsPath)) {
+        const sectorsData = JSON.parse(fs.readFileSync(sectorsPath, 'utf8'));
+        if (sectorsData?.version === 2 && Array.isArray(sectorsData.sectors)) {
+          const scoutedSet = new Set<string>();
+          for (const sec of sectorsData.sectors) {
+            if (sec.scanCount > 0 && sec.path) {
+              scoutedSet.add(sec.path);
+            }
+          }
+          // Add scanned sectors to scouted_dirs
+          for (const dir of scoutedSet) {
+            if (!this.state.scouted_dirs.includes(dir)) {
+              this.state.scouted_dirs.push(dir);
+            }
+          }
+          // Recompute coverage from codebase_index × scouted_dirs
+          if (this.state.codebase_index) {
+            const scoutedDirSet = new Set(this.state.scouted_dirs.map(d => d.replace(/\/$/, '')));
+            let scannedSectors = 0;
+            let scannedFiles = 0;
+            let totalFiles = 0;
+            let totalSectors = 0;
+            for (const mod of this.state.codebase_index.modules) {
+              if (mod.production === false) continue;
+              const fc = mod.production_file_count ?? mod.file_count ?? 0;
+              totalFiles += fc;
+              totalSectors++;
+              if (scoutedDirSet.has(mod.path) || scoutedDirSet.has(mod.path + '/')) {
+                scannedSectors++;
+                scannedFiles += fc;
+              }
+            }
+            this.state.sectors_scanned = scannedSectors;
+            this.state.sectors_total = totalSectors;
+            this.state.files_scanned = scannedFiles;
+            this.state.files_total = totalFiles;
+          }
+        }
+      }
+    } catch {
+      // Non-fatal — sectors.json seeding is best-effort
+    }
 
     // Apply decay to cross-run learnings (if enabled)
     if (this.state.learnings_enabled) {
@@ -480,6 +531,7 @@ export class RunManager {
     ticket_budget_remaining: number;
     spindle_risk: 'none' | 'low' | 'medium' | 'high';
     time_remaining_ms: number | null;
+    coverage: { sectors_scanned: number; sectors_total: number; files_scanned: number; files_total: number; percent: number };
   } {
     const s = this.require();
     const timeRemainingMs = s.expires_at
@@ -495,6 +547,13 @@ export class RunManager {
       ticket_budget_remaining: s.ticket_step_budget - s.ticket_step_count,
       spindle_risk: checkSpindle(s.spindle).risk,
       time_remaining_ms: timeRemainingMs,
+      coverage: {
+        sectors_scanned: s.sectors_scanned,
+        sectors_total: s.sectors_total,
+        files_scanned: s.files_scanned,
+        files_total: s.files_total,
+        percent: s.files_total > 0 ? Math.round((s.files_scanned / s.files_total) * 100) : 0,
+      },
     };
   }
 

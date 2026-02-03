@@ -17,7 +17,7 @@ import {
   extractTags,
   type Learning,
 } from '../lib/learnings.js';
-import { buildTicketPrompt } from '../lib/solo-ticket.js';
+import { buildTicketPrompt } from '../lib/solo-prompt-builder.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

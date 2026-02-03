@@ -20,6 +20,20 @@ export function buildScoutPrompt(options: {
   customPrompt?: string;
   /** Files the scout can read but must NOT propose changes to */
   protectedFiles?: string[];
+  /** Coverage context injected to give the scout awareness of scan progress */
+  coverageContext?: {
+    sectorPath: string;
+    scannedSectors: number;
+    totalSectors: number;
+    percent: number;
+    sectorPercent: number;
+    classificationConfidence: string;
+    scanCount: number;
+    proposalYield: number;
+    sectorSummary?: string;
+    sectorDifficulty?: 'easy' | 'moderate' | 'hard';
+    sectorCategoryAffinity?: { boost: string[]; suppress: string[] };
+  };
 }): string {
   const {
     files,
@@ -31,6 +45,7 @@ export function buildScoutPrompt(options: {
     recentlyCompletedTitles,
     customPrompt,
     protectedFiles,
+    coverageContext,
   } = options;
 
   const protectedNote = protectedFiles?.length
@@ -42,6 +57,41 @@ export function buildScoutPrompt(options: {
     : excludeTypes?.length
       ? `EXCLUDE these categories: ${excludeTypes.join(', ')}`
       : 'Consider all categories';
+
+  const coverageBlock = coverageContext
+    ? (() => {
+        const { sectorPath, scannedSectors, totalSectors, percent, sectorPercent, classificationConfidence, scanCount, proposalYield, sectorSummary } = coverageContext;
+        const lines = [
+          `\n## Coverage Context\n`,
+          `You are scanning sector "${sectorPath}" (scan #${scanCount + 1}).`,
+          `Classification confidence: ${classificationConfidence}.${classificationConfidence === 'low' ? ' This sector has not been reliably classified — pay attention to whether files are production code, tests, config, or generated.' : ''}`,
+          `Overall codebase coverage: ${scannedSectors}/${totalSectors} sectors scanned (${sectorPercent}% of sectors, ${percent}% of files).`,
+          `This sector's historical proposal density: ${proposalYield.toFixed(1)} proposals/scan.`,
+          '',
+        ];
+        if (coverageContext.sectorDifficulty === 'hard') {
+          lines.push('');
+          lines.push('**WARNING:** This sector has a HIGH failure rate. Propose only HIGH-confidence changes. Prefer simple fixes over complex refactors.');
+        }
+        if (coverageContext.sectorCategoryAffinity) {
+          const { boost, suppress } = coverageContext.sectorCategoryAffinity;
+          if (boost.length > 0) {
+            lines.push(`Categories that work well in this sector: ${boost.join(', ')}.`);
+          }
+          if (suppress.length > 0) {
+            lines.push(`Categories ${suppress.join(', ')} have low success in this sector — only propose if HIGH confidence.`);
+          }
+        }
+        if (percent < 50) {
+          lines.push('Many sectors remain unscanned. Focus on high-impact issues rather than minor cleanups.');
+        }
+        if (sectorSummary) {
+          lines.push('');
+          lines.push(sectorSummary);
+        }
+        return lines.join('\n') + '\n';
+      })()
+    : '';
 
   const strategicFocus = customPrompt
     ? `\n## Strategic Focus\n\n${customPrompt}\n`
@@ -60,7 +110,7 @@ export function buildScoutPrompt(options: {
 Analyze these files from scope "${scope}" and identify actionable improvements.
 
 ${categoryFilter}
-
+${coverageBlock}
 ## Categories
 
 - **refactor**: Code quality, readability, maintainability improvements (DRY violations, dead code, over-engineering, inconsistent patterns)
@@ -116,7 +166,10 @@ Respond with ONLY a JSON object (no markdown, no explanation):
   ]
 }
 
-If no improvements are needed, return: {"proposals": []}`;
+If no improvements are needed, return: {"proposals": []}${coverageContext ? `
+
+If this sector appears misclassified (e.g., labeled as production but contains only tests/config/generated code, or vice versa), add to the JSON:
+"sector_reclassification": { "production": true/false, "confidence": "medium"|"high" }` : ''}`;
 }
 
 /**

@@ -4,13 +4,12 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import chalk from 'chalk';
 import type { DatabaseAdapter } from '@blockspool/core/db';
 import {
   runQa,
   getQaRunDetails,
 } from '@blockspool/core/services';
-import { projects, tickets, runs, runSteps, type StepKind } from '@blockspool/core/repos';
+import { projects, tickets, runs, runSteps } from '@blockspool/core/repos';
 import {
   writeJsonArtifact,
   type RunSummaryArtifact,
@@ -32,264 +31,22 @@ import {
 } from '../lib/spindle/index.js';
 import { createExecRunner } from '../lib/exec.js';
 import { createLogger } from '../lib/logger.js';
-import type { SoloConfig } from './solo-config.js';
-import { getBlockspoolDir, getAdapter } from './solo-config.js';
+import { getBlockspoolDir } from './solo-config.js';
 import { normalizeQaConfig } from './solo-utils.js';
 import { withGitMutex, gitExec, cleanupWorktree } from './solo-git.js';
 import { generateSpindleRecommendations } from './solo-ci.js';
 import { ClaudeExecutionBackend, type ExecutionBackend } from './execution-backends/index.js';
+import { buildTicketPrompt } from './solo-prompt-builder.js';
+import { isTestFailure, extractTestFilesFromQaOutput } from './solo-qa-retry.js';
+import type {
+  FailureReason,
+  RunTicketResult,
+  RunTicketOptions,
+  SpindleAbortDetails,
+  StepName,
+} from './solo-ticket-types.js';
+import { EXECUTE_STEPS } from './solo-ticket-types.js';
 
-/**
- * Canonical failure reasons for run results
- */
-export type FailureReason =
-  | 'agent_error'
-  | 'scope_violation'
-  | 'spindle_abort'
-  | 'qa_failed'
-  | 'git_error'
-  | 'pr_error'
-  | 'timeout'
-  | 'cancelled';
-
-/**
- * Outcome type for successful completions that don't involve code changes
- */
-export type CompletionOutcome =
-  | 'no_changes_needed';
-
-/**
- * Spindle abort details for diagnostics
- */
-export interface SpindleAbortDetails {
-  trigger: 'oscillation' | 'spinning' | 'stalling' | 'repetition' | 'token_budget' | 'qa_ping_pong' | 'command_failure';
-  confidence: number;
-  estimatedTokens: number;
-  iteration: number;
-  thresholds: {
-    similarityThreshold: number;
-    maxSimilarOutputs: number;
-    maxStallIterations: number;
-    tokenBudgetWarning: number;
-    tokenBudgetAbort: number;
-  };
-  metrics: {
-    similarityScore?: number;
-    iterationsWithoutChange?: number;
-    repeatedPatterns?: string[];
-    oscillationPattern?: string;
-  };
-  recommendations: string[];
-  artifactPath: string;
-}
-
-/**
- * Result of running a ticket
- */
-export interface RunTicketResult {
-  success: boolean;
-  branchName?: string;
-  prUrl?: string;
-  durationMs: number;
-  error?: string;
-  failureReason?: FailureReason;
-  completionOutcome?: CompletionOutcome;
-  spindle?: SpindleAbortDetails;
-  artifacts?: {
-    execution?: string;
-    diff?: string;
-    violations?: string;
-    spindle?: string;
-    runSummary?: string;
-  };
-  scopeExpanded?: {
-    addedPaths: string[];
-    newRetryCount: number;
-  };
-}
-
-/**
- * Exit codes for solo run
- */
-export const EXIT_CODES = {
-  SUCCESS: 0,
-  FAILURE: 1,
-  SPINDLE_ABORT: 2,
-  SIGINT: 130,
-} as const;
-
-/**
- * Options for running a ticket
- */
-export interface RunTicketOptions {
-  ticket: Awaited<ReturnType<typeof tickets.getById>> & {};
-  repoRoot: string;
-  config: SoloConfig | null;
-  adapter: Awaited<ReturnType<typeof getAdapter>>;
-  runId: string;
-  skipQa: boolean;
-  createPr: boolean;
-  draftPr?: boolean;
-  timeoutMs: number;
-  verbose: boolean;
-  onProgress: (msg: string) => void;
-  /** Override the base branch for worktree creation (e.g. milestone branch) */
-  baseBranch?: string;
-  /** Skip pushing the branch to origin */
-  skipPush?: boolean;
-  /** Skip PR creation even if createPr is true */
-  skipPr?: boolean;
-  /** Execution backend override (default: ClaudeExecutionBackend) */
-  executionBackend?: ExecutionBackend;
-  /** Project guidelines context to prepend to execution prompt */
-  guidelinesContext?: string;
-  /** Learnings context to prepend to execution prompt */
-  learningsContext?: string;
-  /** Project metadata context to prepend to execution prompt */
-  metadataContext?: string;
-  /** If true, retry QA failures by expanding scope to include test files and fixing them */
-  qaRetryWithTestFix?: boolean;
-  /** Scout confidence score (0-100) — used to add planning preamble for complex changes */
-  confidence?: number;
-  /** Estimated complexity from scout — used to add planning preamble */
-  complexity?: string;
-}
-
-/**
- * Execution step definitions
- */
-const EXECUTE_STEPS = [
-  { name: 'worktree', kind: 'git' as StepKind },
-  { name: 'agent', kind: 'internal' as StepKind },
-  { name: 'scope', kind: 'internal' as StepKind },
-  { name: 'commit', kind: 'git' as StepKind },
-  { name: 'push', kind: 'git' as StepKind },
-  { name: 'qa', kind: 'command' as StepKind },
-  { name: 'pr', kind: 'git' as StepKind },
-  { name: 'cleanup', kind: 'internal' as StepKind },
-] as const;
-
-export type StepName = typeof EXECUTE_STEPS[number]['name'];
-
-/**
- * Build the prompt for Claude from a ticket
- */
-export function buildTicketPrompt(ticket: NonNullable<Awaited<ReturnType<typeof tickets.getById>>>, guidelinesContext?: string, learningsContext?: string, metadataContext?: string, opts?: { confidence?: number; complexity?: string }): string {
-  const parts: string[] = [];
-
-  // Planning preamble for uncertain or complex changes
-  const confidence = opts?.confidence;
-  const complexity = opts?.complexity;
-  if ((confidence !== undefined && confidence < 50) || complexity === 'moderate' || complexity === 'complex') {
-    parts.push(
-      '## Approach — This is a complex change',
-      '',
-      `The automated analysis flagged this as uncertain (confidence: ${confidence ?? '?'}%). Before writing code:`,
-      '1. Read all relevant files to understand the full context',
-      '2. Identify all touch points and potential side effects',
-      '3. Write out your implementation plan before making changes',
-      '4. Implement incrementally, verifying at each step',
-      '',
-    );
-  }
-
-  if (guidelinesContext) {
-    parts.push(guidelinesContext, '');
-  }
-
-  if (metadataContext) {
-    parts.push(metadataContext, '');
-  }
-
-  if (learningsContext) {
-    parts.push(learningsContext, '');
-  }
-
-  parts.push(
-    `# Task: ${ticket.title}`,
-    '',
-    ticket.description ?? '',
-    '',
-  );
-
-  if (ticket.allowedPaths.length > 0) {
-    parts.push('## Allowed Paths');
-    parts.push('Only modify files in these paths:');
-    for (const p of ticket.allowedPaths) {
-      parts.push(`- ${p}`);
-    }
-    parts.push('');
-  }
-
-  if (ticket.forbiddenPaths.length > 0) {
-    parts.push('## Forbidden Paths');
-    parts.push('Do NOT modify files in these paths:');
-    for (const p of ticket.forbiddenPaths) {
-      parts.push(`- ${p}`);
-    }
-    parts.push('');
-  }
-
-  if (ticket.verificationCommands.length > 0) {
-    parts.push('## Verification');
-    parts.push('After making changes, verify with:');
-    for (const cmd of ticket.verificationCommands) {
-      parts.push(`- \`${cmd}\``);
-    }
-    parts.push('');
-  }
-
-  parts.push('## Instructions');
-  parts.push('1. Analyze the codebase to understand the context');
-  parts.push('2. Implement the required changes');
-  parts.push('3. Ensure all verification commands pass');
-  parts.push('4. Keep changes minimal and focused');
-
-  return parts.join('\n');
-}
-
-// Re-export execution backend types and implementations from modular directory
-export type { ClaudeResult, ExecutionBackend } from './execution-backends/index.js';
-export { ClaudeExecutionBackend, runClaude, CodexExecutionBackend, KimiExecutionBackend } from './execution-backends/index.js';
-
-
-
-
-/**
- * Check if a QA failure is a test failure (vitest/jest/pytest etc.)
- */
-function isTestFailure(failedStepName: string | undefined): boolean {
-  if (!failedStepName) return false;
-  const lower = failedStepName.toLowerCase();
-  return /test|vitest|jest|pytest|mocha|karma/.test(lower);
-}
-
-/**
- * Extract test file paths from QA error output
- */
-function extractTestFilesFromQaOutput(output: string): string[] {
-  const files = new Set<string>();
-  // Match common test file path patterns
-  const patterns = [
-    // vitest/jest: "FAIL src/foo.test.ts" or "❌ src/foo.test.ts"
-    /(?:FAIL|❌|✗)\s+([^\s]+\.(?:test|spec)\.[jt]sx?)/gi,
-    // General file paths ending in .test.* or .spec.*
-    /([a-zA-Z0-9_/.\\-]+\.(?:test|spec)\.[jt]sx?)/g,
-    // Python test files
-    /([a-zA-Z0-9_/.\\-]+test_[a-zA-Z0-9_]+\.py)/g,
-    // __tests__ directory files
-    /([a-zA-Z0-9_/.\\-]+\/__tests__\/[^\s]+\.[jt]sx?)/g,
-  ];
-
-  for (const pattern of patterns) {
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(output)) !== null) {
-      files.add(match[1]);
-    }
-  }
-
-  return [...files];
-}
 
 /**
  * Execute a ticket in isolation with step tracking
@@ -451,7 +208,6 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
       }
 
       if (opts.baseBranch) {
-        // Use provided base branch (e.g. milestone branch)
         baseBranch = opts.baseBranch;
       } else {
         let detectedBranch = 'master';
@@ -999,7 +755,6 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
                   await markStep('qa', 'success', { metadata: { qaRunId: retryQaResult.runId, qaRetried: true } });
                   // Fall through to push/PR steps below
                 } else {
-                  // Second failure — give up
                   errorParts.push('');
                   errorParts.push('(QA retry with test-fix also failed)');
                   errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
@@ -1016,7 +771,6 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
                   return result;
                 }
               } else {
-                // Agent retry failed
                 errorParts.push('');
                 errorParts.push('(QA retry agent execution failed)');
                 errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
@@ -1033,7 +787,6 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
                 return result;
               }
             } catch {
-              // Retry mechanism failed — fall through to original error
               errorParts.push('');
               errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
               errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
@@ -1049,7 +802,6 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
               return result;
             }
           } else {
-            // No test files found — can't retry
             errorParts.push('');
             errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
             errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);

@@ -14,8 +14,8 @@ import { registerAutoCommands } from './solo-auto.js';
 import { registerNudgeCommands } from './solo-nudge.js';
 
 // Re-export types from extracted modules
-export type { FailureReason, CompletionOutcome, RunTicketResult } from '../lib/solo-ticket.js';
-export { EXIT_CODES } from '../lib/solo-ticket.js';
+export type { FailureReason, CompletionOutcome, RunTicketResult } from '../lib/solo-ticket-types.js';
+export { EXIT_CODES } from '../lib/solo-ticket-types.js';
 
 export const soloCommand = new Command('solo')
   .description('Zero-config local mode - works without any external services')

@@ -33,6 +33,10 @@ export interface DedupEntry {
   hit_count: number;
   /** Whether this was actually executed successfully (stronger signal) */
   completed: boolean;
+  /** Why this entry failed (if not completed) */
+  failureReason?: 'qa_failed' | 'scope_violation' | 'spindle_abort' | 'agent_error' | 'no_changes';
+  /** Titles of proposals that were in the same batch (dependency tracking) */
+  relatedTitles?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +127,8 @@ export function recordDedupEntry(
   projectRoot: string,
   title: string,
   completed: boolean,
+  failureReason?: 'qa_failed' | 'scope_violation' | 'spindle_abort' | 'agent_error' | 'no_changes',
+  relatedTitles?: string[],
 ): void {
   const entries = readEntries(projectRoot);
   const now = new Date().toISOString();
@@ -134,6 +140,8 @@ export function recordDedupEntry(
     existing.last_seen_at = now;
     existing.hit_count++;
     if (completed) existing.completed = true;
+    if (failureReason) existing.failureReason = failureReason;
+    if (relatedTitles?.length) existing.relatedTitles = relatedTitles;
   } else {
     entries.push({
       title,
@@ -142,6 +150,8 @@ export function recordDedupEntry(
       last_seen_at: now,
       hit_count: 1,
       completed,
+      failureReason,
+      relatedTitles,
     });
   }
 
@@ -198,7 +208,10 @@ export function formatDedupForPrompt(entries: DedupEntry[], budget: number = DEF
   charCount += header.length + footer.length;
 
   for (const e of sorted) {
-    const status = e.completed ? '✓ done' : 'attempted';
+    const status = e.completed ? '✓ done'
+      : e.failureReason === 'scope_violation' ? 'scope issue — may work with broader scope'
+      : e.failureReason === 'no_changes' ? 'no changes produced'
+      : 'attempted — failed';
     const line = `- ${e.title} (${status}, seen ${e.hit_count}x)`;
     if (charCount + line.length + 1 > budget) break;
     lines.push(line);
@@ -207,4 +220,33 @@ export function formatDedupForPrompt(entries: DedupEntry[], budget: number = DEF
 
   if (lines.length === 0) return '';
   return header + lines.join('\n') + footer;
+}
+
+/**
+ * Find proposals enabled by recently completed work.
+ * Returns related titles from completed entries within 48h
+ * that are NOT themselves completed.
+ */
+export function getEnabledProposals(projectRoot: string): string[] {
+  const entries = readEntries(projectRoot);
+  const now = Date.now();
+  const cutoff = 48 * 60 * 60 * 1000;
+
+  const completedTitles = new Set(
+    entries.filter(e => e.completed).map(e => e.title.toLowerCase().trim()),
+  );
+
+  const enabled: string[] = [];
+  for (const e of entries) {
+    if (!e.completed || !e.relatedTitles?.length) continue;
+    const lastSeen = new Date(e.last_seen_at).getTime();
+    if (now - lastSeen > cutoff) continue;
+    for (const rt of e.relatedTitles) {
+      if (!completedTitles.has(rt.toLowerCase().trim())) {
+        enabled.push(rt);
+      }
+    }
+  }
+
+  return [...new Set(enabled)];
 }

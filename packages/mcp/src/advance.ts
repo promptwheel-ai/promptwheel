@@ -14,6 +14,8 @@
  *   PR          → NEXT_TICKET | FAILED_VALIDATION
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { DatabaseAdapter } from '@blockspool/core';
 import { repos } from '@blockspool/core';
 import type { Project } from '@blockspool/core';
@@ -290,6 +292,50 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
     }
   }
 
+  // Sector rotation: pick the stalest unscanned production sector
+  try {
+    const sectorsPath = path.join(ctx.project.rootPath, '.blockspool', 'sectors.json');
+    if (fs.existsSync(sectorsPath)) {
+      const sectorsData = JSON.parse(fs.readFileSync(sectorsPath, 'utf8'));
+      if (sectorsData?.version === 2 && Array.isArray(sectorsData.sectors)) {
+        const prodSectors = (sectorsData.sectors as Array<{ path: string; production: boolean; fileCount: number; scanCount: number; lastScannedCycle: number }>)
+          .filter(sec => sec.production && sec.fileCount > 0);
+        // Multi-tier sort matching CLI's pickNextSector
+        const now = Date.now();
+        const sorted = [...prodSectors].sort((a: any, b: any) => {
+          // 1. Never-scanned first
+          if ((a.scanCount === 0) !== (b.scanCount === 0)) return a.scanCount === 0 ? -1 : 1;
+          // 2. Cycle staleness
+          if (a.lastScannedCycle !== b.lastScannedCycle) return a.lastScannedCycle - b.lastScannedCycle;
+          // 3. Temporal decay: if |daysDiff| > 7, older sector first
+          const aDays = (now - (a.lastScannedAt ?? 0)) / 86400000;
+          const bDays = (now - (b.lastScannedAt ?? 0)) / 86400000;
+          if (aDays > 7 && bDays > 7 && Math.abs(aDays - bDays) > 1) return bDays - aDays > 0 ? -1 : 1;
+          // 4. Barren deprioritization
+          const aBarren = a.scanCount > 2 && (a.proposalYield ?? 0) < 0.5 ? 1 : 0;
+          const bBarren = b.scanCount > 2 && (b.proposalYield ?? 0) < 0.5 ? 1 : 0;
+          if (aBarren !== bBarren) return aBarren - bBarren;
+          // 5. High failure rate deprioritization
+          const aFail = (a.failureCount ?? 0) >= 3 && (a.failureCount ?? 0) / ((a.failureCount ?? 0) + (a.successCount ?? 0)) > 0.6 ? 1 : 0;
+          const bFail = (b.failureCount ?? 0) >= 3 && (b.failureCount ?? 0) / ((b.failureCount ?? 0) + (b.successCount ?? 0)) > 0.6 ? 1 : 0;
+          if (aFail !== bFail) return aFail - bFail;
+          // 6. Higher proposalYield first
+          if ((a.proposalYield ?? 0) !== (b.proposalYield ?? 0)) return (b.proposalYield ?? 0) - (a.proposalYield ?? 0);
+          // 7. Alphabetical
+          return a.path.localeCompare(b.path);
+        });
+        if (sorted.length > 0) {
+          const picked = sorted[0];
+          const sectorScope = picked.path === '.' ? './{*,.*}' : `${picked.path}/**`;
+          s.scope = sectorScope;
+          s.selected_sector_path = picked.path;
+        }
+      }
+    }
+  } catch {
+    // Non-fatal — fall through to existing scope
+  }
+
   // Build codebase index block — use cycles + retries so retries advance the chunk
   const chunkOffset = s.scout_cycles + s.scout_retries;
   const indexBlock = s.codebase_index ? formatIndexForPrompt(s.codebase_index, chunkOffset) + '\n\n' : '';
@@ -301,8 +347,52 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
 
   const learningsBlock = buildLearningsBlock(run, [s.scope, ...s.scouted_dirs], []);
 
+  const cov = run.buildDigest().coverage;
+  let sectorSummary: string | undefined;
+  let sectorPercent: number | undefined;
+  try {
+    const sectorsPath = path.join(ctx.project.rootPath, '.blockspool', 'sectors.json');
+    if (fs.existsSync(sectorsPath)) {
+      const sectorsData = JSON.parse(fs.readFileSync(sectorsPath, 'utf8'));
+      if (sectorsData?.version === 2 && Array.isArray(sectorsData.sectors)) {
+        const sectors = sectorsData.sectors as Array<{ path: string; scanCount: number; proposalYield: number; fileCount: number; production: boolean; lastScannedAt: number }>;
+        const prodSectors = sectors.filter(sec => sec.production);
+        const scannedCount = prodSectors.filter(sec => sec.scanCount > 0).length;
+        sectorPercent = prodSectors.length > 0 ? Math.round((scannedCount / prodSectors.length) * 100) : 0;
+        // Build compact summary
+        const recentScanned = sectors
+          .filter(sec => sec.scanCount > 0)
+          .sort((a, b) => b.lastScannedAt - a.lastScannedAt)
+          .slice(0, 5);
+        const topUnscanned = sectors
+          .filter(sec => sec.scanCount === 0 && sec.fileCount > 0)
+          .sort((a, b) => b.fileCount - a.fileCount)
+          .slice(0, 5);
+        const lines: string[] = ['### Nearby Sectors'];
+        if (recentScanned.length > 0) {
+          lines.push('Recently scanned:');
+          for (const sec of recentScanned) {
+            lines.push(`- \`${sec.path}\` — yield: ${(sec.proposalYield ?? 0).toFixed(1)}, scans: ${sec.scanCount}`);
+          }
+        }
+        if (topUnscanned.length > 0) {
+          lines.push('Top unscanned:');
+          for (const sec of topUnscanned) {
+            lines.push(`- \`${sec.path}\` (${sec.fileCount} files)`);
+          }
+        }
+        sectorSummary = lines.join('\n');
+      }
+    }
+  } catch {
+    // Non-fatal
+  }
+  const coverageCtx = cov.sectors_total > 0
+    ? { scannedSectors: cov.sectors_scanned, totalSectors: cov.sectors_total, percent: cov.percent, sectorPercent, sectorSummary }
+    : undefined;
+
   const prompt = guidelinesBlock + metadataBlock + indexBlock + dedupBlock + learningsBlock + escalationBlock + buildScoutPrompt(s.scope, s.categories, s.min_confidence,
-    s.max_proposals_per_scout, dedupContext, formula, hints, s.eco, s.min_impact_score, s.scouted_dirs, s.scout_exclude_dirs);
+    s.max_proposals_per_scout, dedupContext, formula, hints, s.eco, s.min_impact_score, s.scouted_dirs, s.scout_exclude_dirs, coverageCtx);
 
   // Reset scout_retries at the start of a fresh cycle (non-retry entry)
   if (s.scout_retries === 0) {
@@ -347,7 +437,11 @@ async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> 
       return advance(ctx);
     }
     run.setPhase('DONE');
-    return stopResponse(run, 'DONE', 'No more tickets to process');
+    const cov = run.buildDigest().coverage;
+    const covSuffix = cov.sectors_total > 0
+      ? ` (${cov.sectors_scanned}/${cov.sectors_total} sectors scanned, ${cov.percent}% coverage)`
+      : '';
+    return stopResponse(run, 'DONE', `No more tickets to process${covSuffix}`);
   }
 
   // If parallel > 1 and multiple tickets ready → dispatch batch
@@ -840,6 +934,7 @@ function buildScoutPrompt(
   minImpactScore: number = 3,
   scoutedDirs: string[] = [],
   excludeDirs: string[] = [],
+  coverageContext?: { scannedSectors: number; totalSectors: number; percent: number; sectorPercent?: number; sectorSummary?: string },
 ): string {
   const parts = [
     '# Scout Phase',
@@ -878,6 +973,14 @@ function buildScoutPrompt(
       `**Skip these directories when scouting** (build artifacts, vendor, generated): ${excludeDirs.map(d => `\`${d}\``).join(', ')}`,
     ] : []),
     '',
+    ...(coverageContext ? [
+      `## Coverage Context`,
+      '',
+      `Overall codebase coverage: ${coverageContext.scannedSectors}/${coverageContext.totalSectors} sectors scanned (${coverageContext.sectorPercent ?? coverageContext.percent}% of sectors, ${coverageContext.percent}% of files).`,
+      ...(coverageContext.percent < 50 ? ['Many sectors remain unscanned. Focus on high-impact issues rather than minor cleanups.'] : []),
+      ...(coverageContext.sectorSummary ? ['', coverageContext.sectorSummary] : []),
+      '',
+    ] : []),
     '## Quality Bar',
     '',
     '- Proposals must have **real user or developer impact** — not just lint cleanup or style nits.',
@@ -967,6 +1070,12 @@ function buildScoutPrompt(
     '',
     'The `explored_dirs` field should list the top-level directories you analyzed (e.g. `src/services/`, `lib/utils/`). This is used to rotate to unexplored areas in future cycles.',
   );
+
+  if (coverageContext) {
+    parts.push('');
+    parts.push('If this sector appears misclassified (e.g., labeled as production but contains only tests/config/generated code, or vice versa), include in the SCOUT_OUTPUT payload:');
+    parts.push('`"sector_reclassification": { "production": true/false, "confidence": "medium"|"high" }`');
+  }
 
   return parts.join('\n');
 }

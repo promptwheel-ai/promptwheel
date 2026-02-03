@@ -123,6 +123,7 @@ export function recordDedupEntry(
   projectRoot: string,
   title: string,
   completed: boolean,
+  _failureReason?: string,
 ): void {
   const entries = readEntries(projectRoot);
   const now = new Date().toISOString();

@@ -173,7 +173,7 @@ export function registerLifecycleCommands(solo: Command): void {
    * solo prune - Clean up stale state
    */
   solo
-    .command('prune')
+    .command('prune').alias('clean')
     .description('Remove stale runs, history, artifacts, and archives')
     .option('--dry-run', 'Show what would be deleted without deleting')
     .action(async (options: { dryRun?: boolean }) => {

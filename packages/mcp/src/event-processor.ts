@@ -5,6 +5,8 @@
  * the event and updates RunState accordingly (phase transitions, counters, etc).
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import type { DatabaseAdapter } from '@blockspool/core';
 import { repos } from '@blockspool/core';
 import { RunManager } from './run-manager.js';
@@ -52,6 +54,53 @@ export async function processEvent(
         }
       }
 
+      // Update coverage from codebase index + scouted dirs (production modules only)
+      if (s.codebase_index) {
+        const scoutedSet = new Set(s.scouted_dirs.map(d => d.replace(/\/$/, '')));
+        let scannedSectors = 0;
+        let scannedFiles = 0;
+        let totalFiles = 0;
+        let totalSectors = 0;
+        for (const mod of s.codebase_index.modules) {
+          if (mod.production === false) continue;
+          const fc = mod.production_file_count ?? mod.file_count ?? 0;
+          totalFiles += fc;
+          totalSectors++;
+          if (scoutedSet.has(mod.path) || scoutedSet.has(mod.path + '/')) {
+            scannedSectors++;
+            scannedFiles += fc;
+          }
+        }
+        s.sectors_scanned = scannedSectors;
+        s.sectors_total = totalSectors;
+        s.files_scanned = scannedFiles;
+        s.files_total = totalFiles;
+      }
+
+      // Handle sector reclassification if present
+      const sectorReclass = payload['sector_reclassification'] as { production?: boolean; confidence?: string } | undefined;
+      if (sectorReclass && (sectorReclass.confidence === 'medium' || sectorReclass.confidence === 'high')) {
+        try {
+          const sectorsPath = path.join(run.rootPath, '.blockspool', 'sectors.json');
+          if (fs.existsSync(sectorsPath)) {
+            const sectorsData = JSON.parse(fs.readFileSync(sectorsPath, 'utf8'));
+            if (sectorsData?.version === 2 && Array.isArray(sectorsData.sectors) && exploredDirs.length > 0) {
+              const targetPath = exploredDirs[0].replace(/\/$/, '');
+              const sector = sectorsData.sectors.find((sec: { path: string }) => sec.path === targetPath);
+              if (sector) {
+                if (sectorReclass.production !== undefined) {
+                  sector.production = sectorReclass.production;
+                }
+                sector.classificationConfidence = sectorReclass.confidence;
+                fs.writeFileSync(sectorsPath, JSON.stringify(sectorsData, null, 2), 'utf8');
+              }
+            }
+          }
+        } catch {
+          // Non-fatal — sector reclassification is best-effort
+        }
+      }
+
       // Extract proposals from payload
       const rawProposals = (payload['proposals'] ?? []) as RawProposal[];
 
@@ -80,6 +129,30 @@ export async function processEvent(
           new_phase: 'DONE',
           message: 'No proposals in scout output after all retries, transitioning to DONE',
         };
+      }
+
+      // Update sector scan stats if a sector was selected for this cycle
+      if (s.selected_sector_path) {
+        try {
+          const sectorsPath = path.join(run.rootPath, '.blockspool', 'sectors.json');
+          if (fs.existsSync(sectorsPath)) {
+            const sectorsData = JSON.parse(fs.readFileSync(sectorsPath, 'utf8'));
+            if (sectorsData?.version === 2 && Array.isArray(sectorsData.sectors)) {
+              const sector = sectorsData.sectors.find((sec: { path: string }) => sec.path === s.selected_sector_path);
+              if (sector) {
+                sector.lastScannedAt = Date.now();
+                sector.lastScannedCycle = s.scout_cycles;
+                sector.scanCount = (sector.scanCount ?? 0) + 1;
+                sector.proposalYield = 0.7 * (sector.proposalYield ?? 0) + 0.3 * rawProposals.length;
+                fs.writeFileSync(sectorsPath, JSON.stringify(sectorsData, null, 2), 'utf8');
+              }
+            }
+          }
+        } catch {
+          // Non-fatal
+        }
+        s.current_sector_path = s.selected_sector_path;
+        s.selected_sector_path = undefined;
       }
 
       // Store proposals as pending for adversarial review (instead of creating tickets immediately)
@@ -393,6 +466,35 @@ export async function processEvent(
             tags: extractTags(ticket?.allowedPaths ?? [], ticket?.verificationCommands ?? []),
           });
         }
+        // Record failed ticket in dedup memory
+        if (s.current_ticket_id) {
+          try {
+            const ticket = await repos.tickets.getById(db, s.current_ticket_id);
+            if (ticket) {
+              recordDedupEntry(run.rootPath, ticket.title, false, 'agent_error');
+            }
+          } catch {
+            // Non-fatal
+          }
+        }
+        // Record sector failure
+        if (s.current_sector_path) {
+          try {
+            const sectorsPath = path.join(run.rootPath, '.blockspool', 'sectors.json');
+            if (fs.existsSync(sectorsPath)) {
+              const sectorsData = JSON.parse(fs.readFileSync(sectorsPath, 'utf8'));
+              if (sectorsData?.version === 2 && Array.isArray(sectorsData.sectors)) {
+                const sector = sectorsData.sectors.find((sec: { path: string }) => sec.path === s.current_sector_path);
+                if (sector) {
+                  sector.failureCount = (sector.failureCount ?? 0) + 1;
+                  fs.writeFileSync(sectorsPath, JSON.stringify(sectorsData, null, 2), 'utf8');
+                }
+              }
+            }
+          } catch {
+            // Non-fatal
+          }
+        }
         // Fail the ticket, move to next
         if (s.current_ticket_id) {
           await repos.tickets.updateStatus(db, s.current_ticket_id, 'blocked');
@@ -454,6 +556,23 @@ export async function processEvent(
         s.injected_learning_ids = [];
       }
 
+      // Record success learning
+      if (s.learnings_enabled && s.current_ticket_id) {
+        try {
+          const ticket = await repos.tickets.getById(db, s.current_ticket_id);
+          if (ticket) {
+            addLearning(run.rootPath, {
+              text: `${ticket.category ?? 'refactor'} succeeded: ${ticket.title}`.slice(0, 200),
+              category: 'pattern',
+              source: { type: 'ticket_success', detail: ticket.category ?? 'refactor' },
+              tags: extractTags(ticket.allowedPaths ?? [], ticket.verificationCommands ?? []),
+            });
+          }
+        } catch {
+          // Non-fatal
+        }
+      }
+
       // Mark ticket done in DB
       if (s.current_ticket_id) {
         await repos.tickets.updateStatus(db, s.current_ticket_id, 'done');
@@ -513,6 +632,35 @@ export async function processEvent(
             tags: extractTags(ticket?.allowedPaths ?? [], ticket?.verificationCommands ?? []),
           });
         }
+        // Record failed ticket in dedup memory
+        if (s.current_ticket_id) {
+          try {
+            const ticket = await repos.tickets.getById(db, s.current_ticket_id);
+            if (ticket) {
+              recordDedupEntry(run.rootPath, ticket.title, false, 'qa_failed');
+            }
+          } catch {
+            // Non-fatal
+          }
+        }
+        // Record sector failure
+        if (s.current_sector_path) {
+          try {
+            const sectorsPath = path.join(run.rootPath, '.blockspool', 'sectors.json');
+            if (fs.existsSync(sectorsPath)) {
+              const sectorsData = JSON.parse(fs.readFileSync(sectorsPath, 'utf8'));
+              if (sectorsData?.version === 2 && Array.isArray(sectorsData.sectors)) {
+                const sector = sectorsData.sectors.find((sec: { path: string }) => sec.path === s.current_sector_path);
+                if (sector) {
+                  sector.failureCount = (sector.failureCount ?? 0) + 1;
+                  fs.writeFileSync(sectorsPath, JSON.stringify(sectorsData, null, 2), 'utf8');
+                }
+              }
+            }
+          } catch {
+            // Non-fatal
+          }
+        }
         // Give up on this ticket
         if (s.current_ticket_id) {
           await repos.tickets.updateStatus(db, s.current_ticket_id, 'blocked');
@@ -554,6 +702,25 @@ export async function processEvent(
           }
         } catch {
           // Non-fatal — dedup memory is best-effort
+        }
+      }
+
+      // Record sector success
+      if (s.current_sector_path) {
+        try {
+          const sectorsPath = path.join(run.rootPath, '.blockspool', 'sectors.json');
+          if (fs.existsSync(sectorsPath)) {
+            const sectorsData = JSON.parse(fs.readFileSync(sectorsPath, 'utf8'));
+            if (sectorsData?.version === 2 && Array.isArray(sectorsData.sectors)) {
+              const sector = sectorsData.sectors.find((sec: { path: string }) => sec.path === s.current_sector_path);
+              if (sector) {
+                sector.successCount = (sector.successCount ?? 0) + 1;
+                fs.writeFileSync(sectorsPath, JSON.stringify(sectorsData, null, 2), 'utf8');
+              }
+            }
+          }
+        } catch {
+          // Non-fatal
         }
       }
 

@@ -39,6 +39,10 @@
     "./utils": {
       "types": "./dist/utils/index.d.ts",
       "import": "./dist/utils/index.js"
+    },
+    "./codebase-index": {
+      "types": "./dist/codebase-index.d.ts",
+      "import": "./dist/codebase-index.js"
     }
   },
   "files": [

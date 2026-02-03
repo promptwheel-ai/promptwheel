@@ -21,7 +21,7 @@ import {
 } from '../lib/solo-utils.js';
 import { cleanupWorktree } from '../lib/solo-git.js';
 import { soloRunTicket } from '../lib/solo-ticket.js';
-import { EXIT_CODES } from '../lib/solo-ticket.js';
+import { EXIT_CODES } from '../lib/solo-ticket-types.js';
 
 export function registerExecCommands(solo: Command): void {
   /**

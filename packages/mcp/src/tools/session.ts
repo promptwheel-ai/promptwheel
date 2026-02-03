@@ -2,8 +2,9 @@
  * Session management tools: start_session, session_status, end_session, advance, ingest_event
  */
 
-import { join } from 'node:path';
-import { unlinkSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { unlinkSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { SessionManager } from '../state.js';
@@ -231,6 +232,15 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
           // File may not exist — that's fine
         }
 
+        // Clean up orphaned worktrees
+        const worktreesRemoved = pruneWorktrees(state.projectPath);
+        if (worktreesRemoved > 0) {
+          spawnSync('git', ['worktree', 'prune'], {
+            cwd: state.projectPath,
+            encoding: 'utf-8',
+          });
+        }
+
         return {
           content: [{
             type: 'text' as const,
@@ -245,7 +255,16 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
               prs_created: finalState.prs_created,
               scout_cycles: finalState.scout_cycles,
               final_phase: finalState.phase,
-              message: 'Session ended.',
+              coverage_percent: finalState.files_total > 0 ? Math.round((finalState.files_scanned / finalState.files_total) * 100) : 0,
+              sectors_scanned: finalState.sectors_scanned,
+              sectors_total: finalState.sectors_total,
+              worktrees_removed: worktreesRemoved,
+              message: (() => {
+                const pct = finalState.files_total > 0 ? Math.round((finalState.files_scanned / finalState.files_total) * 100) : 0;
+                return pct >= 100
+                  ? 'Session ended. Full coverage achieved.'
+                  : `Session ended. ${pct}% of codebase scanned — run longer for full coverage.`;
+              })(),
             }, null, 2),
           }],
         };
@@ -460,4 +479,50 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
       };
     },
   );
+}
+
+// ── Worktree cleanup ──────────────────────────────────────────────────────────
+
+function pruneWorktrees(repoRoot: string): number {
+  try {
+    const worktreesDir = join(repoRoot, '.blockspool', 'worktrees');
+    if (!existsSync(worktreesDir)) return 0;
+
+    const entries = readdirSync(worktreesDir).filter(e => {
+      try { return statSync(join(worktreesDir, e)).isDirectory(); } catch { return false; }
+    });
+    if (entries.length === 0) return 0;
+
+    // Get worktrees git knows about
+    const listResult = spawnSync('git', ['worktree', 'list', '--porcelain'], {
+      cwd: repoRoot, encoding: 'utf-8',
+    });
+    const gitWorktrees = new Set(
+      (listResult.stdout ?? '').split('\n')
+        .filter(l => l.startsWith('worktree '))
+        .map(l => l.replace('worktree ', '').trim()),
+    );
+
+    let removed = 0;
+    for (const entry of entries) {
+      if (entry === '_milestone') continue;
+      const worktreePath = join(worktreesDir, entry);
+      const isTracked = gitWorktrees.has(resolve(worktreePath));
+      try {
+        if (isTracked) {
+          spawnSync('git', ['worktree', 'remove', '--force', worktreePath], {
+            cwd: repoRoot, encoding: 'utf-8',
+          });
+        } else {
+          rmSync(worktreePath, { recursive: true, force: true });
+        }
+        removed++;
+      } catch {
+        // Individual removal failure is non-fatal
+      }
+    }
+    return removed;
+  } catch {
+    return 0;
+  }
 }

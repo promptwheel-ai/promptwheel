@@ -13,13 +13,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
 import type { Readable } from 'node:stream';
-import {
-  buildTicketPrompt,
-  runClaude,
-  soloRunTicket,
-  type RunTicketOptions,
-  type ClaudeResult,
-} from '../lib/solo-ticket.js';
+import { soloRunTicket } from '../lib/solo-ticket.js';
+import { buildTicketPrompt } from '../lib/solo-prompt-builder.js';
+import { runClaude } from '../lib/execution-backends/index.js';
+import type { RunTicketOptions } from '../lib/solo-ticket-types.js';
+import type { ClaudeResult } from '../lib/execution-backends/index.js';
 
 // Mock all external dependencies
 vi.mock('node:child_process');
