@@ -7,7 +7,7 @@ import { runQa, getQaRunDetails } from '@blockspool/core/services';
 import type { tickets } from '@blockspool/core/repos';
 import { buildTicketPrompt } from './solo-prompt-builder.js';
 import type { ExecutionBackend } from './execution-backends/index.js';
-import { gitExec } from './solo-git.js';
+import { gitExec, gitExecFile } from './solo-git.js';
 
 /**
  * Check if a QA failure is a test failure (vitest/jest/pytest etc.)
@@ -131,10 +131,7 @@ export async function runQaRetryWithTestFix(ctx: QaRetryContext): Promise<QaRetr
       // Re-commit
       await gitExec('git add -A', { cwd: worktreePath });
       try {
-        await gitExec(
-          `git commit -m "fix: update tests for ${ticket.title.replace(/"/g, '\\"')}"`,
-          { cwd: worktreePath },
-        );
+        await gitExecFile('git', ['commit', '-m', `fix: update tests for ${ticket.title}`], { cwd: worktreePath });
       } catch {
         // No new changes to commit — that's fine
       }

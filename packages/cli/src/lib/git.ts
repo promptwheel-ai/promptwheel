@@ -50,7 +50,7 @@ function getProjectId(repoRoot: string, remoteUrl: string | null): string {
   for (let i = 0; i < source.length; i++) {
     const char = source.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
+    hash = hash | 0; // Convert to 32bit integer
   }
 
   return `proj_${Math.abs(hash).toString(36)}`;

@@ -33,7 +33,7 @@ import { createExecRunner } from '../lib/exec.js';
 import { createLogger } from '../lib/logger.js';
 import { getBlockspoolDir } from './solo-config.js';
 import { normalizeQaConfig } from './solo-utils.js';
-import { withGitMutex, gitExec, cleanupWorktree } from './solo-git.js';
+import { withGitMutex, gitExec, gitExecFile, cleanupWorktree } from './solo-git.js';
 import { generateSpindleRecommendations } from './solo-ci.js';
 import { ClaudeExecutionBackend, type ExecutionBackend } from './execution-backends/index.js';
 import { buildTicketPrompt } from './solo-prompt-builder.js';
@@ -589,10 +589,7 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
     artifactPaths.diff = diffArtifactPath;
 
     await gitExec('git add -A', { cwd: worktreePath });
-    await gitExec(
-      `git commit -m "${ticket.title.replace(/"/g, '\\"')}"`,
-      { cwd: worktreePath }
-    );
+    await gitExecFile('git', ['commit', '-m', ticket.title], { cwd: worktreePath });
 
     await markStep('commit', 'success', { metadata: { diffArtifactPath } });
 
@@ -736,10 +733,7 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
                 // Re-commit
                 await gitExec('git add -A', { cwd: worktreePath });
                 try {
-                  await gitExec(
-                    `git commit -m "fix: update tests for ${ticket.title.replace(/"/g, '\\"')}"`,
-                    { cwd: worktreePath },
-                  );
+                  await gitExecFile('git', ['commit', '-m', `fix: update tests for ${ticket.title}`], { cwd: worktreePath });
                 } catch {
                   // No new changes to commit — that's fine
                 }
@@ -849,12 +843,10 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
         const { assertPushSafe: assertPrSafe } = await import('./solo-remote.js');
         await assertPrSafe(worktreePath, config?.allowedRemote);
         const prBody = `## Summary\n\n${ticket.description ?? ticket.title}\n\n---\n_Created by BlockSpool_`;
-        const draftFlag = draftPr ? ' --draft' : '';
+        const ghArgs = ['pr', 'create', '--title', ticket.title, '--body', prBody, '--head', branchName];
+        if (draftPr) ghArgs.push('--draft');
 
-        const prOutput = (await gitExec(
-          `gh pr create --title "${ticket.title.replace(/"/g, '\\"')}" --body "${prBody.replace(/"/g, '\\"')}" --head "${branchName}"${draftFlag}`,
-          { cwd: worktreePath }
-        )).trim();
+        const prOutput = (await gitExecFile('gh', ghArgs, { cwd: worktreePath })).trim();
 
         const urlMatch = prOutput.match(/https:\/\/github\.com\/[^\s]+/);
         prUrl = urlMatch ? urlMatch[0] : undefined;

@@ -673,7 +673,7 @@ Examples:
           console.log(chalk.gray('Creating PR...'));
         }
 
-        const { execSync } = await import('child_process');
+        const { execSync, execFileSync } = await import('child_process');
         try {
           execSync(`git ls-remote --heads origin ${branchName}`, { cwd: repoRoot, encoding: 'utf-8', stdio: 'pipe' });
         } catch {
@@ -689,8 +689,8 @@ Examples:
         try {
           const prBody = `## Summary\n\n${ticket.description ?? ticket.title}\n\n---\n_Created by BlockSpool_`;
 
-          const prOutput = execSync(
-            `gh pr create --title "${ticket.title.replace(/"/g, '\\"')}" --body "${prBody.replace(/"/g, '\\"')}" --head "${branchName}"`,
+          const prOutput = execFileSync(
+            'gh', ['pr', 'create', '--title', ticket.title, '--body', prBody, '--head', branchName],
             { cwd: repoRoot, encoding: 'utf-8' }
           ).trim();
 

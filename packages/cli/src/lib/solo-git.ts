@@ -39,6 +39,27 @@ export async function gitExec(
 }
 
 /**
+ * Async git command execution using execFile — avoids shell interpolation.
+ * Use this instead of gitExec when arguments contain user-controlled data
+ * (e.g., ticket titles) to prevent shell injection.
+ */
+export async function gitExecFile(
+  cmd: string,
+  args: string[],
+  opts: { cwd: string },
+): Promise<string> {
+  const { execFile } = await import('child_process');
+  const { promisify } = await import('util');
+  const execFilePromise = promisify(execFile);
+  const result = await execFilePromise(cmd, args, {
+    cwd: opts.cwd,
+    encoding: 'utf-8',
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return result.stdout;
+}
+
+/**
  * Clean up worktree safely
  */
 export async function cleanupWorktree(repoRoot: string, worktreePath: string) {
@@ -169,8 +190,8 @@ export async function pushAndPrMilestone(
   const body = `## Milestone #${milestoneNumber}\n\n${ticketCount} tickets merged:\n\n${bulletList}\n\n---\n_Created by BlockSpool (milestone mode)_`;
 
   try {
-    const prOutput = (await gitExec(
-      `gh pr create --title "${title.replace(/"/g, '\\"')}" --body "${body.replace(/"/g, '\\"')}" --head "${milestoneBranch}" --draft`,
+    const prOutput = (await gitExecFile(
+      'gh', ['pr', 'create', '--title', title, '--body', body, '--head', milestoneBranch, '--draft'],
       { cwd: milestoneWorktreePath }
     )).trim();
 
