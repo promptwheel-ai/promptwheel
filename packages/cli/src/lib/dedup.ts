@@ -2,10 +2,10 @@
  * Deduplication utilities for proposal filtering.
  */
 
-import { spawnSync } from 'node:child_process';
 import type { DatabaseAdapter } from '@blockspool/core/db';
 import { tickets } from '@blockspool/core/repos';
 import type { TicketProposal } from '@blockspool/core/scout';
+import { gitExecFile } from './solo-git.js';
 
 /**
  * Sleep helper
@@ -96,12 +96,11 @@ export async function getDeduplicationContext(
 
   let openPrBranches: string[] = [];
   try {
-    const result = spawnSync('git', ['branch', '-r', '--list', 'origin/blockspool/*'], {
+    const stdout = await gitExecFile('git', ['branch', '-r', '--list', 'origin/blockspool/*'], {
       cwd: repoRoot,
-      encoding: 'utf-8',
     });
-    if (result.stdout) {
-      openPrBranches = result.stdout
+    if (stdout) {
+      openPrBranches = stdout
         .split('\n')
         .map(b => b.trim().replace('origin/', ''))
         .filter(Boolean);

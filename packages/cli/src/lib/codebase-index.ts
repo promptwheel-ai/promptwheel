@@ -6,6 +6,7 @@ export {
   refreshCodebaseIndex,
   hasStructuralChanges,
   formatIndexForPrompt,
+  getTrackedDirectories,
   SOURCE_EXTENSIONS,
   type CodebaseIndex,
   type ModuleEntry,

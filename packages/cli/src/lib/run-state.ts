@@ -66,6 +66,23 @@ function statePath(repoRoot: string): string {
   return path.join(repoRoot, '.blockspool', RUN_STATE_FILE);
 }
 
+// ── Async mutex to prevent concurrent read-modify-write races ───────────
+// During parallel ticket execution, multiple recordX functions may fire
+// concurrently. Without serialisation the second reader can snapshot stale
+// state before the first writer flushes, silently dropping data.
+//
+// The lock is intentionally per-process (module-level). File-level locking
+// (e.g. flock) is unnecessary because all callers live in the same Node
+// process; a simple promise-chain mutex is sufficient and zero-dep.
+let _writeLock: Promise<void> = Promise.resolve();
+
+function withRunStateLock<T>(fn: () => T): Promise<T> {
+  const prev = _writeLock;
+  let release!: () => void;
+  _writeLock = new Promise<void>((r) => { release = r; });
+  return prev.then(fn).finally(() => release());
+}
+
 const DEFAULT_STATE: RunState = {
   totalCycles: 0,
   lastDocsAuditCycle: 0,
@@ -95,9 +112,9 @@ export function readRunState(repoRoot: string): RunState {
       recentDiffs: Array.isArray(parsed.recentDiffs) ? parsed.recentDiffs : [],
       qualitySignals: parsed.qualitySignals ?? undefined,
       formulaStats: (() => {
-        const raw = parsed.formulaStats ?? {};
-        for (const key of Object.keys(raw)) {
-          const e = raw[key];
+        const statsRaw = parsed.formulaStats ?? {};
+        for (const key of Object.keys(statsRaw)) {
+          const e = statsRaw[key];
           e.recentCycles ??= 0;
           e.recentProposalsGenerated ??= 0;
           e.recentTicketsSucceeded ??= 0;
@@ -106,7 +123,7 @@ export function readRunState(repoRoot: string): RunState {
           e.mergeCount ??= 0;
           e.closedCount ??= 0;
         }
-        return raw;
+        return statsRaw;
       })(),
     };
   } catch {
@@ -128,6 +145,11 @@ export function writeRunState(repoRoot: string, state: RunState): void {
 
 /**
  * Increment the cycle counter and return the new state.
+ *
+ * This function remains synchronous because callers use its return value
+ * directly (e.g. `updatedRunState.totalCycles`). It is only called from
+ * the sequential post-cycle path, never from parallel ticket execution,
+ * so it does not need the async mutex.
  */
 export function recordCycle(repoRoot: string): RunState {
   const state = readRunState(repoRoot);
@@ -149,45 +171,51 @@ export function isDocsAuditDue(repoRoot: string, interval: number = 3): boolean 
 /**
  * Record that a docs-audit was run.
  */
-export function recordDocsAudit(repoRoot: string): void {
-  const state = readRunState(repoRoot);
-  state.lastDocsAuditCycle = state.totalCycles;
-  writeRunState(repoRoot, state);
+export function recordDocsAudit(repoRoot: string): Promise<void> {
+  return withRunStateLock(() => {
+    const state = readRunState(repoRoot);
+    state.lastDocsAuditCycle = state.totalCycles;
+    writeRunState(repoRoot, state);
+  });
 }
 
 /**
  * Record that a formula was used and produced N proposals.
  */
-export function recordFormulaResult(repoRoot: string, formulaName: string, proposalCount: number): void {
-  const state = readRunState(repoRoot);
-  const entry = state.formulaStats[formulaName] ??= { cycles: 0, proposalsGenerated: 0, ticketsSucceeded: 0, ticketsTotal: 0, recentCycles: 0, recentProposalsGenerated: 0, recentTicketsSucceeded: 0, recentTicketsTotal: 0, lastResetCycle: 0 };
-  entry.cycles++;
-  entry.proposalsGenerated += proposalCount;
-  entry.recentCycles++;
-  entry.recentProposalsGenerated += proposalCount;
-  if (state.totalCycles - entry.lastResetCycle >= 20) {
-    entry.recentCycles = 1;
-    entry.recentProposalsGenerated = proposalCount;
-    entry.recentTicketsSucceeded = 0;
-    entry.recentTicketsTotal = 0;
-    entry.lastResetCycle = state.totalCycles;
-  }
-  writeRunState(repoRoot, state);
+export function recordFormulaResult(repoRoot: string, formulaName: string, proposalCount: number): Promise<void> {
+  return withRunStateLock(() => {
+    const state = readRunState(repoRoot);
+    const entry = state.formulaStats[formulaName] ??= { cycles: 0, proposalsGenerated: 0, ticketsSucceeded: 0, ticketsTotal: 0, recentCycles: 0, recentProposalsGenerated: 0, recentTicketsSucceeded: 0, recentTicketsTotal: 0, lastResetCycle: 0 };
+    entry.cycles++;
+    entry.proposalsGenerated += proposalCount;
+    entry.recentCycles++;
+    entry.recentProposalsGenerated += proposalCount;
+    if (state.totalCycles - entry.lastResetCycle >= 20) {
+      entry.recentCycles = 1;
+      entry.recentProposalsGenerated = proposalCount;
+      entry.recentTicketsSucceeded = 0;
+      entry.recentTicketsTotal = 0;
+      entry.lastResetCycle = state.totalCycles;
+    }
+    writeRunState(repoRoot, state);
+  });
 }
 
 /**
  * Record a ticket success/failure for the formula that produced it.
  */
-export function recordFormulaTicketOutcome(repoRoot: string, formulaName: string, success: boolean): void {
-  const state = readRunState(repoRoot);
-  const entry = state.formulaStats[formulaName] ??= { cycles: 0, proposalsGenerated: 0, ticketsSucceeded: 0, ticketsTotal: 0, recentCycles: 0, recentProposalsGenerated: 0, recentTicketsSucceeded: 0, recentTicketsTotal: 0, lastResetCycle: 0 };
-  entry.ticketsTotal++;
-  entry.recentTicketsTotal++;
-  if (success) {
-    entry.ticketsSucceeded++;
-    entry.recentTicketsSucceeded++;
-  }
-  writeRunState(repoRoot, state);
+export function recordFormulaTicketOutcome(repoRoot: string, formulaName: string, success: boolean): Promise<void> {
+  return withRunStateLock(() => {
+    const state = readRunState(repoRoot);
+    const entry = state.formulaStats[formulaName] ??= { cycles: 0, proposalsGenerated: 0, ticketsSucceeded: 0, ticketsTotal: 0, recentCycles: 0, recentProposalsGenerated: 0, recentTicketsSucceeded: 0, recentTicketsTotal: 0, lastResetCycle: 0 };
+    entry.ticketsTotal++;
+    entry.recentTicketsTotal++;
+    if (success) {
+      entry.ticketsSucceeded++;
+      entry.recentTicketsSucceeded++;
+    }
+    writeRunState(repoRoot, state);
+  });
 }
 
 /** Max age for deferred proposals (7 days) */
@@ -196,17 +224,23 @@ const MAX_DEFERRED_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /**
  * Defer a proposal for later when the scope matches.
  */
-export function deferProposal(repoRoot: string, proposal: DeferredProposal): void {
-  const state = readRunState(repoRoot);
-  // Avoid duplicates by title
-  if (state.deferredProposals.some(d => d.title === proposal.title)) return;
-  state.deferredProposals.push(proposal);
-  writeRunState(repoRoot, state);
+export function deferProposal(repoRoot: string, proposal: DeferredProposal): Promise<void> {
+  return withRunStateLock(() => {
+    const state = readRunState(repoRoot);
+    // Avoid duplicates by title
+    if (state.deferredProposals.some(d => d.title === proposal.title)) return;
+    state.deferredProposals.push(proposal);
+    writeRunState(repoRoot, state);
+  });
 }
 
 /**
  * Retrieve and remove deferred proposals that now match the given scope.
  * Also prunes proposals older than 7 days.
+ *
+ * This function remains synchronous because callers use its return value
+ * directly (e.g. `deferred.length`). It is only called from the sequential
+ * scout/filter path, never from parallel ticket execution.
  */
 export function popDeferredForScope(repoRoot: string, scope: string): DeferredProposal[] {
   const state = readRunState(repoRoot);
@@ -243,15 +277,17 @@ export function popDeferredForScope(repoRoot: string, scope: string): DeferredPr
 /**
  * Record a formula merge/close outcome for PR merge signal tracking.
  */
-export function recordFormulaMergeOutcome(projectRoot: string, formula: string, merged: boolean): void {
-  const state = readRunState(projectRoot);
-  const entry = state.formulaStats[formula] ??= { cycles: 0, proposalsGenerated: 0, ticketsSucceeded: 0, ticketsTotal: 0, recentCycles: 0, recentProposalsGenerated: 0, recentTicketsSucceeded: 0, recentTicketsTotal: 0, lastResetCycle: 0, mergeCount: 0, closedCount: 0 };
-  if (merged) {
-    entry.mergeCount = (entry.mergeCount ?? 0) + 1;
-  } else {
-    entry.closedCount = (entry.closedCount ?? 0) + 1;
-  }
-  writeRunState(projectRoot, state);
+export function recordFormulaMergeOutcome(projectRoot: string, formula: string, merged: boolean): Promise<void> {
+  return withRunStateLock(() => {
+    const state = readRunState(projectRoot);
+    const entry = state.formulaStats[formula] ??= { cycles: 0, proposalsGenerated: 0, ticketsSucceeded: 0, ticketsTotal: 0, recentCycles: 0, recentProposalsGenerated: 0, recentTicketsSucceeded: 0, recentTicketsTotal: 0, lastResetCycle: 0, mergeCount: 0, closedCount: 0 };
+    if (merged) {
+      entry.mergeCount = (entry.mergeCount ?? 0) + 1;
+    } else {
+      entry.closedCount = (entry.closedCount ?? 0) + 1;
+    }
+    writeRunState(projectRoot, state);
+  });
 }
 
 /** Max recent diffs to keep (ring buffer) */
@@ -263,31 +299,35 @@ const MAX_RECENT_DIFFS = 10;
 export function pushRecentDiff(
   projectRoot: string,
   diff: { title: string; summary: string; files: string[]; cycle: number },
-): void {
-  const state = readRunState(projectRoot);
-  const diffs = state.recentDiffs ?? [];
-  diffs.push(diff);
-  if (diffs.length > MAX_RECENT_DIFFS) {
-    diffs.splice(0, diffs.length - MAX_RECENT_DIFFS);
-  }
-  state.recentDiffs = diffs;
-  writeRunState(projectRoot, state);
+): Promise<void> {
+  return withRunStateLock(() => {
+    const state = readRunState(projectRoot);
+    const diffs = state.recentDiffs ?? [];
+    diffs.push(diff);
+    if (diffs.length > MAX_RECENT_DIFFS) {
+      diffs.splice(0, diffs.length - MAX_RECENT_DIFFS);
+    }
+    state.recentDiffs = diffs;
+    writeRunState(projectRoot, state);
+  });
 }
 
 /**
  * Record an execution quality signal.
  */
-export function recordQualitySignal(projectRoot: string, signal: 'first_pass' | 'retried' | 'qa_pass' | 'qa_fail'): void {
-  const state = readRunState(projectRoot);
-  const qs = state.qualitySignals ??= { totalTickets: 0, firstPassSuccess: 0, retriedSuccess: 0, qaPassed: 0, qaFailed: 0 };
-  qs.totalTickets++;
-  switch (signal) {
-    case 'first_pass': qs.firstPassSuccess++; break;
-    case 'retried': qs.retriedSuccess++; break;
-    case 'qa_pass': qs.qaPassed++; break;
-    case 'qa_fail': qs.qaFailed++; break;
-  }
-  writeRunState(projectRoot, state);
+export function recordQualitySignal(projectRoot: string, signal: 'first_pass' | 'retried' | 'qa_pass' | 'qa_fail'): Promise<void> {
+  return withRunStateLock(() => {
+    const state = readRunState(projectRoot);
+    const qs = state.qualitySignals ??= { totalTickets: 0, firstPassSuccess: 0, retriedSuccess: 0, qaPassed: 0, qaFailed: 0 };
+    qs.totalTickets++;
+    switch (signal) {
+      case 'first_pass': qs.firstPassSuccess++; break;
+      case 'retried': qs.retriedSuccess++; break;
+      case 'qa_pass': qs.qaPassed++; break;
+      case 'qa_fail': qs.qaFailed++; break;
+    }
+    writeRunState(projectRoot, state);
+  });
 }
 
 /**

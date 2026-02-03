@@ -187,11 +187,13 @@ function normalizeProposal(
       return null;
     }
 
-    // Validate category
+    // Validate category (case-insensitive — LLMs sometimes emit "Refactor" or "SECURITY")
     const validCategories: ProposalCategory[] = ['refactor', 'docs', 'test', 'perf', 'security', 'fix', 'cleanup', 'types'];
-    if (!validCategories.includes(proposal.category)) {
+    const rawCategory = String(proposal.category || '').toLowerCase() as ProposalCategory;
+    if (!validCategories.includes(rawCategory)) {
       return null;
     }
+    proposal.category = rawCategory;
 
     // Filter by category if specified
     if (category && proposal.category !== category) {
@@ -273,7 +275,10 @@ function normalizeProposal(
     }
 
     return proposal;
-  } catch {
+  } catch (err) {
+    if (process.env.BLOCKSPOOL_VERBOSE) {
+      console.error(`normalizeProposal failed: ${err instanceof Error ? err.message : err}`);
+    }
     return null;
   }
 }

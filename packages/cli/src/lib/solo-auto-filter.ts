@@ -177,8 +177,22 @@ export async function filterProposals(
       })
     : categoryFiltered;
 
+  // Per-step pipeline logging
+  if (state.options.verbose || categoryFiltered.length === 0) {
+    console.log(chalk.gray(`  Pipeline: ${proposals.length} → ${categoryFiltered.length} after category`));
+  }
+  if (state.options.verbose || scopeFiltered.length === 0) {
+    console.log(chalk.gray(`  Pipeline: → ${scopeFiltered.length} after scope`));
+  }
+
   // Dedup filter
-  const dedupContext = await getDeduplicationContext(state.adapter, state.project.id, state.repoRoot);
+  let dedupContext: { existingTitles: string[]; openPrBranches: string[] };
+  try {
+    dedupContext = await getDeduplicationContext(state.adapter, state.project.id, state.repoRoot);
+  } catch (err) {
+    console.log(chalk.yellow(`  ⚠ Dedup context failed: ${err instanceof Error ? err.message : err}`));
+    dedupContext = { existingTitles: [], openPrBranches: [] };
+  }
   const approvedProposals: typeof scopeFiltered = [];
   let duplicateCount = 0;
   const rejectedDupTitles: string[] = [];
@@ -200,10 +214,32 @@ export async function filterProposals(
     }
   }
 
+  if (state.options.verbose || approvedProposals.length === 0) {
+    console.log(chalk.gray(`  Pipeline: → ${approvedProposals.length} after dedup`));
+  }
+
   // Bump dedup memory for rejected duplicates
   if (rejectedDupTitles.length > 0) {
     recordDedupEntries(state.repoRoot, rejectedDupTitles.map(t => ({ title: t, completed: false })));
     state.dedupMemory = loadDedupMemory(state.repoRoot);
+  }
+
+  // Impact threshold filter
+  let rejectedByImpact = 0;
+  const impactFiltered = approvedProposals.filter(p => {
+    const impact = p.impact_score ?? 5;
+    if (impact < state.effectiveMinImpact) {
+      rejectedByImpact++;
+      console.log(chalk.gray(`  ✗ Below impact threshold (${impact} < ${state.effectiveMinImpact}): ${p.title}`));
+      return false;
+    }
+    return true;
+  });
+  approvedProposals.length = 0;
+  approvedProposals.push(...impactFiltered);
+
+  if (state.options.verbose || approvedProposals.length === 0) {
+    console.log(chalk.gray(`  Pipeline: → ${approvedProposals.length} after impact`));
   }
 
   // Dependency enablement boost
@@ -245,11 +281,16 @@ export async function filterProposals(
   approvedProposals.length = 0;
   approvedProposals.push(...balanced);
 
+  if (state.options.verbose || approvedProposals.length === 0) {
+    console.log(chalk.gray(`  Pipeline: → ${approvedProposals.length} after balance`));
+  }
+
   if (approvedProposals.length === 0) {
     const parts: string[] = [];
     if (rejectedByCategory > 0) parts.push(`${rejectedByCategory} blocked by category`);
     if (rejectedByScope > 0) parts.push(`${rejectedByScope} out of scope`);
     if (duplicateCount > 0) parts.push(`${duplicateCount} duplicates`);
+    if (rejectedByImpact > 0) parts.push(`${rejectedByImpact} below impact threshold`);
     const reason = parts.length > 0
       ? `No proposals approved (${parts.join(', ')})`
       : 'No proposals passed filters';

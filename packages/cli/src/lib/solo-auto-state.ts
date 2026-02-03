@@ -310,18 +310,23 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
   // Build getCycleFormula/getCycleCategories (need state reference — we'll patch after)
   // These closures reference `state` which we build below.
 
-  // eslint-disable-next-line prefer-const
-  let shutdownRequested = false;
-  // eslint-disable-next-line prefer-const
-  let currentlyProcessing = false;
+  // Single shutdown handler using a mutable reference.  Before `state` is
+  // constructed the reference points at a temporary flags object; once `state`
+  // exists we redirect it so the handler reads/writes `state` directly.
+  // This eliminates the old dual-handler pattern and the race window where a
+  // SIGINT could set a local variable that the state object never observed.
+  let shutdownRef: { shutdownRequested: boolean; currentlyProcessing: boolean } = {
+    shutdownRequested: false,
+    currentlyProcessing: false,
+  };
 
   const shutdownHandler = () => {
-    if (shutdownRequested) {
+    if (shutdownRef.shutdownRequested) {
       console.log(chalk.red('\nForce quit. Exiting immediately.'));
       process.exit(1);
     }
-    shutdownRequested = true;
-    if (currentlyProcessing) {
+    shutdownRef.shutdownRequested = true;
+    if (shutdownRef.currentlyProcessing) {
       console.log(chalk.yellow('\nShutdown requested. Finishing current ticket, then finalizing milestone...'));
     } else {
       console.log(chalk.yellow('\nShutdown requested. Exiting...'));
@@ -468,11 +473,12 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     console.log(chalk.gray(`  Dedup memory loaded: ${dedupMemory.length} titles`));
   }
 
-  // Codebase index
+  // Codebase index — git tracking auto-excludes build artifacts (playwright-report, etc.)
+  // Hardcoded list is fallback for non-git repos
   const excludeDirs = ['node_modules', 'dist', 'build', '.git', '.blockspool', 'coverage', '__pycache__'];
   let codebaseIndex: CodebaseIndex | null = null;
   try {
-    codebaseIndex = buildCodebaseIndex(repoRoot, excludeDirs);
+    codebaseIndex = buildCodebaseIndex(repoRoot, excludeDirs, true);
     console.log(chalk.gray(`  Codebase index: ${codebaseIndex.modules.length} modules, ${codebaseIndex.untested_modules.length} untested, ${codebaseIndex.large_files.length} hotspots`));
   } catch {
     // Non-fatal
@@ -683,7 +689,7 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     deps,
     detectedBaseBranch,
 
-    shutdownRequested: false,
+    shutdownRequested: shutdownRef.shutdownRequested,  // carry over any early signal
     currentlyProcessing: false,
 
     pullInterval,
@@ -705,24 +711,9 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     startNewMilestone: null as any,
   };
 
-  // Wire up shutdown handler to read/write state flags
-  process.removeListener('SIGINT', shutdownHandler);
-  process.removeListener('SIGTERM', shutdownHandler);
-  const stateShutdownHandler = () => {
-    if (state.shutdownRequested) {
-      console.log(chalk.red('\nForce quit. Exiting immediately.'));
-      process.exit(1);
-    }
-    state.shutdownRequested = true;
-    if (state.currentlyProcessing) {
-      console.log(chalk.yellow('\nShutdown requested. Finishing current ticket, then finalizing milestone...'));
-    } else {
-      console.log(chalk.yellow('\nShutdown requested. Exiting...'));
-      process.exit(0);
-    }
-  };
-  process.on('SIGINT', stateShutdownHandler);
-  process.on('SIGTERM', stateShutdownHandler);
+  // Redirect shutdown handler to read/write state flags directly.
+  // No listener removal needed — same handler, just a new backing object.
+  shutdownRef = state;
 
   // Patch formula helpers to read from state
   const stateFormulaCtx = (): CycleFormulaContext => ({

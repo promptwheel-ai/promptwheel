@@ -641,6 +641,21 @@ export async function processEvent(
         }, null, 2),
       );
 
+      // Skip PR phase when draft_prs is false (e.g., --hours mode)
+      if (!s.draft_prs) {
+        await recordTicketDedup(db, run.rootPath, s.current_ticket_id, true);
+        recordSectorOutcome(run.rootPath, s.current_sector_path, 'success');
+        run.completeTicket();
+        run.appendEvent('TICKET_COMPLETED_NO_PR', payload);
+        run.setPhase('NEXT_TICKET');
+        return {
+          processed: true,
+          phase_changed: true,
+          new_phase: 'NEXT_TICKET',
+          message: 'QA passed, PRs disabled — moving to NEXT_TICKET',
+        };
+      }
+
       // Move to PR
       run.setPhase('PR');
       return {

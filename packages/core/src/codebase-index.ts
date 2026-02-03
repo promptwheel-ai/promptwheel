@@ -9,6 +9,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -287,21 +288,52 @@ function readHeader(filePath: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Git-aware directory filtering
+// ---------------------------------------------------------------------------
+
+/**
+ * Use `git ls-files` to discover which top-level directories contain tracked
+ * (or unignored) files. Returns null if git is unavailable or the project
+ * is not a git repo — callers should fall back to hardcoded excludes.
+ */
+export function getTrackedDirectories(projectRoot: string): Set<string> | null {
+  try {
+    const stdout = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+      cwd: projectRoot, maxBuffer: 10 * 1024 * 1024, encoding: 'utf8',
+    });
+    const dirs = new Set<string>();
+    for (const line of stdout.split('\n')) {
+      if (!line) continue;
+      const parts = line.split('/');
+      if (parts.length > 1) dirs.add(parts[0]);
+    }
+    return dirs;
+  } catch {
+    return null; // Not a git repo or git not available
+  }
+}
+
+// ---------------------------------------------------------------------------
 // buildCodebaseIndex
 // ---------------------------------------------------------------------------
 
 export function buildCodebaseIndex(
   projectRoot: string,
   excludeDirs: string[] = [],
+  useGitTracking = true,
 ): CodebaseIndex {
   const excludeSet = new Set(excludeDirs.map(d => d.toLowerCase()));
+
+  // Git-aware filtering: only walk directories that contain tracked files
+  const trackedDirs = useGitTracking ? getTrackedDirectories(projectRoot) : null;
 
   // Step 1: Module map — walk dirs 2 levels deep
   const modules: ModuleEntry[] = [];
   const sourceFilesByModule = new Map<string, string[]>();
 
   function shouldExclude(name: string): boolean {
-    return excludeSet.has(name.toLowerCase()) || name.startsWith('.');
+    if (excludeSet.has(name.toLowerCase()) || name.startsWith('.')) return true;
+    return false;
   }
 
   function walkForModules(dir: string, depth: number): void {
@@ -321,6 +353,10 @@ export function buildCodebaseIndex(
       if (entry.isFile() && SOURCE_EXTENSIONS.has(path.extname(entry.name))) {
         sourceFiles.push(path.join(dir, entry.name));
       } else if (entry.isDirectory() && !shouldExclude(entry.name)) {
+        // At depth 0 (project root), skip directories not tracked by git
+        if (depth === 0 && trackedDirs && !trackedDirs.has(entry.name)) {
+          continue;
+        }
         subdirs.push(entry);
       }
     }
@@ -531,8 +567,9 @@ export function refreshCodebaseIndex(
   existing: CodebaseIndex,
   projectRoot: string,
   excludeDirs: string[] = [],
+  useGitTracking = true,
 ): CodebaseIndex {
-  const fresh = buildCodebaseIndex(projectRoot, excludeDirs);
+  const fresh = buildCodebaseIndex(projectRoot, excludeDirs, useGitTracking);
 
   // Build lookup of old modules by path
   const oldByPath = new Map(existing.modules.map(m => [m.path, m]));

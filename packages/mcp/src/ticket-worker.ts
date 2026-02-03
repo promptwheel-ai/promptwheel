@@ -365,6 +365,13 @@ export async function ingestTicketEvent(
         return { processed: true, message: 'QA passed outside QA phase' };
       }
       await repos.tickets.updateStatus(db, ticketId, 'done');
+
+      // Skip PR phase when draft_prs is false (e.g., --hours mode)
+      if (!run.require().draft_prs) {
+        run.completeTicketWorker(ticketId);
+        return { processed: true, message: 'QA passed, PRs disabled — ticket complete' };
+      }
+
       run.updateTicketWorker(ticketId, { phase: 'PR' });
       return { processed: true, message: 'QA passed, moving to PR' };
     }
