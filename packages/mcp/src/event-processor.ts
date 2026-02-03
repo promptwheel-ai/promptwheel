@@ -8,6 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { DatabaseAdapter } from '@blockspool/core';
+import type { Project } from '@blockspool/core';
 import { repos } from '@blockspool/core';
 import { RunManager } from './run-manager.js';
 import type { EventType, CommitPlan } from './types.js';
@@ -17,6 +18,7 @@ import { deriveScopePolicy, validatePlanScope } from './scope-policy.js';
 import { recordOutput, recordDiff, recordCommandFailure, recordPlanHash } from './spindle.js';
 import { addLearning, confirmLearning, extractTags } from './learnings.js';
 import { recordDedupEntry } from './dedup-memory.js';
+import { ingestTicketEvent } from './ticket-worker.js';
 
 // ---------------------------------------------------------------------------
 // Helpers — shared sector & dedup recording
@@ -80,8 +82,34 @@ export async function processEvent(
   db: DatabaseAdapter,
   type: EventType,
   payload: Record<string, unknown>,
+  project?: Project,
 ): Promise<ProcessResult> {
   const s = run.require();
+
+  // ---------------------------------------------------------------------------
+  // Parallel execution: forward ticket-specific events to ticket workers
+  // ---------------------------------------------------------------------------
+  // When in PARALLEL_EXECUTE phase, events like PR_CREATED, TICKET_RESULT, etc.
+  // should be routed to the ticket worker, not processed at session level.
+  // This handles the case where the user calls blockspool_ingest_event instead
+  // of blockspool_ticket_event for ticket completion.
+  const TICKET_WORKER_EVENTS = new Set([
+    'PR_CREATED', 'TICKET_RESULT', 'PLAN_SUBMITTED', 'QA_PASSED', 'QA_FAILED', 'QA_COMMAND_RESULT',
+  ]);
+
+  if (s.phase === 'PARALLEL_EXECUTE' && TICKET_WORKER_EVENTS.has(type)) {
+    const ticketId = payload['ticket_id'] as string | undefined;
+    if (ticketId && run.getTicketWorker(ticketId)) {
+      // Forward to ticket worker
+      const ctx = { run, db, project: project ?? { id: s.project_id, rootPath: run.rootPath } as Project };
+      const result = await ingestTicketEvent(ctx, ticketId, type, payload);
+      return {
+        processed: result.processed,
+        phase_changed: false,
+        message: result.message,
+      };
+    }
+  }
 
   switch (type) {
     // -----------------------------------------------------------------

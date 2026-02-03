@@ -673,9 +673,9 @@ Examples:
           console.log(chalk.gray('Creating PR...'));
         }
 
-        const { execSync, execFileSync } = await import('child_process');
+        const { execFileSync } = await import('child_process');
         try {
-          execSync(`git ls-remote --heads origin ${branchName}`, { cwd: repoRoot, encoding: 'utf-8', stdio: 'pipe' });
+          execFileSync('git', ['ls-remote', '--heads', 'origin', branchName], { cwd: repoRoot, encoding: 'utf-8', stdio: 'pipe' });
         } catch {
           if (isJsonMode) {
             console.log(JSON.stringify({ success: false, error: `Branch not found on remote: ${branchName}` }));

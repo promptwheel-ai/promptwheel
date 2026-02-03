@@ -510,3 +510,110 @@ describe('advance — digest', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Parallel execution: event forwarding
+// ---------------------------------------------------------------------------
+
+describe('advance — parallel execution event forwarding', () => {
+  it('PR_CREATED via processEvent is forwarded to ticket worker in PARALLEL_EXECUTE phase', async () => {
+    startRun({ parallel: 2 });
+
+    const ticket = await repos.tickets.create(db, {
+      projectId: project.id,
+      title: 'Parallel test ticket',
+      description: 'test',
+      status: 'in_progress',
+      priority: 80,
+      category: 'refactor',
+      allowedPaths: [],
+      verificationCommands: [],
+    });
+
+    const s = run.require();
+    s.phase = 'PARALLEL_EXECUTE';
+
+    // Initialize ticket worker (simulating what advanceNextTicket does)
+    run.initTicketWorker(ticket.id, { title: ticket.title });
+
+    // Call processEvent with PR_CREATED (simulating user calling blockspool_ingest_event)
+    const result = await processEvent(run, db, 'PR_CREATED', {
+      ticket_id: ticket.id,
+      url: 'https://github.com/test/pr/1',
+      branch: 'blockspool/test',
+    }, project);
+
+    // Should be forwarded to ticket worker and complete the ticket
+    expect(result.processed).toBe(true);
+    expect(result.message).toBe('PR created, ticket complete');
+    expect(s.tickets_completed).toBe(1);
+    expect(s.prs_created).toBe(1);
+
+    // Worker should be removed
+    expect(run.getTicketWorker(ticket.id)).toBeNull();
+  });
+
+  it('TICKET_RESULT via processEvent is forwarded to ticket worker in PARALLEL_EXECUTE phase', async () => {
+    startRun({ parallel: 2 });
+
+    const ticket = await repos.tickets.create(db, {
+      projectId: project.id,
+      title: 'Parallel test ticket 2',
+      description: 'test',
+      status: 'in_progress',
+      priority: 80,
+      category: 'refactor',
+      allowedPaths: [],
+      verificationCommands: [],
+    });
+
+    const s = run.require();
+    s.phase = 'PARALLEL_EXECUTE';
+
+    // Initialize ticket worker
+    run.initTicketWorker(ticket.id, { title: ticket.title });
+
+    // Call processEvent with TICKET_RESULT (done status with PR URL)
+    const result = await processEvent(run, db, 'TICKET_RESULT', {
+      ticket_id: ticket.id,
+      status: 'done',
+      pr_url: 'https://github.com/test/pr/2',
+    }, project);
+
+    // Should be forwarded and complete with PR
+    expect(result.processed).toBe(true);
+    expect(result.message).toBe('Ticket complete with PR');
+    expect(s.tickets_completed).toBe(1);
+    expect(s.prs_created).toBe(1);
+  });
+
+  it('events without ticket_id fall through to normal processing', async () => {
+    startRun({ parallel: 2 });
+
+    const s = run.require();
+    s.phase = 'PARALLEL_EXECUTE';
+
+    // PR_CREATED without ticket_id should fall through to normal processing
+    // which will return "PR created outside PR phase"
+    const result = await processEvent(run, db, 'PR_CREATED', {
+      url: 'https://github.com/test/pr/1',
+    }, project);
+
+    expect(result.message).toBe('PR created outside PR phase');
+  });
+
+  it('events for non-existent workers fall through to normal processing', async () => {
+    startRun({ parallel: 2 });
+
+    const s = run.require();
+    s.phase = 'PARALLEL_EXECUTE';
+
+    // PR_CREATED with ticket_id that has no worker should fall through
+    const result = await processEvent(run, db, 'PR_CREATED', {
+      ticket_id: 'nonexistent',
+      url: 'https://github.com/test/pr/1',
+    }, project);
+
+    expect(result.message).toBe('PR created outside PR phase');
+  });
+});

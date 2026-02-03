@@ -318,17 +318,30 @@ export async function ingestTicketEvent(
     }
 
     case 'TICKET_RESULT': {
-      if (worker.phase !== 'EXECUTE') {
-        return { processed: true, message: 'Ticket result outside EXECUTE phase' };
-      }
-
+      // Accept TICKET_RESULT in any phase — inline prompts (Task subagents) don't
+      // call back at each step, so worker.phase may still be 'PLAN'.
       const status = payload['status'] as string;
-      if (status === 'done') {
-        const diff = (payload['diff'] ?? null) as string | null;
-        const changedFiles = (payload['changed_files'] ?? []) as string[];
-        recordDiff(worker.spindle, diff ?? (changedFiles.length > 0 ? changedFiles.join('\n') : null));
-        run.updateTicketWorker(ticketId, { phase: 'QA', spindle: worker.spindle });
-        return { processed: true, message: 'Moving to QA' };
+      if (status === 'done' || status === 'success') {
+        // For inline prompts, 'success' means the subagent completed everything
+        // including QA, commit, push. If PR_CREATED follows, that's the final step.
+        // If not, treat this as ticket complete (e.g., direct commit without PR).
+        if (payload['pr_url']) {
+          // PR was created — mark complete
+          run.require().prs_created++;
+          run.completeTicketWorker(ticketId);
+          return { processed: true, message: 'Ticket complete with PR' };
+        }
+        // No PR URL — move to QA if in traditional flow, or complete if inline
+        if (worker.phase === 'EXECUTE') {
+          const diff = (payload['diff'] ?? null) as string | null;
+          const changedFiles = (payload['changed_files'] ?? []) as string[];
+          recordDiff(worker.spindle, diff ?? (changedFiles.length > 0 ? changedFiles.join('\n') : null));
+          run.updateTicketWorker(ticketId, { phase: 'QA', spindle: worker.spindle });
+          return { processed: true, message: 'Moving to QA' };
+        }
+        // Inline prompt completed without PR — mark complete
+        run.completeTicketWorker(ticketId);
+        return { processed: true, message: 'Ticket complete (no PR)' };
       }
       if (status === 'failed') {
         await repos.tickets.updateStatus(db, ticketId, 'blocked');
@@ -372,9 +385,9 @@ export async function ingestTicketEvent(
     }
 
     case 'PR_CREATED': {
-      if (worker.phase !== 'PR') {
-        return { processed: true, message: 'PR created outside PR phase' };
-      }
+      // Accept PR_CREATED in any phase — inline prompts (Task subagents) don't
+      // call back at each step, so worker.phase may still be 'PLAN'.
+      // The session-level phase is PARALLEL_EXECUTE which is what matters.
       run.require().prs_created++;
       run.completeTicketWorker(ticketId);
       return { processed: true, message: 'PR created, ticket complete' };

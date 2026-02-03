@@ -9,6 +9,124 @@ import type { Ticket } from '@blockspool/core';
 import { execSync } from 'node:child_process';
 import type { SessionManager } from '../state.js';
 
+/**
+ * Allowlist of safe command prefixes for verification commands.
+ * Defense in depth: prevents arbitrary command execution if the trust boundary is compromised.
+ */
+const ALLOWED_COMMAND_PREFIXES = [
+  // Node.js / JavaScript
+  'npm test',
+  'npm run',
+  'npx vitest',
+  'npx jest',
+  'npx mocha',
+  'npx playwright',
+  'npx cypress',
+  'npx eslint',
+  'npx tsc',
+  'npx tsx',
+  'yarn test',
+  'yarn run',
+  'pnpm test',
+  'pnpm run',
+  'bun test',
+  'bun run',
+  'vitest',
+  'jest',
+  'mocha',
+  // Python
+  'pytest',
+  'python -m pytest',
+  'python3 -m pytest',
+  'python -m unittest',
+  'python3 -m unittest',
+  'mypy',
+  'ruff',
+  'flake8',
+  'pylint',
+  // Go
+  'go test',
+  'go vet',
+  'go build',
+  'golangci-lint',
+  // Rust
+  'cargo test',
+  'cargo check',
+  'cargo clippy',
+  'cargo build',
+  // Ruby
+  'bundle exec rspec',
+  'bundle exec rake',
+  'rspec',
+  'rake test',
+  'rails test',
+  // Java / JVM
+  'mvn test',
+  'mvn verify',
+  'gradle test',
+  './gradlew test',
+  // C# / .NET
+  'dotnet test',
+  'dotnet build',
+  // PHP
+  'phpunit',
+  'vendor/bin/phpunit',
+  './vendor/bin/phpunit',
+  'composer test',
+  // Elixir
+  'mix test',
+  'mix compile',
+  // Swift
+  'swift test',
+  'swift build',
+  // Make (common wrapper)
+  'make test',
+  'make check',
+  'make build',
+];
+
+/**
+ * Validates a verification command against the allowlist.
+ * Returns { valid: true } if the command is allowed, or { valid: false, reason: string } if not.
+ */
+export function validateVerificationCommand(command: string): { valid: true } | { valid: false; reason: string } {
+  const trimmedCommand = command.trim();
+
+  // Empty commands are not allowed
+  if (!trimmedCommand) {
+    return { valid: false, reason: 'Empty command is not allowed' };
+  }
+
+  // Check for shell injection patterns
+  const dangerousPatterns = [
+    /[;&|`$]/, // Shell operators and command substitution
+    /\$\(/, // Command substitution
+    /\$\{/, // Variable expansion
+    />|>>|</, // Redirection
+    /\n/, // Newlines (could inject commands)
+  ];
+
+  for (const pattern of dangerousPatterns) {
+    if (pattern.test(trimmedCommand)) {
+      return { valid: false, reason: `Command contains potentially dangerous pattern: ${pattern.source}` };
+    }
+  }
+
+  // Check if command starts with an allowed prefix
+  const isAllowed = ALLOWED_COMMAND_PREFIXES.some(prefix =>
+    trimmedCommand === prefix || trimmedCommand.startsWith(prefix + ' ')
+  );
+
+  if (!isAllowed) {
+    return {
+      valid: false,
+      reason: `Command "${trimmedCommand.slice(0, 50)}${trimmedCommand.length > 50 ? '...' : ''}" does not match any allowed command prefix. Allowed prefixes: npm test, npm run, vitest, jest, pytest, go test, cargo test, etc.`
+    };
+  }
+
+  return { valid: true };
+}
+
 export function registerExecuteTools(server: McpServer, getState: () => SessionManager) {
   server.tool(
     'blockspool_next_ticket',
@@ -173,6 +291,36 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
       }
 
       state.run.appendEvent('QA_STARTED', { ticket_id: params.ticketId });
+
+      // Validate all verification commands before executing any
+      const invalidCommands: Array<{ command: string; reason: string }> = [];
+      for (const cmd of ticket.verificationCommands) {
+        const validation = validateVerificationCommand(cmd);
+        if (!validation.valid) {
+          invalidCommands.push({ command: cmd, reason: validation.reason });
+        }
+      }
+
+      if (invalidCommands.length > 0) {
+        state.run.appendEvent('QA_FAILED', {
+          ticket_id: params.ticketId,
+          reason: 'Verification command validation failed',
+          invalid_commands: invalidCommands,
+        });
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              success: false,
+              ticketId: params.ticketId,
+              error: 'Verification command validation failed',
+              invalidCommands,
+              message: 'One or more verification commands were rejected for security reasons. Only standard test runners are allowed (npm test, vitest, jest, pytest, go test, cargo test, etc.).',
+            }, null, 2),
+          }],
+          isError: true,
+        };
+      }
 
       // Run QA commands
       const qaResults: Array<{ command: string; success: boolean; output: string }> = [];

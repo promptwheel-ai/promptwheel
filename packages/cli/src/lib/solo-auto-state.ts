@@ -267,7 +267,11 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
   const minConfidence = parseInt(options.minConfidence || String(activeFormula?.minConfidence ?? DEFAULT_AUTO_CONFIG.minConfidence), 10);
   const useDraft = options.draft !== false;
 
-  const batchSize = options.batchSize ? parseInt(options.batchSize, 10) : undefined;
+  // Default milestone mode for long runs (>= 1 hour)
+  // Batches tickets into single PR instead of N individual PRs — recommended for continuous improvement
+  // Users can opt out with --batch-size 0
+  const defaultBatchSize = (options.hours && parseFloat(options.hours) >= 1) ? 10 : undefined;
+  const batchSize = options.batchSize ? parseInt(options.batchSize, 10) : defaultBatchSize;
   const milestoneMode = batchSize !== undefined && batchSize > 0;
 
   const userScope = options.scope || activeFormula?.scope;

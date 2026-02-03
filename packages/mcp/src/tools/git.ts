@@ -5,8 +5,22 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { repos } from '@blockspool/core';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import type { SessionManager } from '../state.js';
+
+/**
+ * Validates a git branch name to prevent command injection.
+ * Only allows alphanumeric characters, hyphens, underscores, forward slashes, and dots.
+ * Must not start with a hyphen (to prevent option injection).
+ */
+function validateBranchName(branch: string): boolean {
+  // Git branch name rules:
+  // - Cannot start with a hyphen (prevents option injection like --delete)
+  // - Only alphanumeric, hyphens, underscores, forward slashes, and dots allowed
+  // - Cannot contain shell metacharacters like ; | & $ ` etc.
+  const validPattern = /^[a-zA-Z0-9][a-zA-Z0-9\-_./]*$/;
+  return validPattern.test(branch);
+}
 
 export function registerGitTools(server: McpServer, getState: () => SessionManager) {
   server.tool(
@@ -35,6 +49,20 @@ export function registerGitTools(server: McpServer, getState: () => SessionManag
       }
 
       const baseBranch = params.baseBranch ?? 'main';
+
+      // Validate baseBranch to prevent command injection
+      if (!validateBranchName(baseBranch)) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({
+              error: `Invalid base branch name: "${baseBranch}". Branch names must start with an alphanumeric character and contain only alphanumeric characters, hyphens, underscores, forward slashes, and dots.`,
+            }),
+          }],
+          isError: true,
+        };
+      }
+
       // Create branch name from ticket
       const slug = ticket.title
         .toLowerCase()
@@ -48,12 +76,12 @@ export function registerGitTools(server: McpServer, getState: () => SessionManag
       try {
         // Check if branch exists
         try {
-          execSync(`git rev-parse --verify ${branchName}`, { cwd, stdio: 'pipe' });
+          execFileSync('git', ['rev-parse', '--verify', branchName], { cwd, stdio: 'pipe' });
           // Branch exists, just checkout
-          execSync(`git checkout ${branchName}`, { cwd, stdio: 'pipe' });
+          execFileSync('git', ['checkout', branchName], { cwd, stdio: 'pipe' });
         } catch {
           // Branch doesn't exist, create from base
-          execSync(`git checkout -b ${branchName} ${baseBranch}`, { cwd, stdio: 'pipe' });
+          execFileSync('git', ['checkout', '-b', branchName, baseBranch], { cwd, stdio: 'pipe' });
         }
 
         return {

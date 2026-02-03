@@ -158,6 +158,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
           state.db,
           params.type as EventType,
           params.payload as Record<string, unknown>,
+          state.project,
         );
 
         return {

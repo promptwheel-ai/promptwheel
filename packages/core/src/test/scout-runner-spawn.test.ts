@@ -44,10 +44,11 @@ describe('scout-runner: runClaude', () => {
     mockChild.emit('close', 0);
     await promise;
 
+    // Args should include -p flag but NOT the prompt (prompt is sent via stdin)
     expect(mockSpawn).toHaveBeenCalledWith(
       'claude',
       expect.arrayContaining([
-        '-p', 'Analyze this code',
+        '-p',
         '--model', 'opus',
         '--output-format', 'text',
         '--allowedTools', '',
@@ -57,8 +58,13 @@ describe('scout-runner: runClaude', () => {
         env: expect.objectContaining({
           CLAUDE_CODE_NON_INTERACTIVE: '1',
         }),
+        stdio: ['pipe', 'pipe', 'pipe'],
       })
     );
+
+    // Prompt should be written to stdin
+    expect(mockChild.stdin.write).toHaveBeenCalledWith('Analyze this code');
+    expect(mockChild.stdin.end).toHaveBeenCalled();
   });
 
   it('defaults to opus model when not specified', async () => {
@@ -450,6 +456,10 @@ function createMockChildProcess(opts: {
 
   mockChild.stdout = new EventEmitter();
   mockChild.stderr = new EventEmitter();
+  mockChild.stdin = {
+    write: vi.fn(),
+    end: vi.fn(),
+  };
   mockChild.kill = vi.fn();
 
   // Simulate data emission

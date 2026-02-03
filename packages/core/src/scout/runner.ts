@@ -63,7 +63,7 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerResult> {
     }
 
     const args = [
-      '-p', prompt,
+      '-p',  // Prompt will be sent via stdin to avoid arg length limits
       '--model', model,
       '--output-format', 'text',
       '--allowedTools', '',  // Disable tools - content provided in prompt
@@ -75,8 +75,12 @@ export async function runClaude(options: RunnerOptions): Promise<RunnerResult> {
         ...process.env,
         CLAUDE_CODE_NON_INTERACTIVE: '1',
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    // Send prompt via stdin to avoid OS arg length limits (MAX_ARG_STRLEN ~128KB on Linux)
+    proc.stdin.write(prompt);
+    proc.stdin.end();
 
     let stdout = '';
     let stderr = '';
