@@ -237,6 +237,10 @@ export function consolidateLearnings(projectRoot: string): void {
         // Merge tags
         const tagSet = new Set([...learnings[i].tags, ...learnings[j].tags]);
         learnings[i].tags = [...tagSet];
+        // Preserve most recent confirmation date for decay calculations
+        if (new Date(learnings[j].last_confirmed_at).getTime() > new Date(learnings[i].last_confirmed_at).getTime()) {
+          learnings[i].last_confirmed_at = learnings[j].last_confirmed_at;
+        }
         merged.add(j);
       }
     }
