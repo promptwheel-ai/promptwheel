@@ -299,11 +299,12 @@ export async function createDirectSummaryPr(
   repoRoot: string, branchName: string, baseBranch: string,
   title: string, body: string, draft: boolean
 ): Promise<string> {
-  const draftFlag = draft ? ' --draft' : '';
-  const prOutput = (await gitExec(
-    `gh pr create --title "${title.replace(/"/g, '\\"')}" --body "${body.replace(/"/g, '\\"')}" --head "${branchName}" --base "${baseBranch}"${draftFlag}`,
-    { cwd: repoRoot }
-  )).trim();
+  const args = ['pr', 'create', '--title', title, '--body', body, '--head', branchName, '--base', baseBranch];
+  if (draft) {
+    args.push('--draft');
+  }
+
+  const prOutput = (await gitExecFile('gh', args, { cwd: repoRoot })).trim();
 
   const urlMatch = prOutput.match(/https:\/\/github\.com\/[^\s]+/);
   return urlMatch ? urlMatch[0] : prOutput;
