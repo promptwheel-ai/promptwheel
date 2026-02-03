@@ -1,11 +1,7 @@
 {
   "name": "blockspool",
-  "version": "0.5.31",
   "description": "Continuous codebase improvement — scouts, plans, executes, and PRs",
-  "skills": [
-    "./skills/run",
-    "./skills/status",
-    "./skills/nudge",
-    "./skills/cancel"
-  ]
+  "author": {
+    "name": "BlockSpool"
+  }
 }
