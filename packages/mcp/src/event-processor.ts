@@ -262,7 +262,7 @@ export async function processEvent(
     }
 
     case 'PROPOSALS_FILTERED': {
-      // Legacy event from blockspool_submit_proposals tool.
+      // Emitted after proposal filtering.
       // Check if we have ready tickets now.
       const readyCount = await repos.tickets.countByStatus(db, s.project_id);
       const ready = (readyCount as Record<string, number>)['ready'] ?? 0;

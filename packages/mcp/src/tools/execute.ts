@@ -28,7 +28,7 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
           content: [{
             type: 'text' as const,
             text: JSON.stringify({
-              message: 'No tickets ready for execution. Run blockspool_scout_files to find more work.',
+              message: 'No tickets ready for execution. Call blockspool_advance to scout for more work.',
               tickets_completed: run.tickets_completed,
               tickets_failed: run.tickets_failed,
             }),

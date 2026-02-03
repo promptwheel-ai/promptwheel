@@ -40,13 +40,6 @@ await client.close();
 | `blockspool_list_formulas` | List available formulas | — |
 | `blockspool_get_scope_policy` | Get scope policy for current ticket | `file_path?` |
 
-### Scouting
-
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `blockspool_scout_files` | Get scout prompt + file batch | `batchIndex?` |
-| `blockspool_submit_proposals` | Submit proposals from scouting | `proposals[]` |
-
 ### Execution
 
 | Tool | Description | Parameters |

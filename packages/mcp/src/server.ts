@@ -7,7 +7,6 @@ import type { DatabaseAdapter } from '@blockspool/core';
 import { repos } from '@blockspool/core';
 import { SessionManager } from './state.js';
 import { registerSessionTools } from './tools/session.js';
-import { registerScoutTools } from './tools/scout.js';
 import { registerExecuteTools } from './tools/execute.js';
 import { registerGitTools } from './tools/git.js';
 
@@ -39,7 +38,6 @@ export async function createServer(options: ServerOptions): Promise<{
 
   // Register tool groups
   registerSessionTools(server, getState);
-  registerScoutTools(server, getState);
   registerExecuteTools(server, getState);
   registerGitTools(server, getState);
 
