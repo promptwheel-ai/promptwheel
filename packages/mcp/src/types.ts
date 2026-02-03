@@ -162,6 +162,8 @@ export interface RunState {
   // Cross-run learnings
   learnings_enabled: boolean;
   injected_learning_ids: string[];
+  /** Cached learnings loaded at session start (avoids redundant file I/O) */
+  cached_learnings: import('./learnings.js').Learning[];
 
   // Sector rotation
   selected_sector_path?: string;

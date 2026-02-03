@@ -171,6 +171,7 @@ export class RunManager {
 
       learnings_enabled: config.learnings !== false,
       injected_learning_ids: [],
+      cached_learnings: [],
     };
 
     // Detect project metadata (test runner, framework, etc.)
@@ -239,9 +240,9 @@ export class RunManager {
       // Non-fatal — sectors.json seeding is best-effort
     }
 
-    // Apply decay to cross-run learnings (if enabled)
+    // Apply decay to cross-run learnings and cache (if enabled)
     if (this.state.learnings_enabled) {
-      loadLearnings(this.projectPath, config.learnings_decay_rate);
+      this.state.cached_learnings = loadLearnings(this.projectPath, config.learnings_decay_rate);
     }
 
     // Create run folder

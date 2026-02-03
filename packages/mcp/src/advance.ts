@@ -36,7 +36,6 @@ import { detectProjectMetadata, formatMetadataForPrompt } from './project-metada
 import { formatIndexForPrompt, refreshCodebaseIndex, hasStructuralChanges } from './codebase-index.js';
 import { buildProposalReviewPrompt, type ValidatedProposal } from './proposals.js';
 import {
-  loadLearnings as readLearningsFromDisk,
   selectRelevant,
   formatLearningsForPrompt,
   recordAccess,
@@ -50,6 +49,7 @@ const DEFAULT_LEARNINGS_BUDGET = 2000;
 
 /**
  * Build a learnings block for prompt injection. Tracks injected IDs in state.
+ * Uses cached learnings from RunState (loaded at session start) to avoid redundant file I/O.
  */
 function buildLearningsBlock(
   run: RunManager,
@@ -61,7 +61,8 @@ function buildLearningsBlock(
 
   const projectPath = run.rootPath;
 
-  const allLearnings = readLearningsFromDisk(projectPath, 0); // decay=0, already decayed at session start
+  // Use cached learnings from session start (decay already applied)
+  const allLearnings = s.cached_learnings;
   if (allLearnings.length === 0) return '';
 
   const relevant = selectRelevant(allLearnings, { paths: contextPaths, commands: contextCommands });
