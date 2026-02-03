@@ -93,6 +93,7 @@ export interface AutoModeOptions {
   deliveryMode?: 'direct' | 'pr' | 'auto-merge';
   directBranch?: string;
   directFinalize?: 'pr' | 'merge' | 'none';
+  individualPrs?: boolean;
 }
 
 // ── Session state ───────────────────────────────────────────────────────────
@@ -262,15 +263,19 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     + (options.minutes ? parseFloat(options.minutes) : 0) || undefined;
   const endTime = totalMinutes ? Date.now() + (totalMinutes * 60 * 1000) : undefined;
 
-  const defaultMaxPrs = isContinuous ? 20 : 3;
+  // PR limits: effectively unlimited for timed/continuous runs, otherwise use defaults
+  // Users can override with --max-prs
+  const defaultMaxPrs = isContinuous ? 999 : 3;
   const maxPrs = parseInt(options.maxPrs || String(activeFormula?.maxPrs ?? defaultMaxPrs), 10);
   const minConfidence = parseInt(options.minConfidence || String(activeFormula?.minConfidence ?? DEFAULT_AUTO_CONFIG.minConfidence), 10);
   const useDraft = options.draft !== false;
 
-  // Default milestone mode for long runs (>= 1 hour)
-  // Batches tickets into single PR instead of N individual PRs — recommended for continuous improvement
-  // Users can opt out with --batch-size 0
-  const defaultBatchSize = (options.hours && parseFloat(options.hours) >= 1) ? 10 : undefined;
+  // Milestone mode is the default: batches tickets into single PR
+  // - Easier to review (one PR vs many)
+  // - Scout sees previous work in the branch
+  // - Easy to revert if needed
+  // Use --individual-prs to create separate PR per ticket
+  const defaultBatchSize = options.individualPrs ? undefined : 10;
   const batchSize = options.batchSize ? parseInt(options.batchSize, 10) : defaultBatchSize;
   const milestoneMode = batchSize !== undefined && batchSize > 0;
 

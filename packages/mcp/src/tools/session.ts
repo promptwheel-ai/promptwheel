@@ -31,7 +31,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
       max_proposals: z.number().optional().describe('Max proposals per scout (default: 5).'),
       step_budget: z.number().optional().describe('Max advance() calls (default: 200).'),
       ticket_step_budget: z.number().optional().describe('Max steps per ticket (default: 12).'),
-      max_prs: z.number().optional().describe('Max PRs to create (default: 5).'),
+      max_prs: z.number().optional().describe('Max PRs to create (default: 5, unlimited when hours is set).'),
       max_cycles: z.number().optional().describe('Max scout→execute cycles (default: 1). Use with hours for multi-cycle runs.'),
       draft_prs: z.boolean().optional().describe('Create draft PRs (default: true).'),
       eco: z.boolean().optional().describe('Eco mode: allow subagent delegation during scout for lower cost (default: false).'),

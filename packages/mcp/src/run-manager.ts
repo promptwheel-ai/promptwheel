@@ -94,9 +94,14 @@ export class RunManager {
     const runId = prefixedId('run');
     const sessionId = prefixedId('ses');
     const now = new Date();
+    const isContinuous = config.hours !== undefined || (config.max_cycles !== undefined && config.max_cycles > 1);
     const expiresAt = config.hours
       ? new Date(now.getTime() + config.hours * 60 * 60 * 1000).toISOString()
       : null;
+
+    // When running for a duration (--hours) or multiple cycles, effectively unlimited PRs
+    // Otherwise use default (5) to avoid overwhelming the user
+    const effectiveMaxPrs = config.max_prs ?? (isContinuous ? 999 : DEFAULT_MAX_PRS);
 
     this.state = {
       run_id: runId,
@@ -121,7 +126,7 @@ export class RunManager {
       prs_created: 0,
       scout_cycles: 0,
       max_cycles: config.max_cycles ?? 1,
-      max_prs: config.max_prs ?? DEFAULT_MAX_PRS,
+      max_prs: effectiveMaxPrs,
 
       current_ticket_id: null,
       current_ticket_plan: null,

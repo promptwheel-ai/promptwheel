@@ -54,7 +54,7 @@ Examples:
 `)
     .option('--dry-run', 'Show what would be done without making changes')
     .option('--scope <path>', 'Directory to scout (default: src, rotates in continuous mode)')
-    .option('--max-prs <n>', 'Maximum PRs to create (default: 3, or 20 in continuous mode)')
+    .option('--max-prs <n>', 'Maximum PRs to create (default: 3, unlimited in --hours/--cycles mode)')
     .option('--safe', 'Restrict to safe categories only (refactor, docs, types, perf)')
     .option('--tests', 'Include test proposals (excluded by default)')
     .option('--no-draft', 'Create regular PRs instead of drafts')
@@ -69,7 +69,8 @@ Examples:
     .option('--formula <name>', 'Use a predefined formula (e.g., security-audit, test-coverage, cleanup, deep)')
     .option('--deep', 'Deep architectural review (shortcut for --formula deep)')
     .option('--eco', 'Use sonnet model for scouting (cheaper, faster, less thorough)')
-    .option('--batch-size <n>', 'Milestone mode: merge N tickets into one PR (default: off)')
+    .option('--batch-size <n>', 'Tickets per milestone PR (default: 10)')
+    .option('--individual-prs', 'Create separate PR for each ticket instead of batching into milestone')
     .option('--codex', 'Use Codex for both scouting and execution (no Anthropic key needed)')
     .option('--claude', 'Use Claude for both scouting and execution (default)')
     .option('--kimi', 'Use Kimi for both scouting and execution (MOONSHOT_API_KEY)')
@@ -138,6 +139,7 @@ Examples:
       autoMerge?: boolean;
       directBranch?: string;
       directFinalize?: string;
+      individualPrs?: boolean;
     }) => {
       if (options.deep && !options.formula) {
         options.formula = 'deep';
