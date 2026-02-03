@@ -115,8 +115,18 @@ export async function filterAndCreateTickets(
     valid.push(normalizeProposal(raw));
   }
 
-  // Step 2: Impact score filter (confidence filter removed — confidence is now an execution hint, not a gate)
-  const afterConfidence = valid; // pass-through for backwards compat with event logging
+  // Step 2a: Reject fundamentally flawed proposals (confidence=0 from adversarial review)
+  // Note: confidence is mostly an execution hint, not a gate. But confidence=0 explicitly means
+  // "this proposal is fundamentally flawed" per the adversarial review prompt, so we filter those.
+  const afterConfidence = valid.filter(p => {
+    if (p.confidence <= 0) {
+      rejected.push({ proposal: p, reason: 'Rejected by adversarial review (confidence=0)' });
+      return false;
+    }
+    return true;
+  });
+
+  // Step 2b: Impact score filter
   const minImpact = s.min_impact_score ?? 3;
   const afterImpact = afterConfidence.filter(p => {
     const impact = p.impact_score ?? 5;
