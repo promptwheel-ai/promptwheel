@@ -80,7 +80,7 @@ export async function filterAndCreateTickets(
       f.startsWith(currentScope) || f.startsWith(currentScope + '/')
     );
     if (nowInScope) {
-      // Re-inject as a raw proposal
+      // Re-inject as a raw proposal with all preserved fields
       rawProposals.push({
         category: dp.category,
         title: dp.title,
@@ -89,6 +89,14 @@ export async function filterAndCreateTickets(
         allowed_paths: dp.allowed_paths,
         confidence: dp.confidence,
         impact_score: dp.impact_score,
+        // Include all required fields for schema validation
+        verification_commands: dp.verification_commands,
+        acceptance_criteria: dp.acceptance_criteria,
+        risk: dp.risk,
+        touched_files_estimate: dp.touched_files_estimate,
+        rollback_note: dp.rollback_note,
+        rationale: dp.rationale,
+        estimated_complexity: dp.estimated_complexity,
       });
     } else {
       stillDeferred.push(dp);
@@ -148,6 +156,14 @@ export async function filterAndCreateTickets(
             confidence: p.confidence,
             impact_score: p.impact_score,
             original_scope: s.scope,
+            // Preserve all required fields for schema validation on re-injection
+            verification_commands: p.verification_commands,
+            acceptance_criteria: p.acceptance_criteria,
+            risk: p.risk,
+            touched_files_estimate: p.touched_files_estimate,
+            rollback_note: p.rollback_note,
+            rationale: p.rationale,
+            estimated_complexity: p.estimated_complexity,
           });
           rejected.push({ proposal: p, reason: `Deferred (files outside scope '${s.scope}'): ${files.filter(f => !f.startsWith(sessionScope)).join(', ')}` });
           return false;

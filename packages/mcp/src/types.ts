@@ -203,6 +203,15 @@ export interface DeferredProposal {
   confidence: number;
   impact_score: number;
   original_scope: string;
+  // Required fields for schema validation when re-injected
+  verification_commands: string[];
+  acceptance_criteria: string[];
+  risk: string;
+  touched_files_estimate: number;
+  rollback_note: string;
+  // Optional fields
+  rationale?: string;
+  estimated_complexity?: string;
 }
 
 // ---------------------------------------------------------------------------
