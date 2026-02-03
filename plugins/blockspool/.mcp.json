@@ -1,9 +1,0 @@
-{
-  "mcpServers": {
-    "blockspool": {
-      "command": "npx",
-      "args": ["-y", "@blockspool/mcp"],
-      "env": {}
-    }
-  }
-}
