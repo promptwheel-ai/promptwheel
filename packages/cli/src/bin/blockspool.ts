@@ -21,7 +21,7 @@ const program = new Command();
 program
   .name('blockspool')
   .description('Continuous codebase improvement tool')
-  .version('0.5.36');
+  .version('0.5.37');
 
 // `blockspool solo <cmd>` — backwards compat
 program.addCommand(soloCommand);
