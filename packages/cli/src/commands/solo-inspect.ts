@@ -353,7 +353,7 @@ export function registerInspectCommands(solo: Command): void {
               processInsights: allL.filter(l => l.source.type === 'process_insight').length,
               qaCommands: Object.fromEntries(
                 Object.entries(qaS.commands).map(([k, v]) => [k, {
-                  successRate: v.totalRuns > 0 ? v.successes / v.totalRuns : 1,
+                  successRate: v.totalRuns > 0 ? v.successes / v.totalRuns : -1,
                   avgDurationMs: v.avgDurationMs,
                   totalRuns: v.totalRuns,
                 }]),
@@ -515,7 +515,10 @@ export function registerInspectCommands(solo: Command): void {
           console.log();
           console.log(`  ${chalk.cyan('Wheel:')}`);
           if (qs && qs.totalTickets > 0) {
-            console.log(`    Quality rate: ${qualityPct}%    (first-pass: ${qs.firstPassSuccess}/${qs.totalTickets}, QA: ${qs.qaPassed}/${qs.qaPassed + qs.qaFailed})`);
+            const qaStr = (qs.qaPassed + qs.qaFailed) > 0
+              ? `${qs.qaPassed}/${qs.qaPassed + qs.qaFailed}`
+              : 'untested';
+            console.log(`    Quality rate: ${qualityPct}%    (first-pass: ${qs.firstPassSuccess}/${qs.totalTickets}, QA: ${qaStr})`);
           } else {
             console.log(chalk.gray('    Quality rate: 100% (no data)'));
           }
@@ -531,10 +534,12 @@ export function registerInspectCommands(solo: Command): void {
           if (cmdEntries.length > 0) {
             console.log('    QA command stats:');
             for (const s of cmdEntries) {
-              const rate = s.totalRuns > 0 ? Math.round(s.successes / s.totalRuns * 100) : 100;
-              const avgMs = s.avgDurationMs;
-              const avgStr = avgMs >= 1000 ? `${(avgMs / 1000).toFixed(1)}s` : `${avgMs}ms`;
-              console.log(`      ${s.name}:  ${rate}% success, avg ${avgStr}  (${s.totalRuns} runs)`);
+              const rate = s.totalRuns > 0 ? Math.round(s.successes / s.totalRuns * 100) : null;
+              const rateStr = rate !== null ? `${rate}% success` : 'no data';
+              const avgStr = s.totalRuns > 0
+                ? (s.avgDurationMs >= 1000 ? `avg ${(s.avgDurationMs / 1000).toFixed(1)}s` : `avg ${s.avgDurationMs}ms`)
+                : '';
+              console.log(`      ${s.name}:  ${rateStr}${avgStr ? `, ${avgStr}` : ''}  (${s.totalRuns} runs)`);
             }
           }
 

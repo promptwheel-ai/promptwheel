@@ -218,7 +218,7 @@ export function recordBaselineResult(
  * Get the success rate for a command (0-1).
  */
 export function getCommandSuccessRate(stats: QaCommandStats): number {
-  if (stats.totalRuns === 0) return 1;
+  if (stats.totalRuns === 0) return -1;
   return stats.successes / stats.totalRuns;
 }
 

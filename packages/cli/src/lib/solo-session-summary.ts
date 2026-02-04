@@ -81,7 +81,10 @@ export function displayWheelHealth(ctx: SessionSummaryContext): void {
 
   // Quality rate
   if (qs && qs.totalTickets > 0) {
-    console.log(qualityColor(`  Quality rate: ${qualityPct}% (${qs.firstPassSuccess}/${qs.totalTickets} first-pass, ${qs.qaPassed}/${qs.qaPassed + qs.qaFailed} QA pass)`));
+    const qaStr = (qs.qaPassed + qs.qaFailed) > 0
+      ? `${qs.qaPassed}/${qs.qaPassed + qs.qaFailed} QA pass`
+      : 'QA: untested';
+    console.log(qualityColor(`  Quality rate: ${qualityPct}% (${qs.firstPassSuccess}/${qs.totalTickets} first-pass, ${qaStr})`));
   } else {
     console.log(chalk.gray(`  Quality rate: ${qualityPct}% (no data)`));
   }
@@ -109,10 +112,12 @@ export function displayWheelHealth(ctx: SessionSummaryContext): void {
   const cmdEntries = Object.values(qaStats.commands);
   if (cmdEntries.length > 0) {
     const statLines = cmdEntries.map(s => {
-      const rate = s.totalRuns > 0 ? Math.round(s.successes / s.totalRuns * 100) : 100;
-      const avgMs = s.avgDurationMs;
-      const avgStr = avgMs >= 1000 ? `${(avgMs / 1000).toFixed(1)}s` : `${avgMs}ms`;
-      return `    ${s.name}: ${rate}% success, avg ${avgStr} (${s.totalRuns} runs)`;
+      const rate = s.totalRuns > 0 ? Math.round(s.successes / s.totalRuns * 100) : null;
+      const rateStr = rate !== null ? `${rate}% success` : 'no data';
+      const avgStr = s.totalRuns > 0
+        ? (s.avgDurationMs >= 1000 ? `avg ${(s.avgDurationMs / 1000).toFixed(1)}s` : `avg ${s.avgDurationMs}ms`)
+        : '';
+      return `    ${s.name}: ${rateStr}${avgStr ? `, ${avgStr}` : ''} (${s.totalRuns} runs)`;
     });
     console.log(chalk.gray('  QA stats:'));
     for (const line of statLines) {

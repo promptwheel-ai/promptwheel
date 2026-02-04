@@ -335,6 +335,28 @@ export async function runAutoMode(options: AutoModeOptions): Promise<void> {
       if (scoutResult.shouldRetry) continue;
 
       const filterResult = await filterProposals(state, scoutResult.proposals, scoutResult.scope, scoutResult.cycleFormula);
+
+      // Diminishing returns: post-filter yield check
+      const LOW_YIELD_THRESHOLD = 0.2;
+      const MAX_LOW_YIELD_CYCLES = 3;
+      if (state.cycleCount > 2) {
+        const approved = filterResult.toProcess.length;
+        const scanned = Math.max(scoutResult.scoutResult?.scannedFiles ?? 1, 1);
+        const yieldRate = approved / scanned;
+        if (yieldRate < LOW_YIELD_THRESHOLD) {
+          state.consecutiveLowYieldCycles++;
+        } else {
+          state.consecutiveLowYieldCycles = 0;
+        }
+        if (state.consecutiveLowYieldCycles >= MAX_LOW_YIELD_CYCLES) {
+          const catNote = filterResult.categoryRejected > 0
+            ? ` (${filterResult.categoryRejected} proposals rejected by category — consider broadening categories)`
+            : '';
+          console.log(chalk.yellow(`  Diminishing returns: ${MAX_LOW_YIELD_CYCLES} consecutive low-yield cycles${catNote}. Stopping.`));
+          state.shutdownRequested = true;
+        }
+      }
+
       if (filterResult.shouldBreak) break;
       if (filterResult.shouldRetry) continue;
 

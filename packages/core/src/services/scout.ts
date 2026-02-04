@@ -68,6 +68,8 @@ export interface ScoutRepoOptions {
   scope?: string;
   /** Filter to categories */
   types?: ProposalCategory[];
+  /** Categories to exclude */
+  excludeTypes?: ProposalCategory[];
   /** Maximum proposals */
   maxProposals?: number;
   /** Minimum confidence threshold */
@@ -226,6 +228,7 @@ export async function scoutRepo(
     const scanResult: ScanResult = await scanAndPropose({
       scope: opts.scope ?? 'src/**',
       types: opts.types,
+      excludeTypes: opts.excludeTypes,
       maxProposals: opts.maxProposals ?? 10,
       minConfidence: opts.minConfidence ?? 50,
       projectPath: repoRoot,

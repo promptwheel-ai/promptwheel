@@ -248,8 +248,8 @@ describe('recordBaselineResult', () => {
 // ---------------------------------------------------------------------------
 
 describe('getCommandSuccessRate', () => {
-  it('returns 1 for zero runs', () => {
-    expect(getCommandSuccessRate(makeStats())).toBe(1);
+  it('returns -1 for zero runs (no data)', () => {
+    expect(getCommandSuccessRate(makeStats())).toBe(-1);
   });
 
   it('computes correct rate', () => {

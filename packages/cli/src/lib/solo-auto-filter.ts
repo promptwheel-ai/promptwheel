@@ -31,6 +31,7 @@ export interface FilterResult {
   scope: string;
   shouldRetry: boolean;
   shouldBreak: boolean;
+  categoryRejected: number;
 }
 
 export async function filterProposals(
@@ -316,7 +317,7 @@ export async function filterProposals(
       state.scoutRetries++;
       console.log(chalk.gray(`  Retrying with fresh approach (attempt ${state.scoutRetries}/${MAX_SCOUT_RETRIES + 1})...`));
       await sleep(1000);
-      return { toProcess: [], scope, shouldRetry: true, shouldBreak: false };
+      return { toProcess: [], scope, shouldRetry: true, shouldBreak: false, categoryRejected: rejectedByCategory };
     }
     state.scoutRetries = 0;
     state.scoutedDirs = [];
@@ -324,7 +325,7 @@ export async function filterProposals(
       await sleep(2000);
     }
     // Let shouldContinue() decide whether to loop or stop
-    return { toProcess: [], scope, shouldRetry: true, shouldBreak: false };
+    return { toProcess: [], scope, shouldRetry: true, shouldBreak: false, categoryRejected: rejectedByCategory };
   }
 
   // Batch selection
@@ -368,5 +369,5 @@ export async function filterProposals(
     console.log();
   }
 
-  return { toProcess, scope, shouldRetry: false, shouldBreak: false };
+  return { toProcess, scope, shouldRetry: false, shouldBreak: false, categoryRejected: rejectedByCategory };
 }

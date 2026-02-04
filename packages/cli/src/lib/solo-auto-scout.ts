@@ -4,7 +4,7 @@
 
 import chalk from 'chalk';
 import type { ScoutProgress } from '@blockspool/core/services';
-import type { TicketProposal } from '@blockspool/core/scout';
+import type { TicketProposal, ProposalCategory } from '@blockspool/core/scout';
 import { scoutRepo } from '@blockspool/core/services';
 import type { AutoSessionState } from './solo-auto-state.js';
 import { getNextScope } from './solo-auto-state.js';
@@ -134,6 +134,8 @@ export async function runScoutPhase(state: AutoSessionState): Promise<ScoutResul
     scoutResult = await scoutRepo(state.deps, {
       path: scoutPath,
       scope,
+      types: allowCategories.length <= 4 ? allowCategories as ProposalCategory[] : undefined,
+      excludeTypes: allowCategories.length > 4 ? blockCategories as ProposalCategory[] : undefined,
       maxProposals: 20,
       minConfidence: state.effectiveMinConfidence,
       model: state.options.scoutBackend === 'codex' ? undefined : (state.options.eco ? 'sonnet' : (cycleFormula?.model ?? 'opus')),
@@ -189,23 +191,17 @@ export async function runScoutPhase(state: AutoSessionState): Promise<ScoutResul
     }
   }
 
-  const proposals = scoutResult.proposals;
-
-  // Diminishing returns circuit breaker
-  const LOW_YIELD_THRESHOLD = 0.2;
-  const MAX_LOW_YIELD_CYCLES = 3;
-  if (state.cycleCount > 2) {
-    const yieldRate = proposals.length / Math.max(scoutResult.scannedFiles, 1);
-    if (yieldRate < LOW_YIELD_THRESHOLD) {
-      state.consecutiveLowYieldCycles++;
-    } else {
-      state.consecutiveLowYieldCycles = 0;
-    }
-    if (state.consecutiveLowYieldCycles >= MAX_LOW_YIELD_CYCLES) {
-      console.log(chalk.yellow(`  Diminishing returns: ${MAX_LOW_YIELD_CYCLES} consecutive low-yield cycles. Stopping.`));
-      state.shutdownRequested = true;
+  // Mark sectors with no scannable files so they're never re-selected
+  if (scoutResult.scannedFiles === 0 && state.sectorState && state.currentSectorId) {
+    const sector = state.sectorState.sectors.find(s => s.path === state.currentSectorId);
+    if (sector) {
+      sector.fileCount = 0;
+      sector.productionFileCount = 0;
+      saveSectors(state.repoRoot, state.sectorState);
     }
   }
+
+  const proposals = scoutResult.proposals;
 
   if (proposals.length === 0) {
     if (scoutResult.errors.length > 0) {
