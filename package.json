@@ -1,6 +1,6 @@
 {
   "name": "blockspool",
-  "version": "0.5.38",
+  "version": "0.5.39",
   "description": "Continuous codebase improvement tool — scouts, executes, and batches into milestone PRs",
   "author": "BlockSpool",
   "license": "Apache-2.0",

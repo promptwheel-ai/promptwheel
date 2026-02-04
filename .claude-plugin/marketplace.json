@@ -10,7 +10,7 @@
     {
       "name": "blockspool",
       "description": "Continuous codebase improvement — scouts improvements, executes in parallel, batches into milestone PRs",
-      "version": "0.5.38",
+      "version": "0.5.39",
       "author": {
         "name": "BlockSpool",
         "email": "support@blockspool.com"

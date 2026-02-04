@@ -122,7 +122,10 @@ function buildSectors(modules: CodebaseModuleLike[]): Sector[] {
 
 export function saveSectors(repoRoot: string, state: SectorState): void {
   ensureStateDir(repoRoot);
-  fs.writeFileSync(defaultSectorsFile(repoRoot), JSON.stringify(state, null, 2), 'utf8');
+  const filePath = defaultSectorsFile(repoRoot);
+  const tmpPath = filePath + '.tmp';
+  fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2), 'utf8');
+  fs.renameSync(tmpPath, filePath);
 }
 
 // ---------------------------------------------------------------------------

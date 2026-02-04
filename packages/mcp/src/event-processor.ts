@@ -24,6 +24,13 @@ import { ingestTicketEvent } from './ticket-worker.js';
 // Helpers — shared sector & dedup recording
 // ---------------------------------------------------------------------------
 
+/** Atomic write: write to .tmp then rename, preventing corruption on crash */
+function atomicWriteJsonSync(filePath: string, data: unknown): void {
+  const tmpPath = filePath + '.tmp';
+  fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf8');
+  fs.renameSync(tmpPath, filePath);
+}
+
 function recordSectorOutcome(
   rootPath: string,
   sectorPath: string | undefined,
@@ -42,7 +49,7 @@ function recordSectorOutcome(
     } else {
       sector.successCount = (sector.successCount ?? 0) + 1;
     }
-    fs.writeFileSync(sectorsPath, JSON.stringify(sectorsData, null, 2), 'utf8');
+    atomicWriteJsonSync(sectorsPath, sectorsData);
   } catch {
     // Non-fatal
   }
@@ -168,7 +175,7 @@ export async function processEvent(
                   sector.production = sectorReclass.production;
                 }
                 sector.classificationConfidence = sectorReclass.confidence;
-                fs.writeFileSync(sectorsPath, JSON.stringify(sectorsData, null, 2), 'utf8');
+                atomicWriteJsonSync(sectorsPath, sectorsData);
               }
             }
           }
@@ -220,7 +227,7 @@ export async function processEvent(
                 sector.lastScannedCycle = s.scout_cycles;
                 sector.scanCount = (sector.scanCount ?? 0) + 1;
                 sector.proposalYield = 0.7 * (sector.proposalYield ?? 0) + 0.3 * rawProposals.length;
-                fs.writeFileSync(sectorsPath, JSON.stringify(sectorsData, null, 2), 'utf8');
+                atomicWriteJsonSync(sectorsPath, sectorsData);
               }
             }
           }

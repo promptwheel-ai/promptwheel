@@ -228,19 +228,25 @@ function loadAllUserFormulas(projectPath?: string): Formula[] {
 }
 
 function parseFormulaFile(filePath: string, name: string): Formula | null {
+  // Helper for NaN-safe parseInt
+  const safeInt = (val: string, fallback: number): number => {
+    const n = parseInt(val, 10);
+    return Number.isNaN(n) ? fallback : n;
+  };
+
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     const parsed = parseSimpleYaml(content);
 
     return {
       name,
-      version: parsed.version ? parseInt(parsed.version, 10) : 1,
+      version: parsed.version ? safeInt(parsed.version, 1) : 1,
       description: parsed.description || `Formula: ${name}`,
       scope: parsed.scope,
       categories: parsed.categories ? parseStringList(parsed.categories) : undefined,
-      min_confidence: parsed.min_confidence ? parseInt(parsed.min_confidence, 10) : undefined,
+      min_confidence: parsed.min_confidence ? safeInt(parsed.min_confidence, 50) : undefined,
       prompt: parsed.prompt,
-      max_prs: parsed.max_prs ? parseInt(parsed.max_prs, 10) : undefined,
+      max_prs: parsed.max_prs ? safeInt(parsed.max_prs, 5) : undefined,
       model: parsed.model,
       risk_tolerance: parsed.risk_tolerance as Formula['risk_tolerance'],
       exclude: parsed.exclude ? parseStringList(parsed.exclude) : undefined,

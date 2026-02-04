@@ -15,7 +15,7 @@ export function balanceProposals<T extends { category: string; impact_score?: nu
   const total = proposals.length;
   const maxTests = Math.floor(total * maxTestRatio);
 
-  if (tests.length <= maxTests) return proposals;
+  if (tests.length <= maxTests) return [...proposals];
 
   // Sort tests by impact descending, keep only the top N
   const sortedTests = [...tests].sort(

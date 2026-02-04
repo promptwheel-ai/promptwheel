@@ -61,7 +61,8 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
   // Adaptive parallelism
   let parallelCount: number;
   if (state.parallelExplicit) {
-    parallelCount = Math.max(1, parseInt(state.options.parallel!, 10));
+    const parsed = parseInt(state.options.parallel!, 10);
+    parallelCount = Math.max(1, Number.isNaN(parsed) ? 1 : parsed);
   } else {
     parallelCount = getAdaptiveParallelCount(toProcess);
     const heavy = toProcess.filter(p => p.estimated_complexity === 'moderate' || p.estimated_complexity === 'complex').length;
