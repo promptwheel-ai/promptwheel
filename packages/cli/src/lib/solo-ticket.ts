@@ -22,6 +22,7 @@ import {
   parseChangedFiles,
   analyzeViolationsForExpansion,
 } from '../lib/scope.js';
+import { buildExclusionIndex } from '../lib/exclusion-index.js';
 import {
   checkSpindleLoop,
   createSpindleState,
@@ -283,8 +284,26 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
 
     await markStep('worktree', 'success', { metadata: { branchName, worktreePath } });
 
+    // Build exclusion index: scan for indicator files (lockfiles, configs)
+    // and write inferred artifact patterns to .git/info/exclude so that
+    // git status natively filters them out. Must run before dep install.
+    const excludedPatterns = buildExclusionIndex(worktreePath);
+    if (excludedPatterns.length > 0 && verbose) {
+      onProgress(`Exclusion index: ${excludedPatterns.length} artifact patterns discovered`);
+    }
+
     // Install dependencies in worktree (needed for monorepos where node_modules isn't shared)
     await installWorktreeDeps(worktreePath, verbose, onProgress);
+
+    // Baseline snapshot: capture what git status reports AFTER dep install
+    // but BEFORE the agent runs.  Anything in this baseline is a setup
+    // artifact (lockfile churn, untracked dep dirs the exclusion index
+    // missed, etc.) and will be subtracted from the post-agent status so
+    // only the agent's actual changes enter scope validation.
+    const baselineStatus = (await gitExec('git status --porcelain', {
+      cwd: worktreePath,
+    })).trim();
+    const baselineFiles = new Set(parseChangedFiles(baselineStatus));
 
     // Step 2: Run agent
     await markStep('agent', 'started');
@@ -448,6 +467,22 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
         onProgress(`  Confidence: ${(spindleCheck.confidence * 100).toFixed(0)}%`);
         onProgress(`  Tokens: ~${spindleState.estimatedTokens.toLocaleString()}`);
 
+        // Log scope diagnostics before discarding the worktree
+        try {
+          const abortStatus = (await gitExec('git status --porcelain', { cwd: worktreePath })).trim();
+          if (abortStatus) {
+            const abortAllFiles = parseChangedFiles(abortStatus);
+            const abortChanged = baselineFiles.size > 0
+              ? abortAllFiles.filter(f => !baselineFiles.has(f))
+              : abortAllFiles;
+            const abortViolations = checkScopeViolations(abortChanged, ticket.allowedPaths, ticket.forbiddenPaths);
+            if (abortViolations.length > 0) {
+              (spindleArtifactData as Record<string, unknown>).scopeViolations = abortViolations.map(v => v.file);
+              onProgress(`  Scope violations (discarded): ${abortViolations.map(v => v.file).join(', ')}`);
+            }
+          }
+        } catch { /* diagnostic only */ }
+
         await skipRemaining(2, `Spindle loop: ${trigger}`);
         await cleanupWorktree(repoRoot, worktreePath);
 
@@ -469,6 +504,21 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
         for (const w of getFileEditWarnings(spindleState, spindleConfig.maxFileEdits)) {
           onProgress(`  ⚠ ${w}`);
         }
+
+        // Log scope diagnostics before discarding the worktree
+        try {
+          const blockStatus = (await gitExec('git status --porcelain', { cwd: worktreePath })).trim();
+          if (blockStatus) {
+            const blockAllFiles = parseChangedFiles(blockStatus);
+            const blockChanged = baselineFiles.size > 0
+              ? blockAllFiles.filter(f => !baselineFiles.has(f))
+              : blockAllFiles;
+            const blockViolations = checkScopeViolations(blockChanged, ticket.allowedPaths, ticket.forbiddenPaths);
+            if (blockViolations.length > 0) {
+              onProgress(`  Scope violations (discarded): ${blockViolations.map(v => v.file).join(', ')}`);
+            }
+          }
+        } catch { /* diagnostic only */ }
 
         await skipRemaining(2, `Spindle blocked: ${spindleCheck.reason}`);
         await cleanupWorktree(repoRoot, worktreePath);
@@ -506,7 +556,12 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
       return result;
     }
 
-    const changedFiles = parseChangedFiles(statusOutput);
+    // Subtract baseline: only files the agent actually changed pass through.
+    const allChangedFiles = parseChangedFiles(statusOutput);
+    const changedFiles = baselineFiles.size > 0
+      ? allChangedFiles.filter(f => !baselineFiles.has(f))
+      : allChangedFiles;
+
     const violations = checkScopeViolations(
       changedFiles,
       ticket.allowedPaths,
@@ -779,6 +834,35 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
               });
 
               if (retryResult.success) {
+                // Re-validate scope before committing retry changes
+                const retryStatusOutput = (await gitExec('git status --porcelain', {
+                  cwd: worktreePath,
+                })).trim();
+                const retryAllFiles = parseChangedFiles(retryStatusOutput);
+                const retryChangedFiles = baselineFiles.size > 0
+                  ? retryAllFiles.filter(f => !baselineFiles.has(f))
+                  : retryAllFiles;
+                const retryViolations = checkScopeViolations(
+                  retryChangedFiles,
+                  expandedPaths,
+                  ticket.forbiddenPaths
+                );
+                if (retryViolations.length > 0) {
+                  const violatedFiles = retryViolations.map(v => v.file).join(', ');
+                  errorParts.push('');
+                  errorParts.push(`(QA retry created scope violations: ${violatedFiles})`);
+                  errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
+                  const result = {
+                    success: false,
+                    branchName,
+                    durationMs: Date.now() - startTime,
+                    error: errorParts.join('\n'),
+                    failureReason: 'scope_violation' as FailureReason,
+                  };
+                  await saveRunSummary(result);
+                  return result;
+                }
+
                 // Re-commit
                 await gitExec('git add -A', { cwd: worktreePath });
                 try {

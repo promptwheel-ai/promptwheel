@@ -245,6 +245,8 @@ export function pickNextSector(state: SectorState, currentCycle: number): { sect
     const successRate = total > 0 ? s.successCount / total : 0;
     if (s.scanCount >= 5 && s.proposalYield < 0.3 && (total < 2 || successRate < 0.3)) {
       if (!s.polishedAt) s.polishedAt = Date.now();
+    } else if (s.polishedAt) {
+      s.polishedAt = 0;
     }
   }
 

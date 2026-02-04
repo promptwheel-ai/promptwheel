@@ -57,11 +57,9 @@ export function buildTasteProfile(
     const total = totals.success + totals.failure;
     if (total < 3) continue;
     const rate = totals.success / total;
-    // Also factor in merge rate from formula stats
-    const formulaMerged = Object.values(formulaStats).reduce((sum, f) => sum + (f.mergeCount ?? 0), 0);
-    const formulaClosed = Object.values(formulaStats).reduce((sum, f) => sum + (f.closedCount ?? 0), 0);
-    const mergeBoost = (formulaMerged + formulaClosed) > 5 && formulaMerged > formulaClosed ? 0.1 : 0;
-    if (rate + mergeBoost > 0.6) preferred.push(cat);
+    // Boost categories with strong success volume (not just rate)
+    const volumeBoost = total >= 8 && rate > 0.5 ? 0.1 : 0;
+    if (rate + volumeBoost > 0.6) preferred.push(cat);
     else if (rate < 0.3) avoid.push(cat);
   }
 

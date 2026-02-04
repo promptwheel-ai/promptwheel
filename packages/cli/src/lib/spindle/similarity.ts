@@ -41,7 +41,7 @@ export function computeSimilarity(a: string, b: string): number {
 /**
  * Find repeated phrases between two texts
  */
-export function findRepeatedPhrases(a: string, b: string): string[] {
+export function findRepeatedPhrases(a: string, b: string, maxResults: number = 5): string[] {
   const phrases: string[] = [];
 
   // Split into sentences/fragments
@@ -53,6 +53,7 @@ export function findRepeatedPhrases(a: string, b: string): string[] {
       const sim = computeSimilarity(fragA, fragB);
       if (sim >= 0.9) {
         phrases.push(fragA.trim().slice(0, 60) + '...');
+        if (phrases.length >= maxResults) return phrases;
       }
     }
   }

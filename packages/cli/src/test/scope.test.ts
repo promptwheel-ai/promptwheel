@@ -373,3 +373,4 @@ describe('analyzeViolationsForExpansion', () => {
     expect(result.addedPaths).toContain('src/services/auth.ts');
   });
 });
+

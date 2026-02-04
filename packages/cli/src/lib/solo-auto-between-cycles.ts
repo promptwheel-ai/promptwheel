@@ -205,8 +205,8 @@ export async function runPreCycleMaintenance(state: AutoSessionState): Promise<P
       if (closedOrMergedUrls.length > 0) {
         removePrEntries(state.repoRoot, closedOrMergedUrls);
       }
-      const polledSet = new Set(prStatuses.map(p => p.url));
-      state.pendingPrUrls = state.pendingPrUrls.filter(u => !polledSet.has(u));
+      const closedOrMergedSet = new Set(closedOrMergedUrls);
+      state.pendingPrUrls = state.pendingPrUrls.filter(u => !closedOrMergedSet.has(u));
     } catch {
       // Non-fatal
     }

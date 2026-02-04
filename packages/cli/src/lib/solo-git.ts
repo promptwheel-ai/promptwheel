@@ -221,10 +221,6 @@ export async function cleanupMilestone(repoRoot: string): Promise<void> {
 }
 
 /**
- * Check PR merge/rejection status for a list of PR URLs.
- * Non-fatal on any individual failure.
- */
-/**
  * Fetch review comments from a PR for feedback ingestion.
  * Non-fatal — returns [] on failure.
  */

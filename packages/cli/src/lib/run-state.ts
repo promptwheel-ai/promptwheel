@@ -321,10 +321,9 @@ export function recordQualitySignal(projectRoot: string, signal: 'first_pass' | 
   return withRunStateLock(() => {
     const state = readRunState(projectRoot);
     const qs = state.qualitySignals ??= { totalTickets: 0, firstPassSuccess: 0, retriedSuccess: 0, qaPassed: 0, qaFailed: 0 };
-    qs.totalTickets++;
     switch (signal) {
-      case 'first_pass': qs.firstPassSuccess++; break;
-      case 'retried': qs.retriedSuccess++; break;
+      case 'first_pass': qs.totalTickets++; qs.firstPassSuccess++; break;
+      case 'retried': qs.totalTickets++; qs.retriedSuccess++; break;
       case 'qa_pass': qs.qaPassed++; break;
       case 'qa_fail': qs.qaFailed++; break;
     }
