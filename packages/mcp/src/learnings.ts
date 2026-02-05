@@ -37,6 +37,10 @@ export interface Learning {
   created_at: string;
   last_confirmed_at: string;
   access_count: number;
+  /** Effectiveness tracking: times learning was applied */
+  applied_count?: number;
+  /** Effectiveness tracking: successful outcomes when applied */
+  success_count?: number;
 }
 
 // ---------------------------------------------------------------------------

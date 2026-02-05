@@ -69,6 +69,10 @@ export interface Learning {
   created_at: string;
   last_confirmed_at: string;
   access_count: number;
+  /** Effectiveness tracking: times learning was applied */
+  applied_count?: number;
+  /** Effectiveness tracking: successful outcomes when applied */
+  success_count?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,6 +214,90 @@ export function recordAccess(projectRoot: string, ids: string[]): void {
     }
   }
   writeLearnings(projectRoot, learnings);
+}
+
+/**
+ * Record learning application: track when learnings were used in a ticket context.
+ */
+export function recordApplication(projectRoot: string, ids: string[]): void {
+  if (ids.length === 0) return;
+  const learnings = readLearnings(projectRoot);
+  const idSet = new Set(ids);
+  for (const l of learnings) {
+    if (idSet.has(l.id)) {
+      l.applied_count = (l.applied_count ?? 0) + 1;
+    }
+  }
+  writeLearnings(projectRoot, learnings);
+
+  // Instrument: track application
+  metric('learnings', 'applied', { count: ids.length });
+}
+
+/**
+ * Record learning outcome: track success/failure after a ticket completes.
+ */
+export function recordOutcome(projectRoot: string, ids: string[], success: boolean): void {
+  if (ids.length === 0) return;
+  const learnings = readLearnings(projectRoot);
+  const idSet = new Set(ids);
+  for (const l of learnings) {
+    if (idSet.has(l.id)) {
+      if (success) {
+        l.success_count = (l.success_count ?? 0) + 1;
+        // Boost weight on success
+        l.weight = Math.min(MAX_WEIGHT, l.weight + 2);
+      } else {
+        // Slight penalty on failure (learning didn't help)
+        l.weight = Math.max(1, l.weight - 1);
+      }
+    }
+  }
+  writeLearnings(projectRoot, learnings);
+
+  // Instrument: track outcome
+  metric('learnings', 'outcome', { count: ids.length, success });
+}
+
+/**
+ * Get learning effectiveness stats.
+ */
+export function getLearningEffectiveness(projectRoot: string): {
+  total: number;
+  applied: number;
+  successRate: number;
+  topPerformers: Array<{ id: string; text: string; effectiveness: number }>;
+} {
+  const learnings = readLearnings(projectRoot);
+  const withApplication = learnings.filter(l => (l.applied_count ?? 0) > 0);
+
+  let totalApplied = 0;
+  let totalSuccess = 0;
+  const performers: Array<{ id: string; text: string; effectiveness: number }> = [];
+
+  for (const l of withApplication) {
+    const applied = l.applied_count ?? 0;
+    const success = l.success_count ?? 0;
+    totalApplied += applied;
+    totalSuccess += success;
+
+    if (applied >= 2) { // Only include learnings with enough data
+      performers.push({
+        id: l.id,
+        text: l.text,
+        effectiveness: applied > 0 ? success / applied : 0,
+      });
+    }
+  }
+
+  performers.sort((a, b) => b.effectiveness - a.effectiveness);
+
+  return {
+    total: learnings.length,
+    applied: totalApplied,
+    successRate: totalApplied > 0 ? totalSuccess / totalApplied : 0,
+    topPerformers: performers.slice(0, 5),
+  };
 }
 
 /**

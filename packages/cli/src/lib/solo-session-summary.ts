@@ -62,14 +62,14 @@ export function displayConvergenceSummary(ctx: SessionSummaryContext): void {
 
 /**
  * Display wheel health summary at end of session.
+ * Uses progressive disclosure: compact by default, shows details only when relevant.
  */
-export function displayWheelHealth(ctx: SessionSummaryContext): void {
+export function displayWheelHealth(ctx: SessionSummaryContext, verbose = false): void {
   const { repoRoot } = ctx;
   const qualityRate = getQualityRate(repoRoot);
   const rs = readRunState(repoRoot);
   const qs = rs.qualitySignals;
   const qaStats = loadQaStats(repoRoot);
-  const allLearnings = loadLearnings(repoRoot, 0);
 
   const qualityPct = Math.round(qualityRate * 100);
   const qualityColor = qualityRate > 0.8 ? chalk.green
@@ -77,51 +77,57 @@ export function displayWheelHealth(ctx: SessionSummaryContext): void {
     : chalk.red;
 
   console.log();
-  console.log(chalk.bold('Wheel Health'));
+  console.log(chalk.bold('Session Health'));
 
-  // Quality rate
+  // Quality rate - always show
   if (qs && qs.totalTickets > 0) {
     const qaStr = (qs.qaPassed + qs.qaFailed) > 0
       ? `${qs.qaPassed}/${qs.qaPassed + qs.qaFailed} QA pass`
-      : 'QA: untested';
-    console.log(qualityColor(`  Quality rate: ${qualityPct}% (${qs.firstPassSuccess}/${qs.totalTickets} first-pass, ${qaStr})`));
+      : '';
+    const parts = [`${qs.firstPassSuccess}/${qs.totalTickets} first-pass`];
+    if (qaStr) parts.push(qaStr);
+    console.log(qualityColor(`  Quality: ${qualityPct}% (${parts.join(', ')})`));
   } else {
-    console.log(chalk.gray(`  Quality rate: ${qualityPct}% (no data)`));
+    console.log(chalk.gray(`  Quality: ${qualityPct}%`));
   }
 
-  // Confidence
+  // Confidence - only show if calibrated
   const effectiveConf = ctx.effectiveMinConfidence ?? ctx.originalMinConfidence ?? 20;
   const originalConf = ctx.originalMinConfidence ?? 20;
   const delta = effectiveConf - originalConf;
-  const deltaStr = delta !== 0 ? `, calibrated ${delta > 0 ? '+' : ''}${delta}` : '';
-  console.log(chalk.gray(`  Confidence: ${effectiveConf} (started at ${originalConf}${deltaStr})`));
-
-  // Disabled commands
-  if (qaStats.disabledCommands.length > 0) {
-    const names = qaStats.disabledCommands.map(d => d.name).join(', ');
-    console.log(chalk.yellow(`  Disabled commands: ${names}`));
-  } else {
-    console.log(chalk.gray('  Disabled commands: none'));
+  if (delta !== 0 || verbose) {
+    const deltaStr = delta !== 0 ? ` (${delta > 0 ? '+' : ''}${delta} from ${originalConf})` : '';
+    console.log(chalk.gray(`  Confidence: ${effectiveConf}${deltaStr}`));
   }
 
-  // Meta-learnings (process insights)
-  const processInsights = allLearnings.filter(l => l.source.type === 'process_insight');
-  console.log(chalk.gray(`  Meta-learnings: ${processInsights.length} process insights`));
+  // Disabled commands - only show if any
+  if (qaStats.disabledCommands.length > 0) {
+    const names = qaStats.disabledCommands.map(d => d.name).join(', ');
+    console.log(chalk.yellow(`  Disabled: ${names}`));
+  }
 
-  // QA command stats
+  // QA stats - only show problematic ones or in verbose mode
   const cmdEntries = Object.values(qaStats.commands);
-  if (cmdEntries.length > 0) {
-    const statLines = cmdEntries.map(s => {
+  const problematicCmds = cmdEntries.filter(s => {
+    if (s.totalRuns === 0) return false;
+    const rate = s.successes / s.totalRuns;
+    return rate < 0.8; // Only show commands with <80% success
+  });
+
+  if (verbose && cmdEntries.length > 0) {
+    console.log(chalk.gray('  QA commands:'));
+    for (const s of cmdEntries) {
       const rate = s.totalRuns > 0 ? Math.round(s.successes / s.totalRuns * 100) : null;
-      const rateStr = rate !== null ? `${rate}% success` : 'no data';
-      const avgStr = s.totalRuns > 0
-        ? (s.avgDurationMs >= 1000 ? `avg ${(s.avgDurationMs / 1000).toFixed(1)}s` : `avg ${s.avgDurationMs}ms`)
+      const rateStr = rate !== null ? `${rate}%` : '-';
+      const avgStr = s.totalRuns > 0 && s.avgDurationMs >= 1000
+        ? ` (${(s.avgDurationMs / 1000).toFixed(1)}s)`
         : '';
-      return `    ${s.name}: ${rateStr}${avgStr ? `, ${avgStr}` : ''} (${s.totalRuns} runs)`;
-    });
-    console.log(chalk.gray('  QA stats:'));
-    for (const line of statLines) {
-      console.log(chalk.gray(line));
+      console.log(chalk.gray(`    ${s.name}: ${rateStr}${avgStr}`));
+    }
+  } else if (problematicCmds.length > 0) {
+    for (const s of problematicCmds) {
+      const rate = Math.round(s.successes / s.totalRuns * 100);
+      console.log(chalk.yellow(`  ⚠ ${s.name}: ${rate}% success (${s.totalRuns} runs)`));
     }
   }
 }
