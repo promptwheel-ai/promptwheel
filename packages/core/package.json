@@ -1,6 +1,6 @@
 {
   "name": "@blockspool/core",
-  "version": "0.5.52",
+  "version": "0.5.53",
   "description": "Core business logic and database adapter interface for BlockSpool",
   "author": "BlockSpool",
   "homepage": "https://blockspool.com",

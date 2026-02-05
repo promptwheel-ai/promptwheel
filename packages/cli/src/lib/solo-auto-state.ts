@@ -98,6 +98,8 @@ export interface AutoModeOptions {
   directBranch?: string;
   directFinalize?: 'pr' | 'merge' | 'none';
   individualPrs?: boolean;
+  skipQaFix?: boolean;
+  codex?: boolean;
 }
 
 // ── Session state ───────────────────────────────────────────────────────────
@@ -315,14 +317,127 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
   // ── Pre-session QA Tuning ─────────────────────────────────────────────────
   // Run all QA commands once upfront to establish baselines before any work.
   // This "tunes" the auto-tune system so we know what's working immediately.
+  // If commands fail, offer to fix them first before proceeding.
   if (config?.qa?.commands?.length && !options.dryRun) {
     console.log(chalk.cyan('🎛️  Tuning QA baselines...'));
     const qaConfig = normalizeQaConfig(config);
 
     // Run each command to establish baseline
-    await captureQaBaseline(repoRoot, config, (msg) => console.log(chalk.gray(msg)), repoRoot);
+    let baseline = await captureQaBaseline(repoRoot, config, (msg) => console.log(chalk.gray(msg)), repoRoot);
 
-    // Now auto-tune based on results
+    // Check for failures
+    const failingCommands = [...baseline.entries()].filter(([, passed]) => !passed).map(([name]) => name);
+
+    // Try auto-fix for lint commands (--fix flag)
+    if (failingCommands.length > 0) {
+      const lintCommands = failingCommands.filter(name =>
+        name.toLowerCase().includes('lint') ||
+        qaConfig.commands.find(c => c.name === name)?.cmd.includes('eslint') ||
+        qaConfig.commands.find(c => c.name === name)?.cmd.includes('prettier')
+      );
+
+      if (lintCommands.length > 0) {
+        console.log(chalk.cyan('  🔧 Attempting auto-fix for lint issues...'));
+        for (const name of lintCommands) {
+          const cmd = qaConfig.commands.find(c => c.name === name);
+          if (!cmd) continue;
+
+          // Try adding --fix flag
+          const fixCmd = cmd.cmd.includes('--fix') ? cmd.cmd : `${cmd.cmd} --fix`;
+          try {
+            const { execFileSync } = await import('node:child_process');
+            execFileSync('sh', ['-c', fixCmd], {
+              cwd: cmd.cwd ? path.resolve(repoRoot, cmd.cwd) : repoRoot,
+              timeout: cmd.timeoutMs ?? 120_000,
+              stdio: 'pipe',
+            });
+            console.log(chalk.green(`    ✓ Auto-fixed: ${name}`));
+          } catch {
+            console.log(chalk.gray(`    • Could not auto-fix: ${name}`));
+          }
+        }
+
+        // Re-run baseline after auto-fix
+        console.log(chalk.gray('  Re-checking baselines...'));
+        // Reset stats before re-check
+        resetQaStatsForSession(repoRoot);
+        baseline = await captureQaBaseline(repoRoot, config, (msg) => console.log(chalk.gray(msg)), repoRoot);
+      }
+    }
+
+    // Check for remaining failures after auto-fix attempts
+    const stillFailing = [...baseline.entries()].filter(([, passed]) => !passed).map(([name]) => name);
+
+    if (stillFailing.length > 0 && !options.skipQaFix) {
+      console.log();
+      console.log(chalk.yellow(`  ⚠ ${stillFailing.length} QA command(s) still failing:`));
+      for (const name of stillFailing) {
+        console.log(chalk.gray(`    • ${name}`));
+      }
+      console.log();
+
+      // Prompt user for AI-assisted fix
+      const readline = await import('node:readline');
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+
+      const answer = await new Promise<string>((resolve) => {
+        rl.question(chalk.cyan('  Would you like to try AI-assisted fix before proceeding? [y/N] '), resolve);
+      });
+      rl.close();
+
+      if (answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes') {
+        console.log(chalk.cyan('\n  🤖 Running AI-assisted QA fix...'));
+
+        // Build a prompt for the AI to fix the failing commands
+        const failingCmds = stillFailing.map(name => {
+          const cmd = qaConfig.commands.find(c => c.name === name);
+          return cmd ? `${name}: ${cmd.cmd}` : name;
+        }).join('\n');
+
+        const fixPrompt = `The following QA commands are failing in this project. Please investigate and fix the issues so they pass.
+
+Failing commands:
+${failingCmds}
+
+Instructions:
+1. Run each failing command to see the actual errors
+2. Fix the underlying issues (type errors, lint errors, test failures, build errors)
+3. Do NOT modify the QA commands themselves or disable checks
+4. Make minimal changes to fix the issues
+5. Verify each fix by re-running the command
+
+Focus on fixing the root cause, not suppressing errors.`;
+
+        // Use the execution backend to fix issues
+        const { ClaudeExecutionBackend, CodexExecutionBackend } = await import('./execution-backends/index.js');
+        const backend = options.codex
+          ? new CodexExecutionBackend({ model: options.codexModel })
+          : new ClaudeExecutionBackend();
+
+        try {
+          const result = await backend.run({
+            worktreePath: repoRoot,
+            prompt: fixPrompt,
+            timeoutMs: 10 * 60 * 1000, // 10 minutes for QA fix
+            verbose: true,
+            onProgress: (msg) => console.log(chalk.gray(`    ${msg}`)),
+          });
+
+          if (result.success) {
+            console.log(chalk.green('  ✓ AI fix complete, re-checking baselines...'));
+            resetQaStatsForSession(repoRoot);
+            baseline = await captureQaBaseline(repoRoot, config, (msg) => console.log(chalk.gray(msg)), repoRoot);
+          } else {
+            console.log(chalk.yellow(`  ⚠ AI fix failed: ${result.error?.slice(0, 100)}`));
+          }
+        } catch (err) {
+          console.log(chalk.yellow(`  ⚠ AI fix error: ${err instanceof Error ? err.message : err}`));
+        }
+        console.log();
+      }
+    }
+
+    // Now auto-tune based on final results
     const tuneResult = autoTuneQaConfig(repoRoot, qaConfig);
 
     const working = qaConfig.commands.length - tuneResult.disabled.length;
