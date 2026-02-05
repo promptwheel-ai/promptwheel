@@ -326,7 +326,7 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     let baseline = await captureQaBaseline(repoRoot, config, (msg) => console.log(chalk.gray(msg)), repoRoot);
 
     // Check for failures
-    const failingCommands = [...baseline.entries()].filter(([, passed]) => !passed).map(([name]) => name);
+    const failingCommands = [...baseline.entries()].filter(([, r]) => !r.passed).map(([name]) => name);
 
     // Try auto-fix for lint commands (--fix flag)
     if (failingCommands.length > 0) {
@@ -366,7 +366,7 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     }
 
     // Check for remaining failures after auto-fix attempts
-    const stillFailing = [...baseline.entries()].filter(([, passed]) => !passed).map(([name]) => name);
+    const stillFailing = [...baseline.entries()].filter(([, r]) => !r.passed).map(([name]) => name);
 
     if (stillFailing.length > 0 && !options.skipQaFix) {
       console.log();
@@ -401,29 +401,29 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
 
         while (currentFailing.length > 0) {
           cycle++;
-          const failingCmds = currentFailing.map(name => {
+
+          // Build prompt with command info and error output
+          const failingDetails = currentFailing.map(name => {
             const cmd = qaConfig.commands.find(c => c.name === name);
-            return cmd ? `${name}: ${cmd.cmd}` : name;
-          }).join('\n');
+            const result = baseline.get(name);
+            let detail = `## ${name}\nCommand: ${cmd?.cmd || name}`;
+            if (result?.output) {
+              detail += `\nError output:\n\`\`\`\n${result.output}\n\`\`\``;
+            }
+            return detail;
+          }).join('\n\n');
 
           const fixPrompt = cycle === 1
             ? `These QA commands are failing. Fix the source code so they pass.
 
-Failing commands:
-${failingCmds}
+${failingDetails}
 
-Approach:
-1. Run each command to see the errors
-2. Read the relevant source files
-3. Fix the code — type errors, lint issues, test failures, syntax errors
-4. Verify by re-running the command
+Read the error output above, then fix the source code. Minimal, targeted changes.`
+            : `Cycle ${cycle}: Still failing. Continue fixing.
 
-Focus on minimal, targeted fixes to the source code.`
-            : `Cycle ${cycle}: These commands are still failing:
+${failingDetails}
 
-${failingCmds}
-
-Continue fixing the source code. Small, focused changes.`;
+Small, focused code changes.`;
 
           console.log(chalk.cyan(`\n  ☀ Cycle ${cycle}`), chalk.gray(`— ${currentFailing.length} failing: ${currentFailing.join(', ')}`));
           console.log();
@@ -447,7 +447,7 @@ Continue fixing the source code. Small, focused changes.`;
             resetQaStatsForSession(repoRoot);
             baseline = await captureQaBaseline(repoRoot, config, (msg) => checkSpinner.update(msg), repoRoot);
 
-            const nowFailing = [...baseline.entries()].filter(([, passed]) => !passed).map(([name]) => name);
+            const nowFailing = [...baseline.entries()].filter(([, r]) => !r.passed).map(([name]) => name);
 
             if (nowFailing.length === 0) {
               checkSpinner.succeed('All QA commands now passing!');

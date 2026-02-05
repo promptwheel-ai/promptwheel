@@ -7,7 +7,7 @@ import type { TicketProposal } from '@blockspool/core/scout';
 import { tickets, runs } from '@blockspool/core/repos';
 import type { AutoSessionState } from './solo-auto-state.js';
 import { shouldContinue } from './solo-auto-state.js';
-import { soloRunTicket, captureQaBaseline } from './solo-ticket.js';
+import { soloRunTicket, captureQaBaseline, baselineToPassFail } from './solo-ticket.js';
 import { computeTicketTimeout } from './solo-auto-utils.js';
 import { createSpinner } from './spinner.js';
 import { formatGuidelinesForPrompt } from './guidelines.js';
@@ -99,7 +99,8 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
   let cycleQaBaseline: Map<string, boolean> | null = null;
   if (state.config?.qa?.commands?.length && !state.config.qa.disableBaseline) {
     console.log(chalk.gray('  Capturing QA baseline for this cycle...'));
-    cycleQaBaseline = await captureQaBaseline(state.repoRoot, state.config, (msg) => console.log(chalk.gray(msg)), state.repoRoot);
+    const fullBaseline = await captureQaBaseline(state.repoRoot, state.config, (msg) => console.log(chalk.gray(msg)), state.repoRoot);
+    cycleQaBaseline = baselineToPassFail(fullBaseline);
     const preExisting = [...cycleQaBaseline.entries()].filter(([, passed]) => !passed);
     if (preExisting.length > 0) {
       console.log(chalk.yellow(`  QA baseline: ${preExisting.length} pre-existing failure(s) will be skipped`));
