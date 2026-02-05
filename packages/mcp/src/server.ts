@@ -33,7 +33,7 @@ export async function createServer(options: ServerOptions): Promise<{
 
   const server = new McpServer({
     name: 'blockspool',
-    version: '0.5.46',
+    version: '0.5.47',
   });
 
   // Register tool groups

@@ -391,10 +391,18 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
     }
   };
 
+  // In direct mode, just show ticket number; in PR modes, show progress toward limit
+  const makeLabel = (n: number) => {
+    if (state.deliveryMode === 'direct' && !state.milestoneMode) {
+      return `${n}`;
+    }
+    return `${n}/${state.maxPrs}`;
+  };
+
   if (parallelCount <= 1) {
     // Serial execution
     for (let i = 0; i < toProcess.length && shouldContinue(state); i++) {
-      const result = await processOneProposal(toProcess[i], `${state.totalPrsCreated + 1}/${state.maxPrs}`);
+      const result = await processOneProposal(toProcess[i], makeLabel(state.totalPrsCreated + 1));
       const otherTitles = toProcess.filter((_, j) => j !== i).map(p => p.title);
       if (result.noChanges) {
         recordOutcome(toProcess[i], result, otherTitles);
@@ -424,7 +432,7 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
       waves = [toProcess];
     }
 
-    let prCounter = state.totalPrsCreated;
+    let ticketCounter = state.totalPrsCreated;
 
     for (const wave of waves) {
       if (!shouldContinue(state)) break;
@@ -442,7 +450,7 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
       const tasks = wave.map(async (proposal) => {
         await semAcquire();
         if (!shouldContinue(state)) { semRelease(); return { success: false }; }
-        const label = `${++prCounter}/${state.maxPrs}`;
+        const label = makeLabel(++ticketCounter);
         try {
           return await processOneProposal(proposal, label);
         } finally {

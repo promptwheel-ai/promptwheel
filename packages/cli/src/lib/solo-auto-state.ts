@@ -372,7 +372,6 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     console.log(chalk.gray('  Mode: Scout → Auto-approve → Run → PR'));
   }
   console.log(chalk.gray(`  Scope: ${userScope || (isContinuous ? 'rotating' : 'auto')}`));
-  console.log(chalk.gray(`  Max PRs: ${maxPrs}`));
   console.log(chalk.gray(`  Categories: ${initialCategories.allow.join(', ')}`));
 
   // Delivery mode resolution
@@ -388,8 +387,10 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     console.log(chalk.gray(`  Delivery: ${deliveryMode}${deliveryMode === 'direct' ? ` (branch: ${directBranch}, finalize: ${finalizeLabel})` : ''}`));
   }
   if (milestoneMode) {
-    console.log(chalk.gray(`  Milestone mode: batch size ${batchSize}`));
+    console.log(chalk.gray(`  Milestone mode: batch size ${batchSize}, max PRs ${maxPrs}`));
     console.log(chalk.gray(`  Draft PRs: ${useDraft ? 'yes' : 'no'}`));
+  } else if (deliveryMode === 'pr' || deliveryMode === 'auto-merge') {
+    console.log(chalk.gray(`  Max PRs: ${maxPrs}`));
   }
   console.log();
 
@@ -808,11 +809,15 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
 
 export function shouldContinue(state: AutoSessionState): boolean {
   if (state.shutdownRequested) return false;
+
+  // PR limits only apply to PR-based workflows, not direct mode
   if (state.milestoneMode) {
     if (state.totalMilestonePrs >= state.maxPrs) return false;
-  } else {
+  } else if (state.deliveryMode === 'pr' || state.deliveryMode === 'auto-merge') {
     if (state.totalPrsCreated >= state.maxPrs) return false;
   }
+  // Direct mode: no PR limit, just time/cycles
+
   if (state.endTime && Date.now() >= state.endTime) return false;
   if (state.cycleCount >= state.maxCycles && !state.options.continuous && !state.options.hours && !state.options.minutes) return false;
   return true;
