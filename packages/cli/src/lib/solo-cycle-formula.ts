@@ -18,6 +18,7 @@ export interface CycleFormulaContext {
     tests?: boolean;
   };
   config: { auto?: { docsAuditInterval?: number; docsAudit?: boolean } } | null;
+  sectorProductionFileCount?: number;
 }
 
 /**
@@ -38,7 +39,7 @@ export function getCycleFormula(ctx: CycleFormulaContext, cycle: number): Formul
     const deepStats = rs.formulaStats['deep'];
     if (cycle - (deepStats?.lastResetCycle ?? 0) >= 7) {
       // Session arc: warmup phase → skip deep
-      if (sessionPhase !== 'warmup') return deepFormula;
+      if (sessionPhase !== 'warmup' && (ctx.sectorProductionFileCount ?? Infinity) >= 25) return deepFormula;
     }
   }
 
@@ -75,6 +76,9 @@ export function getCycleFormula(ctx: CycleFormulaContext, cycle: number): Formul
       bestScore = exploitation + exploration;
       bestFormula = c.formula;
     }
+  }
+  if (bestFormula === deepFormula && (ctx.sectorProductionFileCount ?? Infinity) < 25) {
+    return null;
   }
   return bestFormula;
 }

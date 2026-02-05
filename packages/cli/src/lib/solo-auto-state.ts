@@ -269,13 +269,18 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
   const minConfidence = parseInt(options.minConfidence || String(activeFormula?.minConfidence ?? DEFAULT_AUTO_CONFIG.minConfidence), 10);
   const useDraft = options.draft !== false;
 
-  // Milestone mode is the default: batches tickets into single PR
-  // - Easier to review (one PR vs many)
-  // - Scout sees previous work in the branch
-  // - Easy to revert if needed
-  // Use --individual-prs to create separate PR per ticket
-  const defaultBatchSize = options.individualPrs ? undefined : 10;
-  const batchSize = options.batchSize ? parseInt(options.batchSize, 10) : defaultBatchSize;
+  // Milestone mode vs Direct mode:
+  // - Milestone mode: batches tickets into milestone PRs (good for PR-based workflows)
+  // - Direct mode: commits directly to a branch, no PRs by default (good for solo devs)
+  //
+  // Direct mode is the default (deliveryMode: 'direct').
+  // Milestone mode is enabled when:
+  // - deliveryMode is 'pr' or 'auto-merge', OR
+  // - --batch-size is explicitly set
+  //
+  // Use --individual-prs to create separate PR per ticket (disables milestone batching)
+  const batchSize = options.batchSize ? parseInt(options.batchSize, 10) : undefined;
+  // Milestone mode is only enabled for PR-based delivery or explicit batch-size
   const milestoneMode = batchSize !== undefined && batchSize > 0;
 
   const userScope = options.scope || activeFormula?.scope;
@@ -342,6 +347,7 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
   const getFormulaCtx = (): CycleFormulaContext => ({
     activeFormula, sessionPhase, deepFormula, docsAuditFormula,
     isContinuous, repoRoot, options, config,
+    sectorProductionFileCount: undefined,
   });
   const getCycleFormula = (cycle: number) => getCycleFormulaImpl(getFormulaCtx(), cycle);
   const getCycleCategories = (formula: typeof activeFormula) => getCycleCategoriesImpl(getFormulaCtx(), formula);
@@ -370,15 +376,20 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
   console.log(chalk.gray(`  Categories: ${initialCategories.allow.join(', ')}`));
 
   // Delivery mode resolution
+  // - 'direct': commits to a branch, no PRs (default)
+  // - 'pr': creates individual PRs per ticket
+  // - 'auto-merge': creates PRs with auto-merge enabled
   const deliveryMode = options.deliveryMode ?? autoConf.deliveryMode ?? 'direct';
   const directBranch = options.directBranch ?? autoConf.directBranch ?? 'blockspool-direct';
-  const directFinalize = options.directFinalize ?? autoConf.directFinalize ?? 'pr';
+  // Default to 'none' - no PR creation at end of session (truly "no PRs" by default)
+  const directFinalize = options.directFinalize ?? autoConf.directFinalize ?? 'none';
   {
-    console.log(chalk.gray(`  Delivery: ${deliveryMode}${deliveryMode === 'direct' ? ` (branch: ${directBranch}, finalize: ${directFinalize})` : ''}`));
+    const finalizeLabel = directFinalize === 'none' ? 'no PR' : directFinalize;
+    console.log(chalk.gray(`  Delivery: ${deliveryMode}${deliveryMode === 'direct' ? ` (branch: ${directBranch}, finalize: ${finalizeLabel})` : ''}`));
   }
-  console.log(chalk.gray(`  Draft PRs: ${useDraft ? 'yes' : 'no'}`));
   if (milestoneMode) {
     console.log(chalk.gray(`  Milestone mode: batch size ${batchSize}`));
+    console.log(chalk.gray(`  Draft PRs: ${useDraft ? 'yes' : 'no'}`));
   }
   console.log();
 
@@ -415,7 +426,9 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     await initSolo(repoRoot);
   }
 
-  const preflight = await runPreflightChecks(repoRoot, { needsPr: true });
+  // Only require PR capability if we'll actually create PRs
+  const willCreatePrs = milestoneMode || deliveryMode === 'pr' || deliveryMode === 'auto-merge' || directFinalize === 'pr';
+  const preflight = await runPreflightChecks(repoRoot, { needsPr: willCreatePrs });
   if (!preflight.ok) {
     console.error(chalk.red(`✗ ${preflight.error}`));
     process.exit(1);
@@ -600,24 +613,29 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     // Fall back to master
   }
 
-  // Milestone init
+  // Branch initialization - mutually exclusive:
+  // - Milestone mode: creates milestone branches for batched PRs
+  // - Direct mode: commits directly to a single branch (no PRs)
   let milestoneBranch: string | undefined;
   let milestoneWorktreePath: string | undefined;
   let milestoneNumber = 0;
-  if (milestoneMode && !options.dryRun) {
-    const ms = await createMilestoneBranch(repoRoot, detectedBaseBranch);
-    milestoneBranch = ms.milestoneBranch;
-    milestoneWorktreePath = ms.milestoneWorktreePath;
-    milestoneNumber = 1;
-    console.log(chalk.cyan(`Milestone branch: ${milestoneBranch}`));
-    console.log();
-  }
 
-  // Direct branch init
-  if (deliveryMode === 'direct' && !options.dryRun) {
-    await ensureDirectBranch(repoRoot, directBranch, detectedBaseBranch);
-    console.log(chalk.cyan(`Direct branch: ${directBranch}`));
-    console.log();
+  if (!options.dryRun) {
+    if (milestoneMode) {
+      // Milestone mode: create milestone branch for batched PR workflow
+      const ms = await createMilestoneBranch(repoRoot, detectedBaseBranch);
+      milestoneBranch = ms.milestoneBranch;
+      milestoneWorktreePath = ms.milestoneWorktreePath;
+      milestoneNumber = 1;
+      console.log(chalk.cyan(`Milestone branch: ${milestoneBranch}`));
+      console.log();
+    } else if (deliveryMode === 'direct') {
+      // Direct mode: commit directly to branch (no PRs by default)
+      await ensureDirectBranch(repoRoot, directBranch, detectedBaseBranch);
+      console.log(chalk.cyan(`Direct branch: ${directBranch}`));
+      console.log();
+    }
+    // Note: 'pr' and 'auto-merge' modes create per-ticket branches, no init needed
   }
 
   const pullInterval = config?.auto?.pullEveryNCycles ?? 5;
@@ -741,6 +759,9 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     repoRoot: state.repoRoot,
     options: state.options,
     config: state.config,
+    sectorProductionFileCount: state.currentSectorId
+      ? state.sectorState?.sectors.find(s => s.path === state.currentSectorId)?.productionFileCount
+      : undefined,
   });
   state.getCycleFormula = (cycle: number) => getCycleFormulaImpl(stateFormulaCtx(), cycle);
   state.getCycleCategories = (formula) => getCycleCategoriesImpl(stateFormulaCtx(), formula);

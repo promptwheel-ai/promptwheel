@@ -24,7 +24,7 @@ import {
   autoMergePr,
 } from './solo-git.js';
 import { getAdaptiveParallelCount, sleep } from './dedup.js';
-import { partitionIntoWaves } from './wave-scheduling.js';
+import { partitionIntoWaves, type ConflictSensitivity } from './wave-scheduling.js';
 import type { TicketOutcome } from './run-history.js';
 
 export interface ExecuteResult {
@@ -127,7 +127,7 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
     }
   }
 
-  const processOneProposal = async (proposal: TicketProposal, slotLabel: string): Promise<{ success: boolean; prUrl?: string; noChanges?: boolean; wasRetried?: boolean }> => {
+  const processOneProposal = async (proposal: TicketProposal, slotLabel: string): Promise<{ success: boolean; prUrl?: string; noChanges?: boolean; wasRetried?: boolean; conflictBranch?: string }> => {
     console.log(chalk.cyan(`[${slotLabel}] ${proposal.title}`));
     const ticketSpinner = createSpinner(`Setting up...`, 'spool');
 
@@ -230,7 +230,7 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
               await runs.markFailure(state.adapter, currentRun.id, 'Merge conflict with milestone branch');
               await tickets.updateStatus(state.adapter, currentTicket.id, 'blocked');
               ticketSpinner.fail('Merge conflict — ticket blocked');
-              return { success: false };
+              return { success: false, conflictBranch: result.branchName };
             }
             state.milestoneTicketCount++;
             state.milestoneTicketSummaries.push(currentTicket.title);
@@ -349,7 +349,7 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
   };
 
   // Helper to record outcome after processing
-  const recordOutcome = (proposal: TicketProposal, result: { success: boolean; prUrl?: string; noChanges?: boolean; wasRetried?: boolean }, otherTitles: string[]) => {
+  const recordOutcome = (proposal: TicketProposal, result: { success: boolean; prUrl?: string; noChanges?: boolean; wasRetried?: boolean; conflictBranch?: string }, otherTitles: string[]) => {
     if (result.noChanges) {
       recordDedupEntry(state.repoRoot, proposal.title, false, 'no_changes');
       const outcome: TicketOutcome = { id: '', title: proposal.title, category: proposal.category, status: 'no_changes' };
@@ -411,9 +411,14 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
     // Parallel/wave execution
     let waves: Array<typeof toProcess>;
     if (state.milestoneMode) {
-      waves = partitionIntoWaves(toProcess);
+      // Use conflict sensitivity from config (default: 'normal')
+      // - 'strict': Any shared directory = conflict (safest, more sequential)
+      // - 'normal': Sibling files + conflict-prone patterns (balanced)
+      // - 'relaxed': Only direct file overlap (most parallel, riskier)
+      const sensitivity: ConflictSensitivity = state.autoConf.conflictSensitivity ?? 'normal';
+      waves = partitionIntoWaves(toProcess, { sensitivity });
       if (waves.length > 1) {
-        console.log(chalk.gray(`  Conflict-aware scheduling: ${waves.length} waves (avoiding overlapping file paths)`));
+        console.log(chalk.gray(`  Conflict-aware scheduling: ${waves.length} waves (sensitivity: ${sensitivity})`));
       }
     } else {
       waves = [toProcess];
@@ -454,6 +459,42 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
           recordOutcome(proposal, r.value, otherTitles);
         } else {
           recordOutcome(proposal, { success: false }, otherTitles);
+        }
+      }
+
+      // Retry merge-conflicted tickets sequentially after wave settles
+      if (state.milestoneMode && state.milestoneWorktreePath) {
+        const conflicted: Array<{ proposal: TicketProposal; branch: string; index: number }> = [];
+        for (let ri = 0; ri < taskResults.length; ri++) {
+          const r = taskResults[ri];
+          if (r.status === 'fulfilled' && r.value.conflictBranch) {
+            conflicted.push({ proposal: wave[ri], branch: r.value.conflictBranch, index: ri });
+          }
+        }
+        if (conflicted.length > 0) {
+          console.log(chalk.gray(`  Retrying ${conflicted.length} merge-conflicted ticket(s)...`));
+          for (const { proposal, branch } of conflicted) {
+            if (!shouldContinue(state)) break;
+            const retryResult = await mergeTicketToMilestone(
+              state.repoRoot,
+              branch,
+              state.milestoneWorktreePath
+            );
+            if (retryResult.success) {
+              state.milestoneTicketCount++;
+              state.milestoneTicketSummaries.push(proposal.title);
+              console.log(chalk.green(`    ✓ ${proposal.title} — merged on retry`));
+              // Check milestone full
+              if (state.batchSize && state.milestoneTicketCount >= state.batchSize) {
+                await state.finalizeMilestone();
+                if (shouldContinue(state)) {
+                  await state.startNewMilestone();
+                }
+              }
+            } else {
+              console.log(chalk.yellow(`    ✗ ${proposal.title} — still conflicted`));
+            }
+          }
         }
       }
     }

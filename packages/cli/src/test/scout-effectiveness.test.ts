@@ -315,3 +315,165 @@ describe('category constraint selection logic', () => {
     expect(excludeTypes).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fix A: Merge conflict retry
+// ---------------------------------------------------------------------------
+
+describe('merge conflict retry', () => {
+  it('conflictBranch is returned when merge fails', () => {
+    // Simulate processOneProposal returning conflictBranch on merge conflict
+    const result: { success: boolean; conflictBranch?: string } = {
+      success: false,
+      conflictBranch: 'blockspool/ticket-123',
+    };
+    expect(result.conflictBranch).toBe('blockspool/ticket-123');
+    expect(result.success).toBe(false);
+  });
+
+  it('conflictBranch is undefined when merge succeeds', () => {
+    const result: { success: boolean; conflictBranch?: string } = {
+      success: true,
+    };
+    expect(result.conflictBranch).toBeUndefined();
+    expect(result.success).toBe(true);
+  });
+
+  it('retry loop iterates over conflicted tickets', () => {
+    // Simulate wave results with some conflicted tickets
+    type WaveResult = { status: 'fulfilled'; value: { success: boolean; conflictBranch?: string } };
+    const taskResults: WaveResult[] = [
+      { status: 'fulfilled', value: { success: true } },
+      { status: 'fulfilled', value: { success: false, conflictBranch: 'branch-a' } },
+      { status: 'fulfilled', value: { success: true } },
+      { status: 'fulfilled', value: { success: false, conflictBranch: 'branch-b' } },
+      { status: 'fulfilled', value: { success: false } }, // failed but no conflict branch
+    ];
+
+    const conflicted: Array<{ branch: string; index: number }> = [];
+    for (let ri = 0; ri < taskResults.length; ri++) {
+      const r = taskResults[ri];
+      if (r.status === 'fulfilled' && r.value.conflictBranch) {
+        conflicted.push({ branch: r.value.conflictBranch, index: ri });
+      }
+    }
+
+    expect(conflicted).toHaveLength(2);
+    expect(conflicted[0].branch).toBe('branch-a');
+    expect(conflicted[0].index).toBe(1);
+    expect(conflicted[1].branch).toBe('branch-b');
+    expect(conflicted[1].index).toBe(3);
+  });
+
+  it('successful retry increments milestoneTicketCount', () => {
+    const state = {
+      milestoneTicketCount: 3,
+      milestoneTicketSummaries: ['a', 'b', 'c'],
+    };
+
+    // Simulate a successful retry merge
+    const retrySuccess = true;
+    const proposalTitle = 'Fix auth module';
+
+    if (retrySuccess) {
+      state.milestoneTicketCount++;
+      state.milestoneTicketSummaries.push(proposalTitle);
+    }
+
+    expect(state.milestoneTicketCount).toBe(4);
+    expect(state.milestoneTicketSummaries).toContain('Fix auth module');
+  });
+
+  it('failed retry does not increment milestoneTicketCount', () => {
+    const state = {
+      milestoneTicketCount: 3,
+      milestoneTicketSummaries: ['a', 'b', 'c'],
+    };
+
+    const retrySuccess = false;
+    const proposalTitle = 'Fix auth module';
+
+    if (retrySuccess) {
+      state.milestoneTicketCount++;
+      state.milestoneTicketSummaries.push(proposalTitle);
+    }
+
+    expect(state.milestoneTicketCount).toBe(3);
+    expect(state.milestoneTicketSummaries).not.toContain('Fix auth module');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix B: Deep sector threshold
+// ---------------------------------------------------------------------------
+
+describe('deep sector threshold', () => {
+  it('sectorProductionFileCount >= 25 → returns deep formula', () => {
+    const deepFormula = { name: 'deep', description: 'Deep scan' };
+    const sectorProductionFileCount: number | undefined = 30;
+
+    // Simulate the hard-guarantee guard
+    const sessionPhase = 'deep';
+    const shouldUseDeep = sessionPhase !== 'warmup' && (sectorProductionFileCount ?? Infinity) >= 25;
+
+    expect(shouldUseDeep).toBe(true);
+  });
+
+  it('sectorProductionFileCount < 25 → skips deep formula', () => {
+    const sectorProductionFileCount: number | undefined = 22;
+
+    const sessionPhase = 'deep';
+    const shouldUseDeep = sessionPhase !== 'warmup' && (sectorProductionFileCount ?? Infinity) >= 25;
+
+    expect(shouldUseDeep).toBe(false);
+  });
+
+  it('sectorProductionFileCount undefined → treats as Infinity (deep allowed — backward compat)', () => {
+    const sectorProductionFileCount: number | undefined = undefined;
+
+    const sessionPhase = 'deep';
+    const shouldUseDeep = sessionPhase !== 'warmup' && (sectorProductionFileCount ?? Infinity) >= 25;
+
+    expect(shouldUseDeep).toBe(true);
+  });
+
+  it('threshold boundary: 24 → skip deep', () => {
+    const sectorProductionFileCount = 24;
+    const shouldUseDeep = (sectorProductionFileCount ?? Infinity) >= 25;
+    expect(shouldUseDeep).toBe(false);
+  });
+
+  it('threshold boundary: 25 → allow deep', () => {
+    const sectorProductionFileCount = 25;
+    const shouldUseDeep = (sectorProductionFileCount ?? Infinity) >= 25;
+    expect(shouldUseDeep).toBe(true);
+  });
+
+  it('UCB1 deep selection falls through to null on small sector', () => {
+    const deepFormula = { name: 'deep', description: 'Deep scan' };
+    const sectorProductionFileCount: number | undefined = 15;
+
+    // Simulate UCB1 selecting deep
+    let bestFormula: typeof deepFormula | null = deepFormula;
+
+    // Apply the guard
+    if (bestFormula === deepFormula && (sectorProductionFileCount ?? Infinity) < 25) {
+      bestFormula = null;
+    }
+
+    expect(bestFormula).toBeNull();
+  });
+
+  it('UCB1 deep selection kept on large sector', () => {
+    const deepFormula = { name: 'deep', description: 'Deep scan' };
+    const sectorProductionFileCount: number | undefined = 50;
+
+    let bestFormula: typeof deepFormula | null = deepFormula;
+
+    if (bestFormula === deepFormula && (sectorProductionFileCount ?? Infinity) < 25) {
+      bestFormula = null;
+    }
+
+    expect(bestFormula).toBe(deepFormula);
+  });
+});

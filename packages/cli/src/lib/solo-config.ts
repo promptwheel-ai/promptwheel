@@ -116,6 +116,13 @@ export interface AutoConfig {
   codex?: { scoutConcurrency?: number; batchTokenBudget?: number; timeoutMultiplier?: number };
   kimi?: { scoutConcurrency?: number; batchTokenBudget?: number; scoutTimeoutMs?: number; timeoutMultiplier?: number };
   local?: { scoutConcurrency?: number; batchTokenBudget?: number; scoutTimeoutMs?: number; maxIterations?: number; timeoutMultiplier?: number };
+  /**
+   * Wave scheduling conflict sensitivity for parallel execution (default: 'normal'):
+   * - 'strict': Any shared directory or package = conflict (safest, most sequential)
+   * - 'normal': Sibling files + conflict-prone patterns + same category (balanced)
+   * - 'relaxed': Only direct file overlap + glob overlap (most parallel, riskier)
+   */
+  conflictSensitivity?: 'strict' | 'normal' | 'relaxed';
 }
 
 /**
