@@ -38,6 +38,7 @@ import {
   loadDedupMemory,
   type DedupEntry,
 } from './dedup-memory.js';
+import { pruneStaleWorktrees } from './retention.js';
 import {
   buildCodebaseIndex,
   type CodebaseIndex,
@@ -291,6 +292,12 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
   if (!repoRoot) {
     console.error(chalk.red('✗ Not a git repository'));
     process.exit(1);
+  }
+
+  // Clean up stale worktrees from previous interrupted runs
+  const prunedWorktrees = pruneStaleWorktrees(repoRoot);
+  if (prunedWorktrees > 0) {
+    console.log(chalk.gray(`  Cleaned up ${prunedWorktrees} stale worktree(s)`));
   }
 
   const config = loadConfig(repoRoot);
