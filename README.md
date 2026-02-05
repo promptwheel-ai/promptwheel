@@ -625,6 +625,6 @@ Apache 2.0 - See [LICENSE](./LICENSE)
 ---
 
 <p align="center">
-  <b>BlockSpool v0.5.48</b><br>
+  <b>BlockSpool v0.5.49</b><br>
   <i>Set it. Forget it. Merge the PRs.</i>
 </p>

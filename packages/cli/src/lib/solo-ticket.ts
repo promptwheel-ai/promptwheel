@@ -377,7 +377,7 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
       prompt,
       timeoutMs,
       verbose,
-      onProgress: verbose ? onProgress : () => {},
+      onProgress, // Always report progress for visibility
     });
 
     // Save agent artifact
@@ -941,7 +941,7 @@ export async function soloRunTicket(opts: RunTicketOptions): Promise<RunTicketRe
                 prompt: fullRetryPrompt,
                 timeoutMs,
                 verbose,
-                onProgress: verbose ? onProgress : () => {},
+                onProgress, // Always report progress for visibility
               });
 
               if (retryResult.success) {

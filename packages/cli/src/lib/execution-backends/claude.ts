@@ -5,6 +5,30 @@
 import { spawn } from 'node:child_process';
 import type { ClaudeResult, ExecutionBackend } from './types.js';
 
+/** Format elapsed time as human-readable string */
+function formatElapsed(ms: number): string {
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const remainingSecs = secs % 60;
+  return `${mins}m${remainingSecs}s`;
+}
+
+/** Detect phase from Claude CLI output patterns */
+function detectPhase(text: string): string | null {
+  const lower = text.toLowerCase();
+  // Tool usage patterns
+  if (lower.includes('reading') || lower.includes('read file') || lower.includes('let me read')) return 'Reading files';
+  if (lower.includes('writing') || lower.includes('write file') || lower.includes('let me write') || lower.includes('creating file')) return 'Writing files';
+  if (lower.includes('editing') || lower.includes('edit file') || lower.includes('let me edit') || lower.includes('updating')) return 'Editing files';
+  if (lower.includes('running') || lower.includes('execute') || lower.includes('bash') || lower.includes('npm ') || lower.includes('running command')) return 'Running command';
+  if (lower.includes('searching') || lower.includes('grep') || lower.includes('looking for') || lower.includes('finding')) return 'Searching';
+  if (lower.includes('analyzing') || lower.includes('examining') || lower.includes('reviewing')) return 'Analyzing';
+  if (lower.includes('testing') || lower.includes('test')) return 'Testing';
+  if (lower.includes('commit') || lower.includes('git')) return 'Git operations';
+  return null;
+}
+
 export class ClaudeExecutionBackend implements ExecutionBackend {
   readonly name = 'claude';
 
@@ -51,6 +75,13 @@ export async function runClaude(opts: {
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let lastPhase = 'Starting';
+
+    // Periodic progress update with elapsed time
+    const progressInterval = setInterval(() => {
+      const elapsed = formatElapsed(Date.now() - startTime);
+      onProgress(`${lastPhase}... (${elapsed})`);
+    }, 3000);
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -63,6 +94,15 @@ export async function runClaude(opts: {
     claude.stdout.on('data', (data: Buffer) => {
       const text = data.toString();
       stdout += text;
+
+      // Detect phase from output
+      const phase = detectPhase(text);
+      if (phase) {
+        lastPhase = phase;
+        const elapsed = formatElapsed(Date.now() - startTime);
+        onProgress(`${lastPhase}... (${elapsed})`);
+      }
+
       if (verbose) {
         onProgress(text.trim().slice(0, 100));
       }
@@ -74,6 +114,7 @@ export async function runClaude(opts: {
 
     claude.on('close', (code: number | null) => {
       clearTimeout(timer);
+      clearInterval(progressInterval);
       const durationMs = Date.now() - startTime;
 
       if (timedOut) {
@@ -91,6 +132,7 @@ export async function runClaude(opts: {
 
     claude.on('error', (err: Error) => {
       clearTimeout(timer);
+      clearInterval(progressInterval);
       resolve({ success: false, error: err.message, stdout, stderr, exitCode: null, timedOut: false, durationMs: Date.now() - startTime });
     });
   });

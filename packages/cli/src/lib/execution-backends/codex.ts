@@ -9,6 +9,40 @@
 import { spawn } from 'node:child_process';
 import type { ClaudeResult, ExecutionBackend } from './types.js';
 
+/** Format elapsed time as human-readable string */
+function formatElapsed(ms: number): string {
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const remainingSecs = secs % 60;
+  return `${mins}m${remainingSecs}s`;
+}
+
+/** Parse Codex JSONL output to extract meaningful phase info */
+function parseCodexEvent(line: string): { phase?: string; detail?: string } | null {
+  try {
+    const event = JSON.parse(line);
+    // Codex JSONL events have a "type" field
+    if (event.type === 'function_call' || event.type === 'tool_use') {
+      const name = event.name || event.function?.name || '';
+      if (name.includes('read') || name.includes('Read')) return { phase: 'Reading', detail: name };
+      if (name.includes('write') || name.includes('Write') || name.includes('edit') || name.includes('Edit')) return { phase: 'Writing', detail: name };
+      if (name.includes('bash') || name.includes('Bash') || name.includes('exec')) return { phase: 'Running command', detail: name };
+      if (name.includes('grep') || name.includes('Grep') || name.includes('search')) return { phase: 'Searching', detail: name };
+      return { phase: 'Tool', detail: name };
+    }
+    if (event.type === 'message' && event.role === 'assistant') {
+      return { phase: 'Thinking' };
+    }
+    if (event.type === 'done' || event.type === 'complete') {
+      return { phase: 'Completing' };
+    }
+  } catch {
+    // Not JSON, ignore
+  }
+  return null;
+}
+
 export class CodexExecutionBackend implements ExecutionBackend {
   readonly name = 'codex';
   private apiKey?: string;
@@ -66,6 +100,14 @@ export class CodexExecutionBackend implements ExecutionBackend {
         let stdout = '';
         let stderr = '';
         let timedOut = false;
+        let lastPhase = 'Starting';
+        let lineBuffer = '';
+
+        // Periodic progress update with elapsed time
+        const progressInterval = setInterval(() => {
+          const elapsed = formatElapsed(Date.now() - startTime);
+          onProgress(`${lastPhase}... (${elapsed})`);
+        }, 3000);
 
         const timer = setTimeout(() => {
           timedOut = true;
@@ -79,6 +121,23 @@ export class CodexExecutionBackend implements ExecutionBackend {
         proc.stdout.on('data', (data: Buffer) => {
           const text = data.toString();
           stdout += text;
+
+          // Parse JSONL lines for phase info
+          lineBuffer += text;
+          const lines = lineBuffer.split('\n');
+          lineBuffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            const parsed = parseCodexEvent(line);
+            if (parsed?.phase) {
+              lastPhase = parsed.phase;
+              const elapsed = formatElapsed(Date.now() - startTime);
+              const detail = parsed.detail ? `: ${parsed.detail}` : '';
+              onProgress(`${lastPhase}${detail} (${elapsed})`);
+            }
+          }
+
           if (verbose) {
             onProgress(text.trim().slice(0, 100));
           }
@@ -90,6 +149,7 @@ export class CodexExecutionBackend implements ExecutionBackend {
 
         proc.on('close', (code: number | null) => {
           clearTimeout(timer);
+          clearInterval(progressInterval);
           const durationMs = Date.now() - startTime;
 
           if (timedOut) {
@@ -115,6 +175,7 @@ export class CodexExecutionBackend implements ExecutionBackend {
 
         proc.on('error', (err: Error) => {
           clearTimeout(timer);
+          clearInterval(progressInterval);
           resolve({ success: false, error: err.message, stdout, stderr, exitCode: null, timedOut: false, durationMs: Date.now() - startTime });
         });
       });
