@@ -76,6 +76,7 @@ Examples:
     .addOption(new Option('--auto-merge').hideHelp())
     .addOption(new Option('--direct-branch <name>').hideHelp())
     .addOption(new Option('--direct-finalize <mode>').hideHelp())
+    .addOption(new Option('--qa-fix').hideHelp())
     .action(async (mode: string | undefined, options: {
       dryRun?: boolean;
       scope?: string;
@@ -121,6 +122,7 @@ Examples:
       directBranch?: string;
       directFinalize?: string;
       individualPrs?: boolean;
+      qaFix?: boolean;
     }) => {
       if (options.deep && !options.formula) {
         options.formula = 'deep';

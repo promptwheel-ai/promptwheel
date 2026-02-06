@@ -107,6 +107,8 @@ export interface AutoModeOptions {
   directFinalize?: 'pr' | 'merge' | 'none';
   individualPrs?: boolean;
   skipQaFix?: boolean;
+  /** Enable AI-powered QA baseline fix (off by default — modifies working tree) */
+  qaFix?: boolean;
 }
 
 // ── Session state ───────────────────────────────────────────────────────────
@@ -383,7 +385,7 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     // Check for remaining failures after auto-fix attempts
     const stillFailing = [...baseline.entries()].filter(([, r]) => !r.passed).map(([name]) => name);
 
-    if (stillFailing.length > 0 && !options.skipQaFix) {
+    if (stillFailing.length > 0 && options.qaFix) {
       // Try one AI fix cycle silently — no prompts, no wheel
       console.log(chalk.gray(`  ${stillFailing.length} failing — trying quick fix...`));
 
