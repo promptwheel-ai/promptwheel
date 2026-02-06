@@ -1,6 +1,6 @@
 {
   "name": "@blockspool/sqlite",
-  "version": "0.5.59",
+  "version": "0.5.60",
   "description": "SQLite adapter for BlockSpool - zero-config local mode",
   "author": "BlockSpool",
   "homepage": "https://blockspool.com",
@@ -38,7 +38,7 @@
   ],
   "license": "Apache-2.0",
   "dependencies": {
-    "@blockspool/core": "^0.5.59",
+    "@blockspool/core": "^0.5.60",
     "better-sqlite3": "^12.6.2"
   },
   "devDependencies": {
@@ -46,6 +46,6 @@
     "typescript": "^5.7.3"
   },
   "peerDependencies": {
-    "@blockspool/core": ">=0.5.59"
+    "@blockspool/core": ">=0.5.60"
   }
 }

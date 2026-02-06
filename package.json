@@ -1,6 +1,6 @@
 {
   "name": "blockspool",
-  "version": "0.5.59",
+  "version": "0.5.60",
   "description": "Continuous codebase improvement tool — scouts, executes, and batches into milestone PRs",
   "author": "BlockSpool",
   "license": "Apache-2.0",
@@ -24,7 +24,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc --build packages/core packages/sqlite packages/cli",
+    "build": "tsc --build packages/core packages/sqlite packages/mcp packages/cli",
     "dev": "npx tsx packages/cli/src/bin/blockspool.ts",
     "test": "vitest run",
     "test:watch": "vitest",
