@@ -29,7 +29,7 @@
     "!dist/test"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "npx tsc",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "dev": "tsx src/bin/blockspool.ts"
