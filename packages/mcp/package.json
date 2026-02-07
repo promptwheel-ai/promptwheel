@@ -1,6 +1,6 @@
 {
   "name": "@blockspool/mcp",
-  "version": "0.5.61",
+  "version": "0.5.62",
   "description": "BlockSpool MCP server - stateful tool provider for Claude Code",
   "author": "BlockSpool",
   "homepage": "https://blockspool.com",

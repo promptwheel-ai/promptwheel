@@ -13,6 +13,7 @@ import { projects } from '@blockspool/core/repos';
 import { createGitService } from './git.js';
 import {
   getAdapter,
+  getBlockspoolDir,
   isInitialized,
   initSolo,
   loadConfig,
@@ -448,6 +449,15 @@ Read the error output above, then fix the source code. Minimal, targeted changes
       }
       console.log();
     }
+
+    // Persist baseline failures for inline prompts (plugin/MCP path)
+    try {
+      const baselineFailures = [...baseline.entries()]
+        .filter(([, r]) => !r.passed)
+        .map(([name]) => name);
+      const baselinePath = path.join(getBlockspoolDir(repoRoot), 'qa-baseline.json');
+      fs.writeFileSync(baselinePath, JSON.stringify({ failures: baselineFailures, timestamp: Date.now() }));
+    } catch { /* non-fatal */ }
 
     // Now auto-tune based on final results
     const tuneResult = autoTuneQaConfig(repoRoot, qaConfig);

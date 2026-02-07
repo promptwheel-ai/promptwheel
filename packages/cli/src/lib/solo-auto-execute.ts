@@ -2,12 +2,15 @@
  * Ticket execution: processOneProposal + wave scheduling.
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import chalk from 'chalk';
 import type { TicketProposal } from '@blockspool/core/scout';
 import { tickets, runs } from '@blockspool/core/repos';
 import type { AutoSessionState } from './solo-auto-state.js';
 import { shouldContinue } from './solo-auto-state.js';
 import { soloRunTicket, captureQaBaseline, baselineToPassFail } from './solo-ticket.js';
+import { getBlockspoolDir } from './solo-config.js';
 import { computeTicketTimeout } from './solo-auto-utils.js';
 import { createSpinner } from './spinner.js';
 import { formatGuidelinesForPrompt } from './guidelines.js';
@@ -103,6 +106,13 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
     if (preExisting.length > 0) {
       console.log(chalk.yellow(`  QA baseline: ${preExisting.length} pre-existing failure(s) will be skipped`));
     }
+
+    // Persist baseline for inline prompts (plugin/MCP path)
+    try {
+      const baselineFailures = preExisting.map(([name]) => name);
+      const baselinePath = path.join(getBlockspoolDir(state.repoRoot), 'qa-baseline.json');
+      fs.writeFileSync(baselinePath, JSON.stringify({ failures: baselineFailures, timestamp: Date.now() }));
+    } catch { /* non-fatal */ }
   }
 
   // Adaptive parallelism

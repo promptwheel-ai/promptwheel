@@ -438,7 +438,18 @@ export function loadConfig(repoRoot: string): SoloConfig | null {
   if (!fs.existsSync(configPath)) {
     return null;
   }
-  return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  const config: SoloConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+
+  // Backfill setup command for existing configs that predate the feature
+  if (!config.setup) {
+    const detected = detectSetupCommand(repoRoot);
+    if (detected) {
+      config.setup = detected;
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    }
+  }
+
+  return config;
 }
 
 /**

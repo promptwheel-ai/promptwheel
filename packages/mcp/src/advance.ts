@@ -454,8 +454,9 @@ async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> 
     const projectMeta = detectProjectMetadata(ctx.project.rootPath);
     const metadataBlock = formatMetadataForPrompt(projectMeta) + '\n\n';
 
-    // Read project setup command from .blockspool/config.json (language-agnostic)
+    // Read project setup command and QA baseline from .blockspool/
     let setupCommand: string | undefined;
+    let baselineFailures: string[] = [];
     try {
       const configPath = path.join(ctx.project.rootPath, '.blockspool', 'config.json');
       if (fs.existsSync(configPath)) {
@@ -463,11 +464,18 @@ async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> 
         setupCommand = configData.setup;
       }
     } catch { /* non-fatal */ }
+    try {
+      const baselinePath = path.join(ctx.project.rootPath, '.blockspool', 'qa-baseline.json');
+      if (fs.existsSync(baselinePath)) {
+        const data = JSON.parse(fs.readFileSync(baselinePath, 'utf-8'));
+        baselineFailures = data.failures ?? [];
+      }
+    } catch { /* non-fatal */ }
 
     for (const pt of parallelTickets) {
       const ticket = readyTickets.find(t => t.id === pt.ticket_id)!;
       pt.inline_prompt = buildInlineTicketPrompt(
-        ticket, pt.constraints, guidelinesBlock, metadataBlock, s.create_prs, s.draft, s.direct, setupCommand,
+        ticket, pt.constraints, guidelinesBlock, metadataBlock, s.create_prs, s.draft, s.direct, setupCommand, baselineFailures,
       );
     }
 
@@ -1164,6 +1172,7 @@ function buildInlineTicketPrompt(
   draft: boolean,
   direct: boolean,
   setupCommand?: string,
+  baselineFailures: string[] = [],
 ): string {
   const slug = ticket.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
   const branch = `blockspool/${ticket.id}/${slug}`;
@@ -1203,7 +1212,13 @@ function buildInlineTicketPrompt(
       '',
       verifyBlock,
       '',
-      'If tests fail, fix the issues and re-run. Do not skip verification.',
+      ...(baselineFailures.length > 0 ? [
+        `**Pre-existing failures (IGNORE these — they were failing before your changes):** ${baselineFailures.join(', ')}`,
+        '',
+        'Only fix failures that are NEW — caused by your changes. If a command was already failing, do not try to fix it.',
+      ] : [
+        'If tests fail due to your changes, fix the issues and re-run.',
+      ]),
       '',
       '## Step 3 — Commit',
       '',
@@ -1278,7 +1293,13 @@ function buildInlineTicketPrompt(
     '',
     verifyBlock,
     '',
-    'If tests fail, fix the issues and re-run. Do not skip verification.',
+    ...(baselineFailures.length > 0 ? [
+      `**Pre-existing failures (IGNORE these — they were failing before your changes):** ${baselineFailures.join(', ')}`,
+      '',
+      'Only fix failures that are NEW — caused by your changes. If a command was already failing, do not try to fix it.',
+    ] : [
+      'If tests fail due to your changes, fix the issues and re-run.',
+    ]),
     '',
     '## Step 4 — Commit and push',
     '',
