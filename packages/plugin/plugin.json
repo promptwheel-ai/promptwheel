@@ -1,7 +1,7 @@
 {
   "name": "blockspool",
   "version": "0.5.62",
-  "description": "Continuous codebase improvement — scouts, plans, executes, and PRs",
+  "description": "Interactive codebase improvement — scouts, presents roadmap, executes approved changes",
   "skills": [
     "./skills/run",
     "./skills/status",
