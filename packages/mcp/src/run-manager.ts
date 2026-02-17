@@ -159,6 +159,7 @@ export class RunManager {
       codebase_index_dirty: false,
 
       pending_proposals: null,
+      skip_review: config.skip_review ?? false,
       scout_exploration_log: [],
 
       learnings_enabled: config.learnings !== false,

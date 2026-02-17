@@ -12,7 +12,7 @@ import type { Project } from '@blockspool/core';
 import { repos, SCOUT_DEFAULTS } from '@blockspool/core';
 import { RunManager } from './run-manager.js';
 import type { EventType, CommitPlan } from './types.js';
-import { filterAndCreateTickets } from './proposals.js';
+import { filterAndCreateTickets, parseReviewedProposals } from './proposals.js';
 import type { RawProposal } from './proposals.js';
 import { deriveScopePolicy, validatePlanScope } from './scope-policy.js';
 import { recordDiff, recordCommandFailure, recordPlanHash } from './spindle.js';
@@ -218,6 +218,25 @@ export async function processEvent(
         }
       }
 
+      // Fallback: if pending_proposals exist and the LLM sent review results
+      // through SCOUT_OUTPUT instead of PROPOSALS_REVIEWED, redirect to the
+      // PROPOSALS_REVIEWED handler.
+      if (s.pending_proposals !== null) {
+        // Path 1: structured reviewed_proposals array in payload
+        const reviewedArray = payload['reviewed_proposals'] as unknown[] | undefined;
+        if (Array.isArray(reviewedArray) && reviewedArray.length > 0) {
+          return processEvent(run, db, 'PROPOSALS_REVIEWED', payload, project);
+        }
+        // Path 2: XML <reviewed-proposals> block in payload text
+        const payloadText = payload['text'] as string | undefined;
+        if (typeof payloadText === 'string' && payloadText.includes('<reviewed-proposals>')) {
+          const parsed = parseReviewedProposals(payloadText);
+          if (parsed && parsed.length > 0) {
+            return processEvent(run, db, 'PROPOSALS_REVIEWED', { reviewed_proposals: parsed }, project);
+          }
+        }
+      }
+
       // Extract proposals from payload
       const rawProposals = (payload['proposals'] ?? []) as RawProposal[];
 
@@ -261,6 +280,44 @@ export async function processEvent(
         }
         s.current_sector_path = s.selected_sector_path;
         s.selected_sector_path = undefined;
+      }
+
+      // skip_review: create tickets directly without adversarial review pass
+      if (s.skip_review) {
+        run.saveArtifact(
+          `${s.step_count}-scout-proposals.json`,
+          JSON.stringify({ raw: rawProposals, skip_review: true }, null, 2),
+        );
+
+        const result = await filterAndCreateTickets(run, db, rawProposals);
+
+        if (result.created_ticket_ids.length > 0) {
+          s.scout_retries = 0;
+          run.setPhase('NEXT_TICKET');
+          return {
+            processed: true,
+            phase_changed: true,
+            new_phase: 'NEXT_TICKET',
+            message: `Created ${result.created_ticket_ids.length} tickets (review skipped, ${result.rejected.length} rejected)`,
+          };
+        }
+
+        // All proposals rejected
+        if (s.scout_retries < MAX_SCOUT_RETRIES) {
+          s.scout_retries++;
+          return {
+            processed: true,
+            phase_changed: false,
+            message: `All proposals rejected (review skipped, attempt ${s.scout_retries}/${MAX_SCOUT_RETRIES + 1}). Retrying.`,
+          };
+        }
+        run.setPhase('DONE');
+        return {
+          processed: true,
+          phase_changed: true,
+          new_phase: 'DONE',
+          message: `All proposals rejected (review skipped) after all retries`,
+        };
       }
 
       // Store proposals as pending for adversarial review (instead of creating tickets immediately)
@@ -886,6 +943,25 @@ export async function processEvent(
           new_phase: 'DONE',
           message: 'Session cancelled by user',
         };
+      }
+      if (payload['skip_review'] === true) {
+        s.skip_review = true;
+        // If there are pending proposals waiting for review, create tickets immediately
+        if (s.pending_proposals && s.pending_proposals.length > 0) {
+          const pendingProposals = s.pending_proposals;
+          s.pending_proposals = null;
+          const result = await filterAndCreateTickets(run, db, pendingProposals);
+          if (result.created_ticket_ids.length > 0) {
+            run.setPhase('NEXT_TICKET');
+            return {
+              processed: true,
+              phase_changed: true,
+              new_phase: 'NEXT_TICKET',
+              message: `skip_review enabled, created ${result.created_ticket_ids.length} tickets from pending proposals`,
+            };
+          }
+        }
+        return { processed: true, phase_changed: false, message: 'skip_review enabled' };
       }
       return { processed: true, phase_changed: false, message: 'User override recorded' };
     }

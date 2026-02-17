@@ -324,8 +324,13 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
   const { run, db } = ctx;
   const s = run.require();
 
+  // If skip_review is on and stale pending_proposals exist, clear them
+  if (s.skip_review && s.pending_proposals !== null) {
+    s.pending_proposals = null;
+  }
+
   // If pending proposals exist, return adversarial review prompt
-  if (s.pending_proposals !== null) {
+  if (!s.skip_review && s.pending_proposals !== null) {
     // Convert raw proposals to ValidatedProposal shape for the review prompt
     const forReview: ValidatedProposal[] = s.pending_proposals.map(p => ({
       category: p.category ?? 'unknown',

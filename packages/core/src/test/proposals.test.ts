@@ -239,10 +239,11 @@ describe('buildProposalReviewPrompt', () => {
     expect(prompt).toContain('(none)');
   });
 
-  it('includes output format with XML block example', () => {
+  it('includes MCP ingest_event instructions', () => {
     const prompt = buildProposalReviewPrompt([makeValidated()]);
-    expect(prompt).toContain('<reviewed-proposals>');
-    expect(prompt).toContain('</reviewed-proposals>');
+    expect(prompt).toContain('blockspool_ingest_event');
+    expect(prompt).toContain('PROPOSALS_REVIEWED');
+    expect(prompt).toContain('reviewed_proposals');
   });
 
   it('defaults impact when not provided', () => {

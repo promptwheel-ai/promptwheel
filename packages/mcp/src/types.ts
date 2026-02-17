@@ -168,6 +168,9 @@ export interface RunState {
   // Pending proposals awaiting adversarial review before ticket creation
   pending_proposals: import('./proposals.js').RawProposal[] | null;
 
+  // Skip adversarial review: create tickets directly from scout proposals
+  skip_review: boolean;
+
   // Exploration log for better escalation context across scout retries
   scout_exploration_log: string[];
 
@@ -356,4 +359,6 @@ export interface SessionConfig {
   direct?: boolean;
   /** Cross-verify: use a separate verifier agent for QA instead of self-verification. Default: false. */
   cross_verify?: boolean;
+  /** Skip adversarial review: create tickets directly from scout proposals without a second review pass. Default: false. */
+  skip_review?: boolean;
 }

@@ -44,6 +44,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
       learnings_decay_rate: z.number().optional().describe('Weight decay per session load (default: 3).'),
       direct: z.boolean().optional().describe('Direct mode: edit in place without worktrees/branches (default: true for simple solo use). Auto-disabled when create_prs=true or parallel>1.'),
       cross_verify: z.boolean().optional().describe('Cross-verify: use a separate verifier agent for QA instead of self-verification (default: false).'),
+      skip_review: z.boolean().optional().describe('Skip adversarial review: create tickets directly from scout proposals without a second review pass (default: false).'),
     },
     async (params) => {
       const state = getState();
@@ -73,6 +74,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
         learnings_decay_rate: params.learnings_decay_rate,
         direct: params.direct,
         cross_verify: params.cross_verify,
+        skip_review: params.skip_review,
       };
 
       let formulaInfo: { name: string; description: string } | undefined;
