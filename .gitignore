@@ -110,8 +110,8 @@ logs/
 # Gitleaks report (generated during scans)
 gitleaks-report.json
 
-# BlockSpool
-.blockspool/
+# PromptWheel
+.promptwheel/
 .commandlayer/
 *.tgz
 cloud/.next.bak/

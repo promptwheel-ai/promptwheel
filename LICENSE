@@ -1,4 +1,4 @@
-# BlockSpool Licensing
+# PromptWheel Licensing
 
 This repository uses a split licensing model. See [LICENSING.md](./LICENSING.md) for details.
 
@@ -8,7 +8,7 @@ This repository uses a split licensing model. See [LICENSING.md](./LICENSING.md)
 |-----------|---------|
 | `packages/` (engine) | Apache-2.0 |
 | `packs/starter/` | Apache-2.0 |
-| `packs/pro/` | BlockSpool Pack License (Restricted) |
+| `packs/pro/` | PromptWheel Pack License (Restricted) |
 | `cloud/` | Proprietary |
 
 ## The Engine (packages/)
@@ -23,7 +23,7 @@ See [packs/starter/LICENSE](./packs/starter/LICENSE) for the full text.
 
 ## Pro Packs (packs/pro/)
 
-Pro packs are licensed under the BlockSpool Pack License, which allows internal use
+Pro packs are licensed under the PromptWheel Pack License, which allows internal use
 but restricts redistribution.
 See [packs/pro/LICENSE](./packs/pro/LICENSE) for the full text.
 
@@ -34,4 +34,4 @@ open source license.
 
 ## Questions?
 
-See [LICENSING.md](./LICENSING.md) for FAQ or email license@blockspool.com
+See [LICENSING.md](./LICENSING.md) for FAQ or email license@promptwheel.dev
