@@ -1,0 +1,63 @@
+{
+  "name": "@promptwheel/mcp",
+  "version": "0.6.0",
+  "description": "PromptWheel MCP server - stateful tool provider for Claude Code",
+  "author": "PromptWheel",
+  "homepage": "https://promptwheel.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/promptwheel-ai/promptwheel.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/promptwheel-ai/promptwheel/issues"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "promptwheel-mcp": "dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./direct-client": {
+      "types": "./dist/direct-client.d.ts",
+      "import": "./dist/direct-client.js"
+    },
+    "./formulas": {
+      "types": "./dist/formulas.d.ts",
+      "import": "./dist/formulas.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npx tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "promptwheel",
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "tools"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@promptwheel/core": "^0.6.0",
+    "@promptwheel/sqlite": "^0.6.0",
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "minimatch": "^10.1.1"
+  },
+  "devDependencies": {
+    "@types/minimatch": "^5.1.2",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3"
+  }
+}

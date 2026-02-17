@@ -1,0 +1,126 @@
+{
+  "name": "@promptwheel/core",
+  "version": "0.6.0",
+  "description": "Core business logic and database adapter interface for PromptWheel",
+  "author": "PromptWheel",
+  "homepage": "https://promptwheel.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/promptwheel-ai/promptwheel.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/promptwheel-ai/promptwheel/issues"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./db": {
+      "types": "./dist/db/index.d.ts",
+      "import": "./dist/db/index.js"
+    },
+    "./repos": {
+      "types": "./dist/repos/index.d.ts",
+      "import": "./dist/repos/index.js"
+    },
+    "./services": {
+      "types": "./dist/services/index.d.ts",
+      "import": "./dist/services/index.js"
+    },
+    "./scout": {
+      "types": "./dist/scout/index.d.ts",
+      "import": "./dist/scout/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "import": "./dist/utils/index.js"
+    },
+    "./codebase-index": {
+      "types": "./dist/codebase-index/index.d.ts",
+      "import": "./dist/codebase-index/index.js"
+    },
+    "./codebase-index/shared": {
+      "types": "./dist/codebase-index/shared.d.ts",
+      "import": "./dist/codebase-index/shared.js"
+    },
+    "./spindle/shared": {
+      "types": "./dist/spindle/shared.d.ts",
+      "import": "./dist/spindle/shared.js"
+    },
+    "./dedup/shared": {
+      "types": "./dist/dedup/shared.d.ts",
+      "import": "./dist/dedup/shared.js"
+    },
+    "./scope/shared": {
+      "types": "./dist/scope/shared.d.ts",
+      "import": "./dist/scope/shared.js"
+    },
+    "./guidelines/shared": {
+      "types": "./dist/guidelines/shared.d.ts",
+      "import": "./dist/guidelines/shared.js"
+    },
+    "./learnings/shared": {
+      "types": "./dist/learnings/shared.d.ts",
+      "import": "./dist/learnings/shared.js"
+    },
+    "./formulas/shared": {
+      "types": "./dist/formulas/shared.d.ts",
+      "import": "./dist/formulas/shared.js"
+    },
+    "./proposals/shared": {
+      "types": "./dist/proposals/shared.d.ts",
+      "import": "./dist/proposals/shared.js"
+    },
+    "./sectors/shared": {
+      "types": "./dist/sectors/shared.d.ts",
+      "import": "./dist/sectors/shared.js"
+    },
+    "./waves/shared": {
+      "types": "./dist/waves/shared.d.ts",
+      "import": "./dist/waves/shared.js"
+    },
+    "./critic/shared": {
+      "types": "./dist/critic/shared.d.ts",
+      "import": "./dist/critic/shared.js"
+    },
+    "./tools/shared": {
+      "types": "./dist/tools/shared.d.ts",
+      "import": "./dist/tools/shared.js"
+    },
+    "./trace/shared": {
+      "types": "./dist/trace/shared.d.ts",
+      "import": "./dist/trace/shared.js"
+    },
+    "./trajectory/shared": {
+      "types": "./dist/trajectory/shared.d.ts",
+      "import": "./dist/trajectory/shared.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npx tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "promptwheel",
+    "core",
+    "database",
+    "adapter"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3"
+  }
+}

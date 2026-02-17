@@ -1,0 +1,37 @@
+# BlockSpool Licensing
+
+This repository uses a split licensing model. See [LICENSING.md](./LICENSING.md) for details.
+
+## Quick Summary
+
+| Component | License |
+|-----------|---------|
+| `packages/` (engine) | Apache-2.0 |
+| `packs/starter/` | Apache-2.0 |
+| `packs/pro/` | BlockSpool Pack License (Restricted) |
+| `cloud/` | Proprietary |
+
+## The Engine (packages/)
+
+The engine — CLI, core logic, database adapters — is licensed under the Apache License 2.0.
+See [packages/LICENSE](./packages/LICENSE) for the full text.
+
+## Starter Packs (packs/starter/)
+
+The starter automation packs are also licensed under Apache License 2.0.
+See [packs/starter/LICENSE](./packs/starter/LICENSE) for the full text.
+
+## Pro Packs (packs/pro/)
+
+Pro packs are licensed under the BlockSpool Pack License, which allows internal use
+but restricts redistribution.
+See [packs/pro/LICENSE](./packs/pro/LICENSE) for the full text.
+
+## Cloud (cloud/)
+
+The cloud dashboard and related services are proprietary and not covered by any
+open source license.
+
+## Questions?
+
+See [LICENSING.md](./LICENSING.md) for FAQ or email license@blockspool.com

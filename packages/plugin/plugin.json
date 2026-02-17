@@ -1,0 +1,19 @@
+{
+  "name": "promptwheel",
+  "version": "0.6.0",
+  "description": "Interactive codebase improvement — scouts, presents roadmap, executes approved changes",
+  "skills": [
+    "./skills/run",
+    "./skills/status",
+    "./skills/nudge",
+    "./skills/cancel",
+    "./skills/analytics",
+    "./skills/audit",
+    "./skills/heal",
+    "./skills/trajectory",
+    "./skills/formulas",
+    "./skills/history",
+    "./skills/scout",
+    "./skills/guidelines"
+  ]
+}

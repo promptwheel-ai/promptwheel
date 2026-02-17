@@ -1,0 +1,38 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "promptwheel",
+  "description": "Continuous codebase improvement — scouts, plans, executes, and creates PRs",
+  "owner": {
+    "name": "PromptWheel",
+    "email": "support@promptwheel.com"
+  },
+  "plugins": [
+    {
+      "name": "promptwheel",
+      "description": "Continuous codebase improvement — scouts improvements, executes in parallel, batches into milestone PRs",
+      "version": "0.6.0",
+      "author": {
+        "name": "PromptWheel",
+        "email": "support@promptwheel.com"
+      },
+      "source": "./packages/plugin",
+      "category": "development",
+      "homepage": "https://github.com/promptwheel-ai/promptwheel",
+      "keywords": ["coding", "automation", "ai", "improvement", "refactoring"],
+      "skills": [
+        "./skills/run",
+        "./skills/status",
+        "./skills/nudge",
+        "./skills/cancel",
+        "./skills/analytics",
+        "./skills/audit",
+        "./skills/heal",
+        "./skills/trajectory",
+        "./skills/formulas",
+        "./skills/history",
+        "./skills/scout",
+        "./skills/guidelines"
+      ]
+    }
+  ]
+}

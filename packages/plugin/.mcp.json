@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "promptwheel": {
+      "command": "npx",
+      "args": ["-y", "@promptwheel/mcp"],
+      "env": {}
+    }
+  }
+}

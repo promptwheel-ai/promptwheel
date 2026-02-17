@@ -1,0 +1,49 @@
+{
+  "name": "promptwheel",
+  "version": "0.6.0",
+  "description": "Continuous codebase improvement tool — scouts, executes, and batches into milestone PRs",
+  "author": "PromptWheel",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/promptwheel-ai/promptwheel",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/promptwheel-ai/promptwheel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/promptwheel-ai/promptwheel/issues"
+  },
+  "keywords": [
+    "ai",
+    "coding",
+    "claude",
+    "automation",
+    "refactoring"
+  ],
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc --build packages/core packages/sqlite packages/mcp packages/cli",
+    "dev": "npx tsx packages/cli/src/bin/promptwheel.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint packages/*/src/",
+    "lint:fix": "eslint packages/*/src/ --fix",
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.53.0",
+    "@typescript-eslint/parser": "^8.53.0",
+    "@vitest/coverage-v8": "^4.0.18",
+    "eslint": "^9.39.2",
+    "eslint-plugin-security": "^3.0.1",
+
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}

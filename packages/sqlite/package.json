@@ -1,0 +1,52 @@
+{
+  "name": "@promptwheel/sqlite",
+  "version": "0.6.0",
+  "description": "SQLite adapter for PromptWheel - zero-config local mode",
+  "author": "PromptWheel",
+  "homepage": "https://promptwheel.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/promptwheel-ai/promptwheel.git",
+    "directory": "packages/sqlite"
+  },
+  "bugs": {
+    "url": "https://github.com/promptwheel-ai/promptwheel/issues"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npx tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "promptwheel",
+    "sqlite",
+    "database",
+    "adapter",
+    "zero-config"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@promptwheel/core": "^0.6.0",
+    "better-sqlite3": "^12.6.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "typescript": "^5.7.3"
+  },
+  "peerDependencies": {
+    "@promptwheel/core": ">=0.6.0"
+  }
+}
