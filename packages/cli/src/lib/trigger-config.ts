@@ -1,20 +1,20 @@
 /**
  * Trigger configuration loader.
  *
- * Loads user-defined trigger rules from .blockspool/triggers.json.
+ * Loads user-defined trigger rules from .promptwheel/triggers.json.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { TriggerRule } from '@blockspool/core/trace/shared';
+import type { TriggerRule } from '@promptwheel/core/trace/shared';
 
 /**
- * Load trigger rules from .blockspool/triggers.json if it exists.
+ * Load trigger rules from .promptwheel/triggers.json if it exists.
  * Returns empty array if file doesn't exist or is invalid.
  */
 export function loadTriggerRules(repoRoot: string): TriggerRule[] {
   try {
-    const filePath = path.join(repoRoot, '.blockspool', 'triggers.json');
+    const filePath = path.join(repoRoot, '.promptwheel', 'triggers.json');
     if (!fs.existsSync(filePath)) return [];
 
     const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));

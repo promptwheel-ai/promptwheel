@@ -19,7 +19,7 @@ import { loadGuidelines } from './guidelines.js';
 import { addLearning, loadLearnings, consolidateLearnings, extractTags } from './learnings.js';
 import { captureQaBaseline } from './solo-ticket.js';
 import { normalizeQaConfig } from './solo-utils.js';
-import { getBlockspoolDir } from './solo-config.js';
+import { getPromptwheelDir } from './solo-config.js';
 import { removePrEntries } from './file-cooldown.js';
 import { recordFormulaMergeOutcome } from './run-state.js';
 import {
@@ -47,7 +47,7 @@ import {
   getNextStep as getTrajectoryNextStep,
   trajectoryComplete,
   trajectoryStuck,
-} from '@blockspool/core/trajectory/shared';
+} from '@promptwheel/core/trajectory/shared';
 
 // ── Pre-cycle maintenance ───────────────────────────────────────────────────
 
@@ -178,7 +178,7 @@ export async function runPreCycleMaintenance(state: AutoSessionState): Promise<P
               console.log();
               console.log(chalk.bold('Resolution:'));
               console.log(`  1. Resolve the divergence (rebase, merge, or reset)`);
-              console.log(`  2. Re-run: blockspool --wheel`);
+              console.log(`  2. Re-run: promptwheel --wheel`);
               console.log();
               console.log(chalk.gray(`  To keep going despite divergence, set pullPolicy: "warn" in config.`));
 
@@ -319,7 +319,7 @@ export async function runPostCycleMaintenance(state: AutoSessionState, scope: st
   const completedThisCycle = state.cycleOutcomes.filter(o => o.status === 'completed').length;
   if (completedThisCycle > 0 && state.config?.qa?.commands?.length) {
     try {
-      const blPath = path.join(getBlockspoolDir(state.repoRoot), 'qa-baseline.json');
+      const blPath = path.join(getPromptwheelDir(state.repoRoot), 'qa-baseline.json');
       if (fs.existsSync(blPath)) {
         const blData = JSON.parse(fs.readFileSync(blPath, 'utf8'));
         const previouslyFailing: string[] = blData.failures ?? [];

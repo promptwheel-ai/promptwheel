@@ -1,9 +1,9 @@
 ---
 name: learnings
-description: View, manage, or clear BlockSpool's cross-run learnings memory
+description: View, manage, or clear PromptWheel's cross-run learnings memory
 ---
 
-BlockSpool remembers patterns from previous runs — what failed, what worked, and what to avoid. This skill lets you inspect and manage that memory.
+PromptWheel remembers patterns from previous runs — what failed, what worked, and what to avoid. This skill lets you inspect and manage that memory.
 
 ## Arguments
 
@@ -16,8 +16,8 @@ Parse from `<args>` (optional):
 
 ### view (default)
 
-1. Read `.blockspool/learnings.json` from the project root.
-2. If the file doesn't exist, tell the user: "No learnings yet. BlockSpool will start learning from your first session."
+1. Read `.promptwheel/learnings.json` from the project root.
+2. If the file doesn't exist, tell the user: "No learnings yet. PromptWheel will start learning from your first session."
 3. Parse the JSON array. Each entry has: `id`, `text`, `category`, `weight`, `tags`, `created_at`, `structured`.
 4. Display learnings sorted by weight (highest first), grouped by category:
 
@@ -39,12 +39,12 @@ Parse from `<args>` (optional):
 
 ### clear
 
-1. Delete `.blockspool/learnings.json` if it exists.
-2. Confirm: "Learnings cleared. BlockSpool will start fresh on the next session."
+1. Delete `.promptwheel/learnings.json` if it exists.
+2. Confirm: "Learnings cleared. PromptWheel will start fresh on the next session."
 
 ### stats
 
-1. Read `.blockspool/learnings.json`.
+1. Read `.promptwheel/learnings.json`.
 2. Display summary:
 
 ```

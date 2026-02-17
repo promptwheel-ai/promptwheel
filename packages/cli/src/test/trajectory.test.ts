@@ -2,8 +2,8 @@
  * Integration tests for CLI trajectory I/O layer (filesystem-backed).
  *
  * Exercises:
- * - Loading YAML definitions from `.blockspool/trajectories`
- * - State save/load roundtrips in `.blockspool/trajectory-state.json`
+ * - Loading YAML definitions from `.promptwheel/trajectories`
+ * - State save/load roundtrips in `.promptwheel/trajectory-state.json`
  * - Activation behavior (first ready step becomes active; deterministic startedAt)
  * - State clearing (idempotent delete)
  */
@@ -20,16 +20,16 @@ import {
   clearTrajectoryState,
   activateTrajectory,
 } from '../lib/trajectory.js';
-import type { TrajectoryState } from '@blockspool/core/trajectory/shared';
+import type { TrajectoryState } from '@promptwheel/core/trajectory/shared';
 
 let tmpDir: string;
 
 function trajectoriesDir(): string {
-  return path.join(tmpDir, '.blockspool', 'trajectories');
+  return path.join(tmpDir, '.promptwheel', 'trajectories');
 }
 
 function trajectoryStateFile(): string {
-  return path.join(tmpDir, '.blockspool', 'trajectory-state.json');
+  return path.join(tmpDir, '.promptwheel', 'trajectory-state.json');
 }
 
 beforeEach(() => {
@@ -154,7 +154,7 @@ describe('loadTrajectoryState / saveTrajectoryState / clearTrajectoryState', () 
     expect(loadTrajectoryState(tmpDir)).toBeNull();
   });
 
-  it('round-trips through save and load (auto-creates .blockspool directory)', () => {
+  it('round-trips through save and load (auto-creates .promptwheel directory)', () => {
     const state: TrajectoryState = {
       trajectoryName: 't',
       startedAt: 1700000000000,

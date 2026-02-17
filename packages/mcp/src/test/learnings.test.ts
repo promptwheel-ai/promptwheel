@@ -6,9 +6,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import { repos } from '@blockspool/core';
-import type { DatabaseAdapter, Project } from '@blockspool/core';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import { repos } from '@promptwheel/core';
+import type { DatabaseAdapter, Project } from '@promptwheel/core';
 import { RunManager } from '../run-manager.js';
 import { processEvent } from '../event-processor.js';
 import {
@@ -27,7 +27,7 @@ let tmpDir: string;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bs-learnings-test-'));
-  fs.mkdirSync(path.join(tmpDir, '.blockspool'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, '.promptwheel'), { recursive: true });
 });
 
 afterEach(() => {
@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 function learningsPath(): string {
-  return path.join(tmpDir, '.blockspool', 'learnings.json');
+  return path.join(tmpDir, '.promptwheel', 'learnings.json');
 }
 
 function writeLearningsFile(learnings: Learning[]): void {
@@ -455,7 +455,7 @@ describe('Config: learnings disabled', () => {
     });
 
     // Check no learnings file was created (or it's empty)
-    const fp = path.join(tmpDir, '.blockspool', 'learnings.json');
+    const fp = path.join(tmpDir, '.promptwheel', 'learnings.json');
     if (fs.existsSync(fp)) {
       const learnings = JSON.parse(fs.readFileSync(fp, 'utf8'));
       expect(learnings).toHaveLength(0);

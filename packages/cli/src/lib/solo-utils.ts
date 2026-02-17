@@ -2,10 +2,10 @@
  * Solo mode utility functions
  */
 
-import type { DatabaseAdapter } from '@blockspool/core/db';
-import { tickets } from '@blockspool/core/repos';
-import type { TicketProposal } from '@blockspool/core/scout';
-import type { QaConfig } from '@blockspool/core/services';
+import type { DatabaseAdapter } from '@promptwheel/core/db';
+import { tickets } from '@promptwheel/core/repos';
+import type { TicketProposal } from '@promptwheel/core/scout';
+import type { QaConfig } from '@promptwheel/core/services';
 import type { SoloConfig } from './solo-config.js';
 
 /**
@@ -180,7 +180,7 @@ export async function runPreflightChecks(repoRoot: string, opts: {
           return {
             ok: false,
             error: `Remote mismatch: origin points to "${currentRemote}" but solo init recorded "${config.allowedRemote}". ` +
-              'Re-run "blockspool solo init --force" if this is intentional.',
+              'Re-run "promptwheel solo init --force" if this is intentional.',
             warnings,
             hasRemote,
             ghAuthenticated: false,
@@ -243,8 +243,8 @@ export async function runPreflightChecks(repoRoot: string, opts: {
 
 // Path overlap and directory overlap algorithms now live in core.
 // Re-exported here for backwards compatibility.
-export { pathsOverlap, directoriesOverlap } from '@blockspool/core/waves/shared';
-import { pathsOverlap } from '@blockspool/core/waves/shared';
+export { pathsOverlap, directoriesOverlap } from '@promptwheel/core/waves/shared';
+import { pathsOverlap } from '@promptwheel/core/waves/shared';
 
 /**
  * Find in-progress tickets that have overlapping allowed_paths with the given ticket
@@ -364,7 +364,7 @@ export function normalizeQaConfig(config: SoloConfig, overrides?: { maxAttempts?
   const qa = config.qa;
   if (!qa?.commands?.length) {
     throw new Error(
-      'QA is not configured. Add qa.commands to .blockspool/config.json\n\n' +
+      'QA is not configured. Add qa.commands to .promptwheel/config.json\n\n' +
       'Example:\n' +
       '{\n' +
       '  "qa": {\n' +
@@ -384,7 +384,7 @@ export function normalizeQaConfig(config: SoloConfig, overrides?: { maxAttempts?
     timeoutMs: c.timeoutMs ?? (c.timeoutSec ? c.timeoutSec * 1000 : undefined),
   }));
 
-  const artifactsDir = qa.artifacts?.storeDir ?? '.blockspool/artifacts';
+  const artifactsDir = qa.artifacts?.storeDir ?? '.promptwheel/artifacts';
   const maxLogBytes = qa.artifacts?.maxLogBytes ?? 200_000;
   const tailBytes = qa.artifacts?.tailBytes ?? 16_384;
 

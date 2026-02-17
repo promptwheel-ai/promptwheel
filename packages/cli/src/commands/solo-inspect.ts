@@ -10,9 +10,9 @@ import {
   scoutRepo,
   approveProposals,
   type ScoutProgress,
-} from '@blockspool/core/services';
-import { projects, tickets, runs } from '@blockspool/core/repos';
-import type { ProposalCategory } from '@blockspool/core/scout';
+} from '@promptwheel/core/services';
+import { projects, tickets, runs } from '@promptwheel/core/repos';
+import type { ProposalCategory } from '@promptwheel/core/scout';
 import { createGitService } from '../lib/git.js';
 import {
   writeJsonArtifact,
@@ -24,7 +24,7 @@ import {
 } from '../lib/artifacts.js';
 import { parseSelection } from '../lib/selection.js';
 import {
-  getBlockspoolDir,
+  getPromptwheelDir,
   getDbPath,
   isInitialized,
   initSolo,
@@ -101,7 +101,7 @@ export function registerInspectCommands(solo: Command): void {
       const scope = targetPath ?? options.scope ?? 'src/**';
 
       if (!isQuiet) {
-        console.log(chalk.blue('🔍 BlockSpool Solo Scout'));
+        console.log(chalk.blue('🔍 PromptWheel Solo Scout'));
         console.log();
       }
 
@@ -179,7 +179,7 @@ export function registerInspectCommands(solo: Command): void {
         let proposalsArtifactPath: string | null = null;
         if (result.proposals.length > 0) {
           proposalsArtifactPath = writeJsonArtifact({
-            baseDir: getBlockspoolDir(repoRoot),
+            baseDir: getPromptwheelDir(repoRoot),
             type: 'proposals',
             id: result.run.id,
             data: {
@@ -252,8 +252,8 @@ export function registerInspectCommands(solo: Command): void {
           console.log(chalk.gray(`  IDs: ${result.tickets.map(t => t.id).join(', ')}`));
         } else if (!options.autoApprove && result.proposals.length > 0) {
           console.log(chalk.blue('\nNext steps:'));
-          console.log('  blockspool solo approve 1-3     # Approve proposals 1-3');
-          console.log('  blockspool solo approve all     # Approve all proposals');
+          console.log('  promptwheel solo approve 1-3     # Approve proposals 1-3');
+          console.log('  promptwheel solo approve all     # Approve all proposals');
           if (proposalsArtifactPath) {
             console.log(chalk.gray(`\n  Proposals saved: ${proposalsArtifactPath}`));
           }
@@ -366,7 +366,7 @@ export function registerInspectCommands(solo: Command): void {
           return;
         }
 
-        console.log(chalk.blue('📊 BlockSpool Solo Status'));
+        console.log(chalk.blue('📊 PromptWheel Solo Status'));
         console.log();
         console.log(chalk.gray(`Database: ${dbPath}`));
         console.log();
@@ -374,7 +374,7 @@ export function registerInspectCommands(solo: Command): void {
         console.log(`Projects: ${projectList.length}`);
 
         if (projectList.length === 0) {
-          console.log(chalk.yellow('\nNo projects found. Run: blockspool solo scout .'));
+          console.log(chalk.yellow('\nNo projects found. Run: promptwheel solo scout .'));
           return;
         }
 
@@ -417,7 +417,7 @@ export function registerInspectCommands(solo: Command): void {
 
           if (summary.lastExecute) {
             const exec = summary.lastExecute;
-            const baseDir = getBlockspoolDir(repoRoot);
+            const baseDir = getPromptwheelDir(repoRoot);
 
             let spindleInfo: { reason?: string; artifactPath?: string } | null = null;
             if (exec.status === 'failure' && exec.id) {
@@ -570,7 +570,7 @@ export function registerInspectCommands(solo: Command): void {
       const entries = readRunHistory(repoRoot || undefined, parseInt(options.limit || '10', 10));
 
       if (entries.length === 0) {
-        console.log(chalk.gray('No history yet. Run `blockspool solo auto` to get started.'));
+        console.log(chalk.gray('No history yet. Run `promptwheel solo auto` to get started.'));
         return;
       }
 
@@ -617,8 +617,8 @@ export function registerInspectCommands(solo: Command): void {
         console.log();
       }
 
-      console.log(chalk.gray('Usage: blockspool solo auto --formula <name>'));
-      console.log(chalk.gray('Custom: Create .blockspool/formulas/<name>.yaml'));
+      console.log(chalk.gray('Usage: promptwheel solo auto --formula <name>'));
+      console.log(chalk.gray('Custom: Create .promptwheel/formulas/<name>.yaml'));
     });
 
   /**
@@ -627,7 +627,7 @@ export function registerInspectCommands(solo: Command): void {
   solo
     .command('export')
     .description('Export local state for debugging or migration')
-    .option('-o, --output <file>', 'Output file', 'blockspool-export.json')
+    .option('-o, --output <file>', 'Output file', 'promptwheel-export.json')
     .action(async (options: { output: string }) => {
       const git = createGitService();
       const repoRoot = await git.findRepoRoot(process.cwd());
@@ -684,7 +684,7 @@ export function registerInspectCommands(solo: Command): void {
       json?: boolean;
     }) => {
       const repoRoot = process.cwd();
-      const baseDir = getBlockspoolDir(repoRoot);
+      const baseDir = getPromptwheelDir(repoRoot);
       const artifactsDir = path.join(baseDir, 'artifacts');
 
       if (options.show) {
@@ -795,9 +795,9 @@ Selection formats:
   all       All proposals
 
 Examples:
-  blockspool solo approve 1       # Approve first proposal
-  blockspool solo approve 1-3     # Approve proposals 1, 2, 3
-  blockspool solo approve all     # Approve all proposals
+  promptwheel solo approve 1       # Approve first proposal
+  promptwheel solo approve 1-3     # Approve proposals 1, 2, 3
+  promptwheel solo approve all     # Approve all proposals
 `)
     .option('-v, --verbose', 'Show detailed output')
     .option('--json', 'Output as JSON')
@@ -816,18 +816,18 @@ Examples:
         process.exit(1);
       }
 
-      const baseDir = getBlockspoolDir(repoRoot);
+      const baseDir = getPromptwheelDir(repoRoot);
       const artifact = getLatestArtifact<ProposalsArtifact>(baseDir, 'proposals');
 
       if (!artifact) {
         if (isJsonMode) {
           console.log(JSON.stringify({
             success: false,
-            error: 'No proposals found. Run: blockspool solo scout .',
+            error: 'No proposals found. Run: promptwheel solo scout .',
           }));
         } else {
           console.error(chalk.red('✗ No proposals found'));
-          console.log(chalk.gray('  Run: blockspool solo scout .'));
+          console.log(chalk.gray('  Run: promptwheel solo scout .'));
         }
         process.exit(1);
       }
@@ -872,7 +872,7 @@ Examples:
       const selectedProposals = selectedIndices.map(i => proposals[i]);
 
       if (!isJsonMode) {
-        console.log(chalk.blue('📋 BlockSpool Solo Approve'));
+        console.log(chalk.blue('📋 PromptWheel Solo Approve'));
         console.log();
         console.log(`Selected ${selectedProposals.length} proposal(s):`);
         for (const idx of selectedIndices) {
@@ -908,8 +908,8 @@ Examples:
           }
           console.log();
           console.log(chalk.blue('Next steps:'));
-          console.log(`  blockspool solo run ${createdTickets[0]?.id}  # Run a ticket`);
-          console.log('  blockspool solo status                # View all tickets');
+          console.log(`  promptwheel solo run ${createdTickets[0]?.id}  # Run a ticket`);
+          console.log('  promptwheel solo status                # View all tickets');
         }
 
       } finally {

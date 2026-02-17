@@ -1,8 +1,8 @@
 /**
  * Pure formula algorithms — no filesystem.
  *
- * Shared by both @blockspool/cli and @blockspool/mcp.
- * Callers handle file I/O (reading YAML files from .blockspool/formulas/).
+ * Shared by both @promptwheel/cli and @promptwheel/mcp.
+ * Callers handle file I/O (reading YAML files from .promptwheel/formulas/).
  */
 
 // ---------------------------------------------------------------------------

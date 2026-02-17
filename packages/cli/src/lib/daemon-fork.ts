@@ -8,7 +8,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
-import { getBlockspoolDir } from './solo-config.js';
+import { getPromptwheelDir } from './solo-config.js';
 
 const DAEMON_PID_FILE = 'daemon.pid';
 const DAEMON_LOG_FILE = 'daemon.log';
@@ -17,7 +17,7 @@ const DAEMON_LOG_ROTATED = 'daemon.log.1';
 // ── PID management ───────────────────────────────────────────────────────────
 
 export function readDaemonPid(repoRoot: string): number | null {
-  const pidPath = path.join(getBlockspoolDir(repoRoot), DAEMON_PID_FILE);
+  const pidPath = path.join(getPromptwheelDir(repoRoot), DAEMON_PID_FILE);
   try {
     if (!fs.existsSync(pidPath)) return null;
     const pid = parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10);
@@ -28,13 +28,13 @@ export function readDaemonPid(repoRoot: string): number | null {
 }
 
 export function writeDaemonPid(repoRoot: string, pid: number): void {
-  const dir = getBlockspoolDir(repoRoot);
+  const dir = getPromptwheelDir(repoRoot);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, DAEMON_PID_FILE), String(pid));
 }
 
 export function removeDaemonPid(repoRoot: string): void {
-  const pidPath = path.join(getBlockspoolDir(repoRoot), DAEMON_PID_FILE);
+  const pidPath = path.join(getPromptwheelDir(repoRoot), DAEMON_PID_FILE);
   try {
     if (fs.existsSync(pidPath)) fs.unlinkSync(pidPath);
   } catch { /* non-fatal */ }
@@ -66,11 +66,11 @@ export interface ForkOptions {
 
 /**
  * Fork a detached daemon child process.
- * The child runs `blockspool solo daemon __run` with the same env.
+ * The child runs `promptwheel solo daemon __run` with the same env.
  * Returns the child PID.
  */
 export function forkDaemon(repoRoot: string, options: ForkOptions): number {
-  const dir = getBlockspoolDir(repoRoot);
+  const dir = getPromptwheelDir(repoRoot);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
   const logPath = path.join(dir, DAEMON_LOG_FILE);
@@ -82,7 +82,7 @@ export function forkDaemon(repoRoot: string, options: ForkOptions): number {
   if (options.formula) args.push('--formula', options.formula);
   if (options.scope) args.push('--scope', options.scope);
 
-  // Find the blockspool binary — use the same entry point that's running now
+  // Find the promptwheel binary — use the same entry point that's running now
   const binPath = process.argv[1];
 
   const child = spawn(process.execPath, [binPath, ...args], {
@@ -153,7 +153,7 @@ export async function stopDaemon(repoRoot: string): Promise<boolean> {
  * Renames current log to daemon.log.1, starts fresh.
  */
 export function rotateDaemonLog(repoRoot: string, maxSizeMB: number): void {
-  const dir = getBlockspoolDir(repoRoot);
+  const dir = getPromptwheelDir(repoRoot);
   const logPath = path.join(dir, DAEMON_LOG_FILE);
 
   try {
@@ -172,5 +172,5 @@ export function rotateDaemonLog(repoRoot: string, maxSizeMB: number): void {
  * Get the daemon log file path.
  */
 export function getDaemonLogPath(repoRoot: string): string {
-  return path.join(getBlockspoolDir(repoRoot), DAEMON_LOG_FILE);
+  return path.join(getPromptwheelDir(repoRoot), DAEMON_LOG_FILE);
 }

@@ -5,9 +5,9 @@
  * State is stored in RunState.ticket_workers[ticketId].
  */
 
-import type { DatabaseAdapter } from '@blockspool/core';
-import { repos, EXECUTION_DEFAULTS } from '@blockspool/core';
-import type { Project } from '@blockspool/core';
+import type { DatabaseAdapter } from '@promptwheel/core';
+import { repos, EXECUTION_DEFAULTS } from '@promptwheel/core';
+import type { Project } from '@promptwheel/core';
 import { RunManager } from './run-manager.js';
 import type {
   AdvanceConstraints,
@@ -22,8 +22,8 @@ import {
   computeRetryRisk,
   scoreStrategies,
   buildCriticBlock,
-} from '@blockspool/core/critic/shared';
-import type { Learning } from '@blockspool/core/learnings/shared';
+} from '@promptwheel/core/critic/shared';
+import type { Learning } from '@promptwheel/core/learnings/shared';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -47,7 +47,7 @@ export interface TicketWorkerResponse {
 
 /**
  * Advance a single ticket worker through its lifecycle.
- * Called by the blockspool_advance_ticket MCP tool.
+ * Called by the promptwheel_advance_ticket MCP tool.
  */
 export async function advanceTicketWorker(
   ctx: TicketWorkerContext,
@@ -129,7 +129,7 @@ export async function advanceTicketWorker(
     };
   }
 
-  const worktreePath = `.blockspool/worktrees/${ticketId}`;
+  const worktreePath = `.promptwheel/worktrees/${ticketId}`;
   const policy = deriveScopePolicy({
     allowedPaths: ticket.allowedPaths ?? [],
     category: ticket.category ?? 'refactor',
@@ -341,7 +341,7 @@ export async function ingestTicketEvent(
       };
 
       const ticket = await repos.tickets.getById(db, ticketId);
-      const worktreeRoot = run.require().direct ? undefined : `.blockspool/worktrees/${ticketId}`;
+      const worktreeRoot = run.require().direct ? undefined : `.promptwheel/worktrees/${ticketId}`;
       const policy = deriveScopePolicy({
         allowedPaths: ticket?.allowedPaths ?? [],
         category: ticket?.category ?? 'refactor',
@@ -484,7 +484,7 @@ function writeScopePolicy(
   ticketId: string,
   policy: ReturnType<typeof deriveScopePolicy>,
 ): void {
-  const dir = path.join(projectRoot, '.blockspool', 'scope-policies');
+  const dir = path.join(projectRoot, '.promptwheel', 'scope-policies');
   fs.mkdirSync(dir, { recursive: true });
   const policyPath = path.join(dir, `${ticketId}.json`);
   fs.writeFileSync(policyPath, JSON.stringify(serializeScopePolicy(policy), null, 2), 'utf8');
@@ -509,7 +509,7 @@ function buildTicketPlanPrompt(
     `**Working directory:** \`${worktreePath}\``,
     'Ensure you are working in the git worktree above. If it does not exist, create it:',
     '```bash',
-    `git worktree add ${worktreePath} -b blockspool/${ticket.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50)}`,
+    `git worktree add ${worktreePath} -b promptwheel/${ticket.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50)}`,
     '```',
     '',
   ];
@@ -533,7 +533,7 @@ function buildTicketPlanPrompt(
     `**Allowed paths:** ${ticket.allowedPaths.length > 0 ? ticket.allowedPaths.join(', ') : 'any'}`,
     `**Verification commands:** ${ticket.verificationCommands.join(', ') || 'none specified'}`,
     '',
-    'Then call `blockspool_ticket_event` with the ticket_id, type `PLAN_SUBMITTED`, and the plan as payload.',
+    'Then call `promptwheel_ticket_event` with the ticket_id, type `PLAN_SUBMITTED`, and the plan as payload.',
   );
 
   return parts.join('\n');
@@ -571,7 +571,7 @@ function buildTicketExecutePrompt(
     '',
     '## When done',
     'Output a `<ticket-result>` block with status, changed_files, summary, lines_added, lines_removed.',
-    `Then call \`blockspool_ticket_event\` with ticket_id="${ticket.id}", type \`TICKET_RESULT\`, and the result as payload.`,
+    `Then call \`promptwheel_ticket_event\` with ticket_id="${ticket.id}", type \`TICKET_RESULT\`, and the result as payload.`,
   );
 
   return parts.join('\n');
@@ -591,10 +591,10 @@ function buildTicketQaPrompt(
     '',
     ...ticket.verificationCommands.map(c => `\`\`\`bash\ncd ${worktreePath} && ${c}\n\`\`\``),
     '',
-    'For each command, call `blockspool_ticket_event` with type `QA_COMMAND_RESULT` and:',
+    'For each command, call `promptwheel_ticket_event` with type `QA_COMMAND_RESULT` and:',
     '`{ "command": "...", "success": true/false, "output": "stdout+stderr" }`',
     '',
-    'After all commands, call `blockspool_ticket_event` with type `QA_PASSED` if all pass, or `QA_FAILED` with failure details.',
+    'After all commands, call `promptwheel_ticket_event` with type `QA_PASSED` if all pass, or `QA_FAILED` with failure details.',
   ].join('\n');
 }
 
@@ -625,10 +625,10 @@ function buildCrossQaPrompt(
     '3. Check for any obvious issues the implementer may have missed',
     '4. Report results honestly',
     '',
-    'For each command, call `blockspool_ticket_event` with type `QA_COMMAND_RESULT` and:',
+    'For each command, call `promptwheel_ticket_event` with type `QA_COMMAND_RESULT` and:',
     '`{ "command": "...", "success": true/false, "output": "stdout+stderr" }`',
     '',
-    'After all commands, call `blockspool_ticket_event` with type `QA_PASSED` if all pass, or `QA_FAILED` with failure details.',
+    'After all commands, call `promptwheel_ticket_event` with type `QA_PASSED` if all pass, or `QA_FAILED` with failure details.',
   ].join('\n');
 }
 
@@ -655,6 +655,6 @@ function buildTicketPrPrompt(
     '4. Push to remote: `git push -u origin <branch>`',
     `5. Create ${draftPr ? 'draft ' : ''}PR: \`gh pr create${draftPr ? ' --draft' : ''}\``,
     '',
-    'Call `blockspool_ticket_event` with type `PR_CREATED` and `{ "url": "<pr-url>", "branch": "<branch-name>" }` as payload.',
+    'Call `promptwheel_ticket_event` with type `PR_CREATED` and `{ "url": "<pr-url>", "branch": "<branch-name>" }` as payload.',
   ].join('\n');
 }

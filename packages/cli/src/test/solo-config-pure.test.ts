@@ -1,55 +1,55 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
 import {
-  getBlockspoolDir,
+  getPromptwheelDir,
   getDbPath,
   formatProgress,
   displayProposal,
   DEFAULT_AUTO_CONFIG,
 } from '../lib/solo-config.js';
-import type { ScoutProgress } from '@blockspool/core/services';
-import type { TicketProposal } from '@blockspool/core/scout';
+import type { ScoutProgress } from '@promptwheel/core/services';
+import type { TicketProposal } from '@promptwheel/core/scout';
 
 // ---------------------------------------------------------------------------
-// getBlockspoolDir
+// getPromptwheelDir
 // ---------------------------------------------------------------------------
-describe('getBlockspoolDir', () => {
+describe('getPromptwheelDir', () => {
   const originalEnv = process.env;
 
   afterEach(() => {
     process.env = originalEnv;
   });
 
-  it('returns path.join(repoRoot, ".blockspool") when repoRoot is provided', () => {
-    const result = getBlockspoolDir('/my/repo');
-    expect(result).toBe(path.join('/my/repo', '.blockspool'));
+  it('returns path.join(repoRoot, ".promptwheel") when repoRoot is provided', () => {
+    const result = getPromptwheelDir('/my/repo');
+    expect(result).toBe(path.join('/my/repo', '.promptwheel'));
   });
 
   it('uses HOME env var when repoRoot is omitted', () => {
     process.env = { ...originalEnv, HOME: '/home/testuser', USERPROFILE: undefined };
-    const result = getBlockspoolDir();
-    expect(result).toBe(path.join('/home/testuser', '.blockspool'));
+    const result = getPromptwheelDir();
+    expect(result).toBe(path.join('/home/testuser', '.promptwheel'));
   });
 
   it('uses USERPROFILE when HOME is not set', () => {
     process.env = { ...originalEnv, HOME: undefined as unknown as string, USERPROFILE: '/Users/win' };
     // Delete HOME so it's truly absent
     delete process.env.HOME;
-    const result = getBlockspoolDir();
-    expect(result).toBe(path.join('/Users/win', '.blockspool'));
+    const result = getPromptwheelDir();
+    expect(result).toBe(path.join('/Users/win', '.promptwheel'));
   });
 
   it('falls back to "." when neither HOME nor USERPROFILE is set', () => {
     process.env = { ...originalEnv };
     delete process.env.HOME;
     delete process.env.USERPROFILE;
-    const result = getBlockspoolDir();
-    expect(result).toBe(path.join('.', '.blockspool'));
+    const result = getPromptwheelDir();
+    expect(result).toBe(path.join('.', '.promptwheel'));
   });
 
   it('handles trailing slash in repoRoot', () => {
-    const result = getBlockspoolDir('/my/repo/');
-    expect(result).toBe(path.join('/my/repo/', '.blockspool'));
+    const result = getPromptwheelDir('/my/repo/');
+    expect(result).toBe(path.join('/my/repo/', '.promptwheel'));
   });
 });
 
@@ -62,14 +62,14 @@ describe('getDbPath', () => {
     expect(result).toMatch(/state\.sqlite$/);
   });
 
-  it('uses getBlockspoolDir internally', () => {
+  it('uses getPromptwheelDir internally', () => {
     const result = getDbPath('/repo');
-    expect(result).toBe(path.join('/repo', '.blockspool', 'state.sqlite'));
+    expect(result).toBe(path.join('/repo', '.promptwheel', 'state.sqlite'));
   });
 
   it('works without repoRoot argument', () => {
     const result = getDbPath();
-    expect(result).toMatch(/\.blockspool[/\\]state\.sqlite$/);
+    expect(result).toMatch(/\.promptwheel[/\\]state\.sqlite$/);
   });
 });
 

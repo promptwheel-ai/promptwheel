@@ -5,7 +5,7 @@
  * agents only touch files they're allowed to.
  *
  * Shared constants (ALWAYS_DENIED, CREDENTIAL_PATTERNS, FILE_DENY_PATTERNS)
- * and pure algorithms live in @blockspool/core/scope/shared.
+ * and pure algorithms live in @promptwheel/core/scope/shared.
  * This file adds MCP-specific policy derivation and minimatch-based validation.
  */
 
@@ -14,15 +14,15 @@ import { minimatch } from 'minimatch';
 import {
   ALWAYS_DENIED,
   FILE_DENY_PATTERNS,
-} from '@blockspool/core/scope/shared';
+} from '@promptwheel/core/scope/shared';
 import {
   assessAdaptiveRisk,
   type Learning,
   type AdaptiveRiskAssessment,
-} from '@blockspool/core/learnings/shared';
+} from '@promptwheel/core/learnings/shared';
 
 // Re-export for existing consumers
-export { detectCredentialInContent as containsCredentials } from '@blockspool/core/scope/shared';
+export { detectCredentialInContent as containsCredentials } from '@promptwheel/core/scope/shared';
 
 /**
  * Normalize an allowed_path for minimatch:
@@ -256,7 +256,7 @@ export interface CategoryToolPolicy {
  * - test: can only edit test files
  * - security: full edit access but no npm install / arbitrary bash
  *
- * @deprecated Use ToolRegistry from @blockspool/mcp/tool-registry instead.
+ * @deprecated Use ToolRegistry from @promptwheel/mcp/tool-registry instead.
  * Kept for backward compatibility during migration.
  */
 export const CATEGORY_TOOL_POLICIES: Record<string, CategoryToolPolicy> = {

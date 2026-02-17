@@ -1,9 +1,9 @@
 ---
 name: formulas
-description: List available BlockSpool formulas (built-in and custom)
+description: List available PromptWheel formulas (built-in and custom)
 ---
 
-Call the `blockspool_list_formulas` MCP tool and display the results.
+Call the `promptwheel_list_formulas` MCP tool and display the results.
 
 Show each formula with its name, description, categories, and risk tolerance. Format as:
 
@@ -15,9 +15,9 @@ Show each formula with its name, description, categories, and risk tolerance. Fo
 - **test-coverage** — Improve test coverage (categories: test)
 ...
 
-### Custom (.blockspool/formulas/)
+### Custom (.promptwheel/formulas/)
 - **my-formula** — Custom description
 ...
 ```
 
-If no custom formulas exist, note that custom formulas can be added to `.blockspool/formulas/`.
+If no custom formulas exist, note that custom formulas can be added to `.promptwheel/formulas/`.

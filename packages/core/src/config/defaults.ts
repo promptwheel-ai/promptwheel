@@ -1,5 +1,5 @@
 /**
- * Centralized default constants for BlockSpool.
+ * Centralized default constants for PromptWheel.
  *
  * Both CLI (solo-config.ts) and MCP (run-manager.ts) must agree on these values.
  * Add new defaults here — not scattered across packages.

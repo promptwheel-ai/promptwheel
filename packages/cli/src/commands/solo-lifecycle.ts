@@ -8,7 +8,7 @@ import * as fs from 'node:fs';
 import chalk from 'chalk';
 import { createGitService } from '../lib/git.js';
 import {
-  getBlockspoolDir,
+  getPromptwheelDir,
   getDbPath,
   isInitialized,
   initSolo,
@@ -26,7 +26,7 @@ export function registerLifecycleCommands(solo: Command): void {
    */
   solo
     .command('init')
-    .description('Initialize BlockSpool local state for this repository')
+    .description('Initialize PromptWheel local state for this repository')
     .option('-f, --force', 'Reinitialize even if already initialized')
     .action(async (options: { force?: boolean }) => {
       const git = createGitService();
@@ -40,7 +40,7 @@ export function registerLifecycleCommands(solo: Command): void {
 
       if (isInitialized(repoRoot) && !options.force) {
         console.log(chalk.yellow('Already initialized.'));
-        console.log(chalk.gray(`  Config: ${getBlockspoolDir(repoRoot)}/config.json`));
+        console.log(chalk.gray(`  Config: ${getPromptwheelDir(repoRoot)}/config.json`));
         console.log(chalk.gray(`  Database: ${getDbPath(repoRoot)}`));
         console.log();
         console.log('Run with --force to reinitialize.');
@@ -53,8 +53,8 @@ export function registerLifecycleCommands(solo: Command): void {
       const adapter = await getAdapter(repoRoot);
       await adapter.close();
 
-      console.log(chalk.green('✓ Initialized BlockSpool solo mode'));
-      console.log(chalk.gray(`  Config: ${getBlockspoolDir(repoRoot)}/config.json`));
+      console.log(chalk.green('✓ Initialized PromptWheel solo mode'));
+      console.log(chalk.gray(`  Config: ${getPromptwheelDir(repoRoot)}/config.json`));
       console.log(chalk.gray(`  Database: ${config.dbPath}`));
 
       // Show detected QA commands
@@ -64,11 +64,11 @@ export function registerLifecycleCommands(solo: Command): void {
         for (const cmd of detectedQa) {
           console.log(chalk.gray(`  • ${cmd.name}: ${cmd.cmd}`));
         }
-        console.log(chalk.gray('  (Edit .blockspool/config.json to customize)'));
+        console.log(chalk.gray('  (Edit .promptwheel/config.json to customize)'));
       } else {
         console.log();
         console.log(chalk.yellow('⚠ No QA commands detected'));
-        console.log(chalk.gray('  Add qa.commands to .blockspool/config.json to enable QA:'));
+        console.log(chalk.gray('  Add qa.commands to .promptwheel/config.json to enable QA:'));
         console.log(chalk.gray('  {'));
         console.log(chalk.gray('    "qa": {'));
         console.log(chalk.gray('      "commands": ['));
@@ -81,8 +81,8 @@ export function registerLifecycleCommands(solo: Command): void {
 
       console.log();
       console.log('Next steps:');
-      console.log('  blockspool solo scout .    Scan for improvement opportunities');
-      console.log('  blockspool solo status     View local state');
+      console.log('  promptwheel solo scout .    Scan for improvement opportunities');
+      console.log('  promptwheel solo status     View local state');
     });
 
   /**
@@ -102,9 +102,9 @@ export function registerLifecycleCommands(solo: Command): void {
         process.exit(1);
       }
 
-      const reportsDir = path.join(getBlockspoolDir(repoRoot), 'reports');
+      const reportsDir = path.join(getPromptwheelDir(repoRoot), 'reports');
       if (!fs.existsSync(reportsDir)) {
-        console.log(chalk.gray('No reports yet. Run blockspool to generate one.'));
+        console.log(chalk.gray('No reports yet. Run promptwheel to generate one.'));
         return;
       }
 
@@ -114,7 +114,7 @@ export function registerLifecycleCommands(solo: Command): void {
         .reverse();
 
       if (files.length === 0) {
-        console.log(chalk.gray('No reports yet. Run blockspool to generate one.'));
+        console.log(chalk.gray('No reports yet. Run promptwheel to generate one.'));
         return;
       }
 
@@ -172,7 +172,7 @@ export function registerLifecycleCommands(solo: Command): void {
         process.exit(1);
       }
 
-      const dir = getBlockspoolDir(repoRoot);
+      const dir = getPromptwheelDir(repoRoot);
       const dbPathVal = getDbPath(repoRoot);
 
       if (!fs.existsSync(dir)) {
@@ -181,7 +181,7 @@ export function registerLifecycleCommands(solo: Command): void {
       }
 
       if (!options.force) {
-        console.log(chalk.yellow('⚠ This will delete all local BlockSpool data:'));
+        console.log(chalk.yellow('⚠ This will delete all local PromptWheel data:'));
         console.log(chalk.gray(`  ${dir}`));
         console.log();
         console.log('Run with --force to confirm.');
@@ -229,8 +229,8 @@ export function registerLifecycleCommands(solo: Command): void {
       }
 
       if (!isInitialized(repoRoot)) {
-        console.error(chalk.red('✗ BlockSpool not initialized'));
-        console.error(chalk.gray('  Run: blockspool init'));
+        console.error(chalk.red('✗ PromptWheel not initialized'));
+        console.error(chalk.gray('  Run: promptwheel init'));
         process.exit(1);
       }
 

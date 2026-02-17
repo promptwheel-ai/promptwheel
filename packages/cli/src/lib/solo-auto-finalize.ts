@@ -65,7 +65,7 @@ async function finalizeSafe(state: AutoSessionState): Promise<number> {
         .map(t => `- [${t.category}] ${t.title} — ${t.files.length} file(s)`)
         .join('\n');
       const summaryBody = [
-        '## BlockSpool Session Summary',
+        '## PromptWheel Session Summary',
         '',
         `### Tickets Completed (${state.completedDirectTickets.length})`,
         ticketList,
@@ -73,7 +73,7 @@ async function finalizeSafe(state: AutoSessionState): Promise<number> {
         '### Stats',
         `- Cycles: ${state.cycleCount} | Duration: ${durationStr} | Files modified: ${new Set(state.completedDirectTickets.flatMap(t => t.files)).size}`,
       ].join('\n');
-      const title = `BlockSpool: ${state.completedDirectTickets.length} improvements`;
+      const title = `PromptWheel: ${state.completedDirectTickets.length} improvements`;
 
       if (state.directFinalize === 'pr') {
         const prUrl = await createDirectSummaryPr(state.repoRoot, state.directBranch, state.detectedBaseBranch, title, summaryBody, true);
@@ -91,7 +91,7 @@ async function finalizeSafe(state: AutoSessionState): Promise<number> {
 
   }
 
-  // Return to base branch so user isn't left on a blockspool working branch
+  // Return to base branch so user isn't left on a promptwheel working branch
   try {
     await gitExecFile('git', ['checkout', state.detectedBaseBranch], { cwd: state.repoRoot });
   } catch { /* non-fatal — user can checkout manually */ }

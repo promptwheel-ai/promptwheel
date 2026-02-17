@@ -1,5 +1,5 @@
 /**
- * Re-exports from @blockspool/core — single source of truth for codebase indexing.
+ * Re-exports from @promptwheel/core — single source of truth for codebase indexing.
  */
 export {
   buildCodebaseIndex,
@@ -11,4 +11,4 @@ export {
   type ModuleEntry,
   type LargeFileEntry,
   type ClassificationConfidence,
-} from '@blockspool/core/codebase-index';
+} from '@promptwheel/core/codebase-index';

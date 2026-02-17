@@ -18,7 +18,7 @@ import { loadGoals, readGoalState, writeGoalState, type GoalState } from '../lib
 let tmpDir: string;
 
 function goalsDir(): string {
-  return path.join(tmpDir, '.blockspool', 'goals');
+  return path.join(tmpDir, '.promptwheel', 'goals');
 }
 
 function writeGoalYaml(filename: string, content: string): void {
@@ -195,14 +195,14 @@ describe('readGoalState', () => {
     expect(state).toEqual({ measurements: {}, lastUpdated: 0 });
   });
 
-  it('returns default state when .blockspool directory does not exist', () => {
+  it('returns default state when .promptwheel directory does not exist', () => {
     const nonExistent = path.join(os.tmpdir(), 'no-such-dir-' + Date.now());
     const state = readGoalState(nonExistent);
     expect(state).toEqual({ measurements: {}, lastUpdated: 0 });
   });
 
   it('returns default state for corrupted file', () => {
-    const stateDir = path.join(tmpDir, '.blockspool');
+    const stateDir = path.join(tmpDir, '.promptwheel');
     fs.mkdirSync(stateDir, { recursive: true });
     fs.writeFileSync(path.join(stateDir, 'goal-state.json'), 'not valid json', 'utf-8');
 
@@ -212,11 +212,11 @@ describe('readGoalState', () => {
 });
 
 describe('writeGoalState', () => {
-  it('creates .blockspool directory if missing', () => {
+  it('creates .promptwheel directory if missing', () => {
     const state: GoalState = { measurements: {}, lastUpdated: 0 };
     writeGoalState(tmpDir, state);
 
-    expect(fs.existsSync(path.join(tmpDir, '.blockspool', 'goal-state.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.promptwheel', 'goal-state.json'))).toBe(true);
   });
 
   it('round-trips state through write and read', () => {

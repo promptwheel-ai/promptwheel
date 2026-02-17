@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
 import * as projects from '../repos/projects.js';
 import * as tickets from '../repos/tickets.js';
 import * as runs from '../repos/runs.js';

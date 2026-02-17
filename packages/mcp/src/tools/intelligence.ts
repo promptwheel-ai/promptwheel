@@ -7,7 +7,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { repos } from '@blockspool/core';
+import { repos } from '@promptwheel/core';
 import type { SessionManager } from '../state.js';
 import type { EventType } from '../types.js';
 import {
@@ -17,9 +17,9 @@ import {
 import { checkSpindle } from '../spindle.js';
 
 export function registerIntelligenceTools(server: McpServer, getState: () => SessionManager) {
-  // ── blockspool_validate_ticket ────────────────────────────────────────────
+  // ── promptwheel_validate_ticket ────────────────────────────────────────────
   server.tool(
-    'blockspool_validate_ticket',
+    'promptwheel_validate_ticket',
     'Validates a ticket against quality gates without executing it. Answers "why can\'t this ticket run?"',
     {
       ticket_id: z.string().describe('The ticket ID to validate.'),
@@ -65,7 +65,7 @@ export function registerIntelligenceTools(server: McpServer, getState: () => Ses
           suggestions.push('Create a new ticket if this work is still needed');
         } else if (ticket.status === 'blocked') {
           reasons.push('Ticket is currently blocked');
-          suggestions.push('Use blockspool_heal_blocked to diagnose and recover');
+          suggestions.push('Use promptwheel_heal_blocked to diagnose and recover');
         } else if (ticket.status === 'in_progress') {
           reasons.push('Ticket is already in progress');
         }
@@ -122,9 +122,9 @@ export function registerIntelligenceTools(server: McpServer, getState: () => Ses
     },
   );
 
-  // ── blockspool_audit_tickets ──────────────────────────────────────────────
+  // ── promptwheel_audit_tickets ──────────────────────────────────────────────
   server.tool(
-    'blockspool_audit_tickets',
+    'promptwheel_audit_tickets',
     'Analyzes ticket quality across the current session/project.',
     {
       status_filter: z.string().optional().describe('Filter by status (e.g., "ready", "blocked", "done").'),
@@ -207,9 +207,9 @@ export function registerIntelligenceTools(server: McpServer, getState: () => Ses
     },
   );
 
-  // ── blockspool_ticket_stats ───────────────────────────────────────────────
+  // ── promptwheel_ticket_stats ───────────────────────────────────────────────
   server.tool(
-    'blockspool_ticket_stats',
+    'promptwheel_ticket_stats',
     'Throughput metrics — completions by type, by day, success rates.',
     {
       days: z.number().optional().describe('Number of days to look back (default: 7).'),
@@ -292,9 +292,9 @@ export function registerIntelligenceTools(server: McpServer, getState: () => Ses
     },
   );
 
-  // ── blockspool_history ───────────────────────────────────────────────────
+  // ── promptwheel_history ───────────────────────────────────────────────────
   server.tool(
-    'blockspool_history',
+    'promptwheel_history',
     'View recent session runs with summary stats.',
     {
       limit: z.number().optional().describe('Max number of runs to return (default: 10).'),
@@ -353,9 +353,9 @@ export function registerIntelligenceTools(server: McpServer, getState: () => Ses
     },
   );
 
-  // ── blockspool_heal_blocked ───────────────────────────────────────────────
+  // ── promptwheel_heal_blocked ───────────────────────────────────────────────
   server.tool(
-    'blockspool_heal_blocked',
+    'promptwheel_heal_blocked',
     'Diagnose and recover blocked tickets.',
     {
       ticket_id: z.string().describe('The ticket ID to diagnose/heal.'),

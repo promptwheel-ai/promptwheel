@@ -194,7 +194,7 @@ export function buildProposalReviewPrompt(proposals: ReviewableProposal[]): stri
     'If a proposal is fundamentally flawed, set its confidence to 0.',
     'Optionally add a `review_note` (string) explaining your reasoning.',
     '',
-    'Call `blockspool_ingest_event` with type `PROPOSALS_REVIEWED` and payload:',
+    'Call `promptwheel_ingest_event` with type `PROPOSALS_REVIEWED` and payload:',
     '`{ "reviewed_proposals": [{ "title": "...", "confidence": N, "impact_score": N, "review_note": "..." }, ...] }`',
     '',
     'Example payload:',

@@ -20,7 +20,7 @@ import {
 let tmpDir: string;
 
 function cooldownFile(): string {
-  return path.join(tmpDir, '.blockspool', 'file-cooldown.json');
+  return path.join(tmpDir, '.promptwheel', 'file-cooldown.json');
 }
 
 function readRaw(): Array<{ filePath: string; prUrl: string; createdAt: number }> {
@@ -29,7 +29,7 @@ function readRaw(): Array<{ filePath: string; prUrl: string; createdAt: number }
 }
 
 function writeRaw(entries: Array<{ filePath: string; prUrl: string; createdAt: number }>): void {
-  const dir = path.join(tmpDir, '.blockspool');
+  const dir = path.join(tmpDir, '.promptwheel');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(cooldownFile(), JSON.stringify(entries, null, 2) + '\n', 'utf8');
 }
@@ -201,8 +201,8 @@ describe('recordPrFiles + getCooledFiles round-trip', () => {
     expect(result.get('src/b.ts')).toBe('https://github.com/pr/1');
   });
 
-  it('creates .blockspool directory if it does not exist', () => {
-    const bsDir = path.join(tmpDir, '.blockspool');
+  it('creates .promptwheel directory if it does not exist', () => {
+    const bsDir = path.join(tmpDir, '.promptwheel');
     expect(fs.existsSync(bsDir)).toBe(false);
 
     recordPrFiles(tmpDir, 'https://github.com/pr/1', ['src/a.ts']);
@@ -349,7 +349,7 @@ describe('removePrEntries', () => {
 
 describe('edge cases', () => {
   it('handles corrupted JSON in cooldown file', () => {
-    const dir = path.join(tmpDir, '.blockspool');
+    const dir = path.join(tmpDir, '.promptwheel');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(cooldownFile(), 'not valid json', 'utf8');
 
@@ -358,7 +358,7 @@ describe('edge cases', () => {
   });
 
   it('handles non-array JSON in cooldown file', () => {
-    const dir = path.join(tmpDir, '.blockspool');
+    const dir = path.join(tmpDir, '.promptwheel');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(cooldownFile(), JSON.stringify({ not: 'an array' }), 'utf8');
 

@@ -11,7 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NodeExecRunner, createExecRunner } from '../lib/exec.js';
-import type { ExecSpec, ExecResult } from '@blockspool/core';
+import type { ExecSpec, ExecResult } from '@promptwheel/core';
 
 // Mock dependencies
 vi.mock('node:child_process');

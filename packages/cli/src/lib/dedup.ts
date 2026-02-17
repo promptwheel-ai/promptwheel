@@ -2,18 +2,18 @@
  * Deduplication utilities for proposal filtering.
  *
  * Pure algorithms (normalizeTitle, titleSimilarity, isDuplicate) live in
- * @blockspool/core/dedup/shared. This file re-exports them and adds
+ * @promptwheel/core/dedup/shared. This file re-exports them and adds
  * I/O-dependent helpers (database lookups, git branch listing).
  */
 
-import type { DatabaseAdapter } from '@blockspool/core/db';
-import { tickets } from '@blockspool/core/repos';
-import type { TicketProposal } from '@blockspool/core/scout';
+import type { DatabaseAdapter } from '@promptwheel/core/db';
+import { tickets } from '@promptwheel/core/repos';
+import type { TicketProposal } from '@promptwheel/core/scout';
 import { gitExecFile } from './solo-git.js';
 
 // Re-export pure algorithms from core
-export { normalizeTitle, titleSimilarity } from '@blockspool/core/dedup/shared';
-import { normalizeTitle, titleSimilarity } from '@blockspool/core/dedup/shared';
+export { normalizeTitle, titleSimilarity } from '@promptwheel/core/dedup/shared';
+import { normalizeTitle, titleSimilarity } from '@promptwheel/core/dedup/shared';
 
 /**
  * Sleep helper
@@ -47,8 +47,8 @@ export async function isDuplicateProposal(
   }
 
   for (const branch of openPrBranches) {
-    // Extract slug from branch name (e.g., 'blockspool/tkt_abc123/fix-login-bug' -> 'fix login bug')
-    const branchTitle = branch.replace(/^blockspool\/tkt_[a-z0-9]+\//, '').replace(/-/g, ' ');
+    // Extract slug from branch name (e.g., 'promptwheel/tkt_abc123/fix-login-bug' -> 'fix login bug')
+    const branchTitle = branch.replace(/^promptwheel\/tkt_[a-z0-9]+\//, '').replace(/-/g, ' ');
     if (branchTitle && titleSimilarity(proposal.title, branchTitle) >= similarityThreshold) {
       return { isDuplicate: true, reason: `Open PR branch: ${branch}` };
     }
@@ -75,7 +75,7 @@ export async function getDeduplicationContext(
 
   let openPrBranches: string[] = [];
   try {
-    const stdout = await gitExecFile('git', ['branch', '-r', '--list', 'origin/blockspool/*'], {
+    const stdout = await gitExecFile('git', ['branch', '-r', '--list', 'origin/promptwheel/*'], {
       cwd: repoRoot,
     });
     if (stdout) {

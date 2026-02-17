@@ -7,13 +7,13 @@ Formulas are repeatable recipes that tell the scout what to look for. They contr
 ## Built-in Formulas
 
 ```bash
-blockspool --formula security-audit   # Focus on vulnerabilities
-blockspool --formula test-coverage     # Add missing tests
-blockspool --formula type-safety       # Improve TypeScript types
-blockspool --formula cleanup           # Dead code, unused imports
-blockspool --formula docs              # Documentation improvements
-blockspool --formula docs-audit        # Find stale/inaccurate docs
-blockspool --deep                      # Architectural review (shortcut for --formula deep)
+promptwheel --formula security-audit   # Focus on vulnerabilities
+promptwheel --formula test-coverage     # Add missing tests
+promptwheel --formula type-safety       # Improve TypeScript types
+promptwheel --formula cleanup           # Dead code, unused imports
+promptwheel --formula docs              # Documentation improvements
+promptwheel --formula docs-audit        # Find stale/inaccurate docs
+promptwheel --deep                      # Architectural review (shortcut for --formula deep)
 ```
 
 | Formula | Categories | What it does |
@@ -32,24 +32,24 @@ blockspool --deep                      # Architectural review (shortcut for --fo
 
 The `docs-audit` formula cross-references your markdown files (README, CONTRIBUTING, docs/) against the actual codebase to find stale, inaccurate, or outdated documentation.
 
-**Automatic docs-audit:** BlockSpool automatically runs a docs-audit every 3 cycles, tracked across sessions in `.blockspool/run-state.json`. Whether you run one cycle at a time or in wheel mode, the counter persists — so your 1st, 2nd runs are normal, and the 3rd triggers a docs check.
+**Automatic docs-audit:** PromptWheel automatically runs a docs-audit every 3 cycles, tracked across sessions in `.promptwheel/run-state.json`. Whether you run one cycle at a time or in wheel mode, the counter persists — so your 1st, 2nd runs are normal, and the 3rd triggers a docs check.
 
 ```bash
 # Change the interval (default: 3)
-blockspool --docs-audit-interval 5
+promptwheel --docs-audit-interval 5
 
 # Disable automatic docs-audit entirely
-blockspool --no-docs-audit
+promptwheel --no-docs-audit
 
 # Run a one-off docs-audit manually
-blockspool --formula docs-audit
+promptwheel --formula docs-audit
 ```
 
 ---
 
 ## Guidelines Context Injection
 
-BlockSpool automatically loads your project guidelines and injects them into every scout and execution prompt, so agents follow your conventions. For Claude runs it searches for `CLAUDE.md`; for Codex runs it searches for `AGENTS.md`. If the preferred file isn't found, it falls back to the other. If neither exists, a baseline is auto-generated from your `package.json` (disable with `"autoCreateGuidelines": false`). The file is re-read periodically during long runs (default: every 10 cycles) to pick up edits. The full file content is injected without truncation.
+PromptWheel automatically loads your project guidelines and injects them into every scout and execution prompt, so agents follow your conventions. For Claude runs it searches for `CLAUDE.md`; for Codex runs it searches for `AGENTS.md`. If the preferred file isn't found, it falls back to the other. If neither exists, a baseline is auto-generated from your `package.json` (disable with `"autoCreateGuidelines": false`). The file is re-read periodically during long runs (default: every 10 cycles) to pick up edits. The full file content is injected without truncation.
 
 | Backend | Primary | Fallback |
 |---------|---------|----------|
@@ -61,13 +61,13 @@ BlockSpool automatically loads your project guidelines and injects them into eve
 All scout runs read `CLAUDE.md` and `.claude/` for project context but **never propose changes** to them. To opt in to CLAUDE.md edits:
 
 ```bash
-blockspool --include-claude-md
+promptwheel --include-claude-md
 ```
 
 To override the exclusion list for docs-audit specifically, create a custom formula:
 
 ```yaml
-# .blockspool/formulas/docs-audit.yml  (overrides built-in)
+# .promptwheel/formulas/docs-audit.yml  (overrides built-in)
 description: Docs audit with custom exclusions
 categories: [docs]
 min_confidence: 70
@@ -81,10 +81,10 @@ prompt: |
 
 ## Custom Formulas
 
-Custom formulas live in `.blockspool/formulas/` and override built-ins with the same name:
+Custom formulas live in `.promptwheel/formulas/` and override built-ins with the same name:
 
 ```yaml
-# .blockspool/formulas/my-formula.yml
+# .promptwheel/formulas/my-formula.yml
 description: Focus on error handling
 categories: [refactor]
 exclude: [vendor/**, generated/**]
@@ -98,7 +98,7 @@ prompt: |
 Run with:
 
 ```bash
-blockspool --formula my-formula
+promptwheel --formula my-formula
 ```
 
 ---

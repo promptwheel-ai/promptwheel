@@ -4,7 +4,7 @@ description: Manage trajectories — list, show, activate, pause, resume, skip, 
 argument-hint: "list | show <name> | activate <name> | pause | resume | skip <step-id> | reset <name> | generate <goal>"
 ---
 
-Manage BlockSpool trajectories. Trajectories are ordered multi-step plans that guide the wheel across cycles.
+Manage PromptWheel trajectories. Trajectories are ordered multi-step plans that guide the wheel across cycles.
 
 ## Arguments
 
@@ -24,7 +24,7 @@ If no subcommand is given, default to **list**.
 ## Subcommand Routing
 
 ### list
-Call `blockspool_trajectory_list`. Display results as a formatted table:
+Call `promptwheel_trajectory_list`. Display results as a formatted table:
 ```
 ## Trajectories
 
@@ -34,7 +34,7 @@ Call `blockspool_trajectory_list`. Display results as a formatted table:
 ```
 
 ### show `<name>`
-Call `blockspool_trajectory_show` with `name`. Display the full trajectory with step details, showing status icons:
+Call `promptwheel_trajectory_show` with `name`. Display the full trajectory with step details, showing status icons:
 - Completed: [x]
 - Active: [>]
 - Pending: [ ]
@@ -42,19 +42,19 @@ Call `blockspool_trajectory_show` with `name`. Display the full trajectory with 
 - Failed: [!]
 
 ### activate `<name>`
-Call `blockspool_trajectory_activate` with `name`. Confirm activation and show the first step.
+Call `promptwheel_trajectory_activate` with `name`. Confirm activation and show the first step.
 
 ### pause
-Call `blockspool_trajectory_pause`. Confirm the trajectory is paused.
+Call `promptwheel_trajectory_pause`. Confirm the trajectory is paused.
 
 ### resume
-Call `blockspool_trajectory_resume`. Confirm resumption and show the current step.
+Call `promptwheel_trajectory_resume`. Confirm resumption and show the current step.
 
 ### skip `<step-id>`
-Call `blockspool_trajectory_skip` with `step_id`. Show which step was skipped and what's next.
+Call `promptwheel_trajectory_skip` with `step_id`. Show which step was skipped and what's next.
 
 ### reset `<name>`
-Call `blockspool_trajectory_reset` with `name`. Confirm the reset.
+Call `promptwheel_trajectory_reset` with `name`. Confirm the reset.
 
 ### generate `<goal>`
 
@@ -85,9 +85,9 @@ steps:
     depends_on: [step-1]
 ```
 
-4. Write the YAML to `.blockspool/trajectories/<name>.yaml` (create the directory if needed)
+4. Write the YAML to `.promptwheel/trajectories/<name>.yaml` (create the directory if needed)
 5. Ask the user if they want to activate it immediately
-6. If yes, call `blockspool_trajectory_activate` with the trajectory name
+6. If yes, call `promptwheel_trajectory_activate` with the trajectory name
 
 **Guidelines for generation:**
 - Use 3-8 steps (not too granular, not too broad)

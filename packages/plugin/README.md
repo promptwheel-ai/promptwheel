@@ -1,4 +1,4 @@
-# @blockspool/plugin — Claude Code Plugin
+# @promptwheel/plugin — Claude Code Plugin
 
 Continuous codebase improvement for Claude Code. Scouts improvements, plans changes, executes code, runs QA, and creates PRs — all within your Claude Code session.
 
@@ -6,15 +6,15 @@ Continuous codebase improvement for Claude Code. Scouts improvements, plans chan
 
 ```bash
 # 1. Add the marketplace
-/plugin marketplace add blockspool/blockspool
+/plugin marketplace add promptwheel-ai/promptwheel
 
 # 2. Install the plugin
-/plugin install blockspool@blockspool
+/plugin install promptwheel@promptwheel
 
 # 3. Restart Claude Code
 
 # 4. Verify
-/blockspool:run
+/promptwheel:run
 ```
 
 If commands don't appear after restart, check that the plugin is enabled in `~/.claude/settings.json`:
@@ -22,7 +22,7 @@ If commands don't appear after restart, check that the plugin is enabled in `~/.
 ```json
 {
   "enabledPlugins": {
-    "blockspool@blockspool": true
+    "promptwheel@promptwheel": true
   }
 }
 ```
@@ -30,14 +30,14 @@ If commands don't appear after restart, check that the plugin is enabled in `~/.
 ### Updating
 
 ```bash
-/plugin update blockspool@blockspool
+/plugin update promptwheel@promptwheel
 ```
 
 Or remove and reinstall:
 
 ```bash
-/plugin remove blockspool@blockspool
-/plugin install blockspool@blockspool
+/plugin remove promptwheel@promptwheel
+/plugin install promptwheel@promptwheel
 ```
 
 ### Manual MCP setup (alternative)
@@ -47,9 +47,9 @@ Add the MCP server directly to your project's `.mcp.json`:
 ```json
 {
   "mcpServers": {
-    "blockspool": {
+    "promptwheel": {
       "command": "npx",
-      "args": ["-y", "@blockspool/mcp"],
+      "args": ["-y", "@promptwheel/mcp"],
       "env": {}
     }
   }
@@ -58,7 +58,7 @@ Add the MCP server directly to your project's `.mcp.json`:
 
 ## Commands
 
-### `/blockspool:run`
+### `/promptwheel:run`
 
 Start an improvement session. Scouts the codebase, creates tickets, executes changes, and creates PRs.
 
@@ -78,28 +78,28 @@ Start an improvement session. Scouts the codebase, creates tickets, executes cha
 **Examples:**
 
 ```
-/blockspool:run                                  Single cycle
-/blockspool:run hours=4 batch_size=20            4-hour run with milestone PRs
-/blockspool:run formula=security-audit           Focus on vulnerabilities
-/blockspool:run deep=true                        Architectural review
-/blockspool:run cycles=5 parallel=3              5 cycles, 3 tickets at a time
-/blockspool:run formula=test-coverage parallel=4 Test coverage with high parallelism
+/promptwheel:run                                  Single cycle
+/promptwheel:run hours=4 batch_size=20            4-hour run with milestone PRs
+/promptwheel:run formula=security-audit           Focus on vulnerabilities
+/promptwheel:run deep=true                        Architectural review
+/promptwheel:run cycles=5 parallel=3              5 cycles, 3 tickets at a time
+/promptwheel:run formula=test-coverage parallel=4 Test coverage with high parallelism
 ```
 
-### `/blockspool:status`
+### `/promptwheel:status`
 
 Show current session state: phase, budget, tickets completed, spindle risk.
 
-### `/blockspool:nudge`
+### `/promptwheel:nudge`
 
 Send a hint to guide the next scout cycle.
 
 ```
-/blockspool:nudge hint="focus on authentication module"
-/blockspool:nudge hint="skip test files, focus on SQL injection"
+/promptwheel:nudge hint="focus on authentication module"
+/promptwheel:nudge hint="skip test files, focus on SQL injection"
 ```
 
-### `/blockspool:cancel`
+### `/promptwheel:cancel`
 
 Gracefully end the current session. Displays summary of work completed.
 
@@ -135,10 +135,10 @@ packages/plugin/
 ├── .claude-plugin/plugin.json   # Plugin manifest
 ├── .mcp.json                    # MCP server config
 ├── skills/
-│   ├── run/SKILL.md             # /blockspool:run
-│   ├── status/SKILL.md          # /blockspool:status
-│   ├── nudge/SKILL.md           # /blockspool:nudge
-│   └── cancel/SKILL.md          # /blockspool:cancel
+│   ├── run/SKILL.md             # /promptwheel:run
+│   ├── status/SKILL.md          # /promptwheel:status
+│   ├── nudge/SKILL.md           # /promptwheel:nudge
+│   └── cancel/SKILL.md          # /promptwheel:cancel
 ├── hooks/hooks.json             # Hook registration (auto-loaded)
 └── scripts/hook-driver.js       # Stop + PreToolUse hook logic
 ```

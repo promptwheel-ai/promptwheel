@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { Formula } from '@blockspool/core/formulas/shared';
+import type { Formula } from '@promptwheel/core/formulas/shared';
 import type { GoalMeasurement } from '../lib/goals.js';
 
 // We need to mock fs and child_process before importing the module under test.

@@ -6,13 +6,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import { repos } from '@blockspool/core';
-import type { DatabaseAdapter, Project } from '@blockspool/core';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import { repos } from '@promptwheel/core';
+import type { DatabaseAdapter, Project } from '@promptwheel/core';
 import { RunManager } from '../run-manager.js';
 import { filterAndCreateTickets } from '../proposals.js';
 import type { RawProposal } from '../proposals.js';
-import { bigramSimilarity as titleSimilarity } from '@blockspool/core/dedup/shared';
+import { bigramSimilarity as titleSimilarity } from '@promptwheel/core/dedup/shared';
 import { processEvent } from '../event-processor.js';
 
 let db: DatabaseAdapter;
@@ -400,7 +400,7 @@ describe('processEvent SCOUT_OUTPUT', () => {
     });
 
     const artifactPath = path.join(
-      tmpDir, '.blockspool', 'runs', s.run_id, 'artifacts',
+      tmpDir, '.promptwheel', 'runs', s.run_id, 'artifacts',
       `${s.step_count}-scout-proposals.json`,
     );
     expect(fs.existsSync(artifactPath)).toBe(true);

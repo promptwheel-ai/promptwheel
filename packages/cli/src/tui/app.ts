@@ -6,7 +6,7 @@
  */
 
 import blessed, { Widgets } from 'neo-blessed';
-import type { DatabaseAdapter } from '@blockspool/core/db';
+import type { DatabaseAdapter } from '@promptwheel/core/db';
 import { AdaptivePoller } from './poller.js';
 import { buildSnapshot, type TuiSnapshot } from './state.js';
 import { createOverviewScreen } from './screens/overview.js';
@@ -66,7 +66,7 @@ export async function startTuiApp(deps: TuiAppDeps): Promise<{ stop: () => Promi
   const screen = blessed.screen({
     smartCSR: true,
     fullUnicode: true,
-    title: 'BlockSpool',
+    title: 'PromptWheel',
   });
 
   // Toast bar at bottom for status messages

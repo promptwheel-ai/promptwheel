@@ -1,22 +1,22 @@
 #!/usr/bin/env node
 /**
- * @blockspool/mcp — MCP server entry point
+ * @promptwheel/mcp — MCP server entry point
  *
  * Runs as a stdio MCP server for Claude Code.
- * Usage: npx @blockspool/mcp
+ * Usage: npx @promptwheel/mcp
  */
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
 import { createServer } from './server.js';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
 async function main() {
-  const projectPath = process.env.BLOCKSPOOL_PROJECT_PATH ?? process.cwd();
+  const projectPath = process.env.PROMPTWHEEL_PROJECT_PATH ?? process.cwd();
 
   // Determine DB path
-  const bsDir = path.join(projectPath, '.blockspool');
+  const bsDir = path.join(projectPath, '.promptwheel');
   if (!fs.existsSync(bsDir)) {
     fs.mkdirSync(bsDir, { recursive: true });
   }
@@ -44,6 +44,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('BlockSpool MCP server failed to start:', err);
+  console.error('PromptWheel MCP server failed to start:', err);
   process.exit(1);
 });

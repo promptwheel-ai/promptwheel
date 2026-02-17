@@ -2,27 +2,27 @@
  * Formulas - User-defined repeatable sweep recipes
  *
  * A formula is a YAML config that defines what an auto run should
- * look for and how to fix it. Formulas live in .blockspool/formulas/
+ * look for and how to fix it. Formulas live in .promptwheel/formulas/
  * and can be invoked with --formula <name>.
  *
  * Pure definitions (BUILTIN_FORMULAS, YAML parsing) live in
- * @blockspool/core/formulas/shared. This file wraps them with
+ * @promptwheel/core/formulas/shared. This file wraps them with
  * filesystem I/O and adds CLI-specific formula application logic.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { ProposalCategory } from '@blockspool/core/scout';
+import type { ProposalCategory } from '@promptwheel/core/scout';
 import {
   type Formula as CoreFormula,
   BUILTIN_FORMULAS as CORE_BUILTINS,
   parseSimpleYaml,
   parseStringList,
-} from '@blockspool/core/formulas/shared';
+} from '@promptwheel/core/formulas/shared';
 
 // Re-export core types and constants
-export type { Formula } from '@blockspool/core/formulas/shared';
-export { BUILTIN_FORMULAS, parseSimpleYaml, parseStringList } from '@blockspool/core/formulas/shared';
+export type { Formula } from '@promptwheel/core/formulas/shared';
+export { BUILTIN_FORMULAS, parseSimpleYaml, parseStringList } from '@promptwheel/core/formulas/shared';
 
 // Use core's Formula type locally
 type Formula = CoreFormula;
@@ -35,7 +35,7 @@ type Formula = CoreFormula;
  * Load a formula by name.
  *
  * Search order:
- * 1. .blockspool/formulas/<name>.yaml (or .yml)
+ * 1. .promptwheel/formulas/<name>.yaml (or .yml)
  * 2. Built-in formulas
  */
 export function loadFormula(name: string, repoPath?: string): Formula | null {
@@ -55,7 +55,7 @@ export function listFormulas(repoPath?: string): Formula[] {
 }
 
 /**
- * Load a user-defined formula from .blockspool/formulas/
+ * Load a user-defined formula from .promptwheel/formulas/
  */
 function loadUserFormula(name: string, repoPath?: string): Formula | null {
   const dir = getFormulasDir(repoPath);
@@ -95,7 +95,7 @@ function loadAllUserFormulas(repoPath?: string): Formula[] {
  */
 function getFormulasDir(repoPath?: string): string | null {
   const base = repoPath || process.cwd();
-  return path.join(base, '.blockspool', 'formulas');
+  return path.join(base, '.promptwheel', 'formulas');
 }
 
 /**

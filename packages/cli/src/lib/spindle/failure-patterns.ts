@@ -2,7 +2,7 @@
  * Spindle — Failure pattern detectors (command failures, QA ping-pong, file edits)
  *
  * Merged from command-failure.ts, qa-ping-pong.ts, and file-edits.ts.
- * Core detection algorithms live in @blockspool/core; this module
+ * Core detection algorithms live in @promptwheel/core; this module
  * re-exports them and adds CLI-specific state helpers.
  */
 
@@ -13,7 +13,7 @@ import {
   detectCommandFailure,
   extractFilesFromDiff,
   getFileEditWarnings as _getFileEditWarnings,
-} from '@blockspool/core/spindle/shared';
+} from '@promptwheel/core/spindle/shared';
 
 // Re-export shared detectors for consumers
 export { shortHash, detectQaPingPong, detectCommandFailure, extractFilesFromDiff };

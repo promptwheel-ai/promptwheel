@@ -1,5 +1,5 @@
 /**
- * BlockSpool v2 types — Run state, events, phases, and response contracts.
+ * PromptWheel v2 types — Run state, events, phases, and response contracts.
  *
  * These match the schemas defined in docs/PLUGIN_ROADMAP.md.
  */

@@ -1,14 +1,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { DatabaseAdapter } from '@blockspool/core';
-import type { Project } from '@blockspool/core';
-import { repos } from '@blockspool/core';
+import type { DatabaseAdapter } from '@promptwheel/core';
+import type { Project } from '@promptwheel/core';
+import { repos } from '@promptwheel/core';
 import { RunManager } from './run-manager.js';
 import { recordDedupEntry } from './dedup-memory.js';
 import {
   recordTicketOutcome as recordTicketOutcomeCore,
-} from '@blockspool/core/sectors/shared';
-import type { SectorState } from '@blockspool/core/sectors/shared';
+} from '@promptwheel/core/sectors/shared';
+import type { SectorState } from '@promptwheel/core/sectors/shared';
 
 // ---------------------------------------------------------------------------
 // EventContext — shared context for all handlers
@@ -45,13 +45,13 @@ export function atomicWriteJsonSync(filePath: string, data: unknown): void {
 /** Load sectors.json, return null if missing/invalid. */
 export function loadSectorsState(rootPath: string): { state: SectorState; filePath: string } | null {
   try {
-    const filePath = path.join(rootPath, '.blockspool', 'sectors.json');
+    const filePath = path.join(rootPath, '.promptwheel', 'sectors.json');
     if (!fs.existsSync(filePath)) return null;
     const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
     if (data?.version !== 2 || !Array.isArray(data.sectors)) return null;
     return { state: data as SectorState, filePath };
   } catch (err) {
-    console.warn(`[blockspool] loadSectorsState: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[promptwheel] loadSectorsState: ${err instanceof Error ? err.message : String(err)}`);
     return null;
   }
 }
@@ -68,7 +68,7 @@ export function recordSectorOutcome(
     recordTicketOutcomeCore(loaded.state, sectorPath, outcome === 'success');
     atomicWriteJsonSync(loaded.filePath, loaded.state);
   } catch (err) {
-    console.warn(`[blockspool] recordSectorOutcome: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[promptwheel] recordSectorOutcome: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -88,7 +88,7 @@ export async function recordTicketDedup(
       recordDedupEntry(rootPath, ticket.title, completed, reason);
     }
   } catch (err) {
-    console.warn(`[blockspool] recordTicketDedup: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[promptwheel] recordTicketDedup: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

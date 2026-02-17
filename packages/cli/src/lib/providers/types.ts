@@ -2,7 +2,7 @@
  * Provider configuration types
  */
 
-import type { ScoutBackend } from '@blockspool/core/scout';
+import type { ScoutBackend } from '@promptwheel/core/scout';
 import type { ExecutionBackend } from '../execution-backends/index.js';
 
 export interface ProviderFactoryOpts {

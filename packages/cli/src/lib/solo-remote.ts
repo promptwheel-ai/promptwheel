@@ -38,7 +38,7 @@ export function normalizeRemoteUrl(url: string): string {
  */
 export async function assertPushSafe(cwd: string, allowedRemote: string | undefined): Promise<void> {
   if (allowedRemote === undefined) {
-    console.warn('[push-safety] No allowedRemote configured — skipping push guard. Run "blockspool solo init --force" to set one.');
+    console.warn('[push-safety] No allowedRemote configured — skipping push guard. Run "promptwheel solo init --force" to set one.');
     return;
   }
 
@@ -50,7 +50,7 @@ export async function assertPushSafe(cwd: string, allowedRemote: string | undefi
     throw new Error(
       `Push blocked: origin "${currentRemote}" (normalized: ${normalizedCurrent}) does not match ` +
       `allowed remote "${allowedRemote}" (normalized: ${normalizedAllowed}). ` +
-      'Re-run "blockspool solo init --force" if this is intentional.'
+      'Re-run "promptwheel solo init --force" if this is intentional.'
     );
   }
 }

@@ -15,8 +15,8 @@ Parse from `$ARGUMENTS`:
 ## Implementation
 
 1. Parse ticket_id and optional action from `$ARGUMENTS`
-2. If no ticket_id provided, call `blockspool_audit_tickets` with `status_filter=blocked` to list blocked tickets, then ask the user which one to heal
-3. Call `blockspool_heal_blocked` MCP tool with `ticket_id` and `action`
+2. If no ticket_id provided, call `promptwheel_audit_tickets` with `status_filter=blocked` to list blocked tickets, then ask the user which one to heal
+3. Call `promptwheel_heal_blocked` MCP tool with `ticket_id` and `action`
 4. Display diagnosis and any applied changes
 
 ## Output Format

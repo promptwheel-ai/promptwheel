@@ -19,7 +19,7 @@ describe('isInitialized', () => {
     mockedFs.existsSync.mockReturnValue(true);
     expect(isInitialized('/repo')).toBe(true);
     expect(mockedFs.existsSync).toHaveBeenCalledWith(
-      path.join('/repo', '.blockspool', 'config.json'),
+      path.join('/repo', '.promptwheel', 'config.json'),
     );
   });
 
@@ -127,7 +127,7 @@ describe('loadConfig', () => {
 
   it('returns parsed config when config exists', async () => {
     const { loadConfig } = await import('../lib/solo-config.js');
-    const config = { version: 1, repoRoot: '/repo', createdAt: '2025-01-01', dbPath: '/repo/.blockspool/state.sqlite' };
+    const config = { version: 1, repoRoot: '/repo', createdAt: '2025-01-01', dbPath: '/repo/.promptwheel/state.sqlite' };
     // Only return true for config.json path; false for setup-detection paths
     // (package.json, pnpm-lock.yaml, etc.) so detectSetupCommand doesn't inject a setup field
     mockedFs.existsSync.mockImplementation((p: fs.PathLike) => {
@@ -143,7 +143,7 @@ describe('loadConfig', () => {
       version: 1,
       repoRoot: '/repo',
       createdAt: '2025-01-01T00:00:00.000Z',
-      dbPath: '/repo/.blockspool/state.sqlite',
+      dbPath: '/repo/.promptwheel/state.sqlite',
       qa: { commands: [{ name: 'test', cmd: 'npm run test' }] },
     };
     mockedFs.existsSync.mockReturnValue(true);
@@ -159,11 +159,11 @@ describe('loadConfig', () => {
 });
 
 describe('initSolo', () => {
-  it('creates .blockspool directory', async () => {
+  it('creates .promptwheel directory', async () => {
     const { initSolo } = await import('../lib/solo-config.js');
     mockedFs.existsSync.mockImplementation((p: fs.PathLike) => {
       const s = String(p);
-      // .blockspool dir doesn't exist, package.json doesn't exist, .gitignore doesn't exist
+      // .promptwheel dir doesn't exist, package.json doesn't exist, .gitignore doesn't exist
       return false;
     });
     mockedFs.mkdirSync.mockReturnValue(undefined);
@@ -171,7 +171,7 @@ describe('initSolo', () => {
 
     await initSolo('/repo');
     expect(mockedFs.mkdirSync).toHaveBeenCalledWith(
-      path.join('/repo', '.blockspool'),
+      path.join('/repo', '.promptwheel'),
       { recursive: true },
     );
   });
@@ -207,7 +207,7 @@ describe('initSolo', () => {
     expect(detectedQa.length).toBeGreaterThan(0);
   });
 
-  it('adds .blockspool to .gitignore if not present', async () => {
+  it('adds .promptwheel to .gitignore if not present', async () => {
     const { initSolo } = await import('../lib/solo-config.js');
     mockedFs.existsSync.mockImplementation((p: fs.PathLike) => {
       const s = String(p);
@@ -222,7 +222,7 @@ describe('initSolo', () => {
     await initSolo('/repo');
     expect(mockedFs.appendFileSync).toHaveBeenCalledWith(
       path.join('/repo', '.gitignore'),
-      expect.stringContaining('.blockspool'),
+      expect.stringContaining('.promptwheel'),
     );
   });
 
@@ -233,7 +233,7 @@ describe('initSolo', () => {
       if (s.endsWith('.gitignore')) return true;
       return false;
     });
-    mockedFs.readFileSync.mockReturnValue('node_modules/\n.blockspool/\n');
+    mockedFs.readFileSync.mockReturnValue('node_modules/\n.promptwheel/\n');
     mockedFs.mkdirSync.mockReturnValue(undefined);
     mockedFs.writeFileSync.mockReturnValue(undefined);
 

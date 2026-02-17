@@ -61,7 +61,7 @@ export async function run(ctx: TicketContext): Promise<StepResult> {
 
   await ctx.markStep('worktree', 'started');
 
-  const worktreesDir = path.join(repoRoot, '.blockspool', 'worktrees');
+  const worktreesDir = path.join(repoRoot, '.promptwheel', 'worktrees');
   if (!fs.existsSync(worktreesDir)) {
     fs.mkdirSync(worktreesDir, { recursive: true });
   }

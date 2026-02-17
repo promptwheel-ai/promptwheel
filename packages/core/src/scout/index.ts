@@ -240,7 +240,7 @@ function normalizeProposal(
 
     return proposal;
   } catch (err) {
-    if (process.env.BLOCKSPOOL_VERBOSE) {
+    if (process.env.PROMPTWHEEL_VERBOSE) {
       console.error(`normalizeProposal failed: ${err instanceof Error ? err.message : err}`);
     }
     return null;

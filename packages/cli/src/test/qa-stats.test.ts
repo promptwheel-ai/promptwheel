@@ -27,15 +27,15 @@ import {
 let tmpDir: string;
 
 function statsFile(): string {
-  return path.join(tmpDir, '.blockspool', 'qa-stats.json');
+  return path.join(tmpDir, '.promptwheel', 'qa-stats.json');
 }
 
 function runStateFile(): string {
-  return path.join(tmpDir, '.blockspool', 'run-state.json');
+  return path.join(tmpDir, '.promptwheel', 'run-state.json');
 }
 
 function writeStatsRaw(store: QaStatsStore): void {
-  const dir = path.join(tmpDir, '.blockspool');
+  const dir = path.join(tmpDir, '.promptwheel');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(statsFile(), JSON.stringify(store, null, 2));
 }
@@ -46,7 +46,7 @@ function readStatsRaw(): QaStatsStore {
 }
 
 function writeRunState(qualitySignals: { totalTickets: number; firstPassSuccess: number; retriedSuccess: number; qaPassed: number; qaFailed: number }): void {
-  const dir = path.join(tmpDir, '.blockspool');
+  const dir = path.join(tmpDir, '.promptwheel');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const state = {
     totalCycles: 10,
@@ -80,7 +80,7 @@ function makeStats(overrides: Partial<QaCommandStats> = {}): QaCommandStats {
 function makeQaConfig(commands: Array<{ name: string; cmd: string; timeoutMs?: number }>) {
   return {
     commands: commands.map(c => ({ name: c.name, cmd: c.cmd, cwd: '.', timeoutMs: c.timeoutMs })),
-    artifacts: { dir: '.blockspool/artifacts', maxLogBytes: 200_000, tailBytes: 16_384 },
+    artifacts: { dir: '.promptwheel/artifacts', maxLogBytes: 200_000, tailBytes: 16_384 },
     retry: { enabled: false, maxAttempts: 1 },
   };
 }
@@ -127,7 +127,7 @@ describe('loadQaStats', () => {
   });
 
   it('handles corrupted JSON gracefully', () => {
-    const dir = path.join(tmpDir, '.blockspool');
+    const dir = path.join(tmpDir, '.promptwheel');
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(statsFile(), 'not json');
 
@@ -530,7 +530,7 @@ describe('resetQaStatsForSession', () => {
 
 describe('buildBaselineHealthBlock', () => {
   function writeBaseline(data: Record<string, unknown>): void {
-    const dir = path.join(tmpDir, '.blockspool');
+    const dir = path.join(tmpDir, '.promptwheel');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'qa-baseline.json'), JSON.stringify(data));
   }
@@ -545,7 +545,7 @@ describe('buildBaselineHealthBlock', () => {
   });
 
   it('returns empty string for corrupt baseline JSON', () => {
-    const dir = path.join(tmpDir, '.blockspool');
+    const dir = path.join(tmpDir, '.promptwheel');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, 'qa-baseline.json'), 'not json');
     expect(buildBaselineHealthBlock(tmpDir)).toBe('');

@@ -1,22 +1,22 @@
 {
-  "name": "@blockspool/mcp",
+  "name": "@promptwheel/mcp",
   "version": "0.6.0",
-  "description": "BlockSpool MCP server - stateful tool provider for Claude Code",
-  "author": "BlockSpool",
-  "homepage": "https://blockspool.com",
+  "description": "PromptWheel MCP server - stateful tool provider for Claude Code",
+  "author": "PromptWheel",
+  "homepage": "https://promptwheel.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/blockspool/blockspool.git",
+    "url": "git+https://github.com/promptwheel-ai/promptwheel.git",
     "directory": "packages/mcp"
   },
   "bugs": {
-    "url": "https://github.com/blockspool/blockspool/issues"
+    "url": "https://github.com/promptwheel-ai/promptwheel/issues"
   },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "blockspool-mcp": "dist/index.js"
+    "promptwheel-mcp": "dist/index.js"
   },
   "exports": {
     ".": {
@@ -42,7 +42,7 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "blockspool",
+    "promptwheel",
     "mcp",
     "model-context-protocol",
     "claude-code",
@@ -50,8 +50,8 @@
   ],
   "license": "Apache-2.0",
   "dependencies": {
-    "@blockspool/core": "^0.6.0",
-    "@blockspool/sqlite": "^0.6.0",
+    "@promptwheel/core": "^0.6.0",
+    "@promptwheel/sqlite": "^0.6.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "minimatch": "^10.1.1"
   },

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { DatabaseAdapter } from '@blockspool/core/db';
+import type { DatabaseAdapter } from '@promptwheel/core/db';
 
 // Mock child_process
 // execFile must call its callback with { stdout, stderr } because promisify
@@ -20,7 +20,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 });
 
 // Mock the repos
-vi.mock('@blockspool/core/repos', () => ({
+vi.mock('@promptwheel/core/repos', () => ({
   tickets: {
     listByProject: vi.fn(),
   },
@@ -33,7 +33,7 @@ import {
   titleSimilarity,
 } from '../lib/solo-auto.js';
 import { spawnSync, execFile } from 'node:child_process';
-import { tickets } from '@blockspool/core/repos';
+import { tickets } from '@promptwheel/core/repos';
 
 function makeFakeDb(): DatabaseAdapter {
   return {
@@ -95,7 +95,7 @@ describe('isDuplicateProposal', () => {
     const result = await isDuplicateProposal(
       { title: 'fix broken tests' },
       [],
-      ['blockspool/tkt_abc123'],
+      ['promptwheel/tkt_abc123'],
       0.5,
     );
 
@@ -151,7 +151,7 @@ describe('getDeduplicationContext', () => {
     vi.mocked(execFile).mockImplementation((_cmd: any, _args: any, _opts: any, callback: any) => {
       const cb = typeof _opts === 'function' ? _opts : callback;
       if (typeof cb === 'function') {
-        cb(null, { stdout: '  origin/blockspool/tkt_abc123\n  origin/blockspool/tkt_def456\n', stderr: '' });
+        cb(null, { stdout: '  origin/promptwheel/tkt_abc123\n  origin/promptwheel/tkt_def456\n', stderr: '' });
       }
       return undefined as any;
     });
@@ -160,12 +160,12 @@ describe('getDeduplicationContext', () => {
 
     expect(execFile).toHaveBeenCalledWith(
       'git',
-      ['branch', '-r', '--list', 'origin/blockspool/*'],
+      ['branch', '-r', '--list', 'origin/promptwheel/*'],
       expect.objectContaining({ cwd: '/repo', encoding: 'utf-8' }),
       expect.any(Function),
     );
-    expect(ctx.openPrBranches).toContain('blockspool/tkt_abc123');
-    expect(ctx.openPrBranches).toContain('blockspool/tkt_def456');
+    expect(ctx.openPrBranches).toContain('promptwheel/tkt_abc123');
+    expect(ctx.openPrBranches).toContain('promptwheel/tkt_def456');
   });
 });
 

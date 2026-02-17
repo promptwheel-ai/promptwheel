@@ -6,9 +6,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import { repos } from '@blockspool/core';
-import type { DatabaseAdapter, Project } from '@blockspool/core';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import { repos } from '@promptwheel/core';
+import type { DatabaseAdapter, Project } from '@promptwheel/core';
 import { RunManager } from '../run-manager.js';
 import { advance } from '../advance.js';
 import { processEvent } from '../event-processor.js';
@@ -465,7 +465,7 @@ describe('advance — spindle integration', () => {
     await advance({ run, db, project });
 
     const eventsPath = path.join(
-      tmpDir, '.blockspool', 'runs', s.run_id, 'events.ndjson',
+      tmpDir, '.promptwheel', 'runs', s.run_id, 'events.ndjson',
     );
     const events = fs.readFileSync(eventsPath, 'utf8')
       .trim().split('\n').map(l => JSON.parse(l));

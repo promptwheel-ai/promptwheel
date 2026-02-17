@@ -1,12 +1,12 @@
 import type { EventContext, ProcessResult } from './event-helpers.js';
 import { loadSectorsState, atomicWriteJsonSync } from './event-helpers.js';
-import { repos, SCOUT_DEFAULTS } from '@blockspool/core';
+import { repos, SCOUT_DEFAULTS } from '@promptwheel/core';
 import { filterAndCreateTickets, parseReviewedProposals } from './proposals.js';
 import type { RawProposal } from './proposals.js';
 import { addLearning, extractTags } from './learnings.js';
 import {
   recordScanResult as recordScanResultCore,
-} from '@blockspool/core/sectors/shared';
+} from '@promptwheel/core/sectors/shared';
 
 const MAX_SCOUT_RETRIES = SCOUT_DEFAULTS.MAX_SCOUT_RETRIES;
 
@@ -68,7 +68,7 @@ export async function handleScoutOutput(ctx: EventContext, payload: Record<strin
         }
       }
     } catch (err) {
-      console.warn(`[blockspool] sector reclassification: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[promptwheel] sector reclassification: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -130,7 +130,7 @@ export async function handleScoutOutput(ctx: EventContext, payload: Record<strin
         atomicWriteJsonSync(loaded.filePath, loaded.state);
       }
     } catch (err) {
-      console.warn(`[blockspool] record sector scan stats: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[promptwheel] record sector scan stats: ${err instanceof Error ? err.message : String(err)}`);
     }
     s.current_sector_path = s.selected_sector_path;
     s.selected_sector_path = undefined;

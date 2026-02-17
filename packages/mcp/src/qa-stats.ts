@@ -2,7 +2,7 @@
  * Per-command QA statistics tracking for the MCP package.
  *
  * Minimal subset copied from CLI's `packages/cli/src/lib/qa-stats.ts`.
- * Provides persistence to `.blockspool/qa-stats.json` for QA command
+ * Provides persistence to `.promptwheel/qa-stats.json` for QA command
  * result tracking when running through the plugin/MCP path.
  */
 
@@ -56,7 +56,7 @@ const MAX_BASELINE_RING = 10;
 // ---------------------------------------------------------------------------
 
 function statsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.blockspool', QA_STATS_FILE);
+  return path.join(projectRoot, '.promptwheel', QA_STATS_FILE);
 }
 
 export function loadQaStats(projectRoot: string): QaStatsStore {
@@ -74,7 +74,7 @@ export function loadQaStats(projectRoot: string): QaStatsStore {
       lastCalibratedQualityRate: parsed.lastCalibratedQualityRate ?? null,
     };
   } catch (err) {
-    console.warn(`[blockspool] failed to parse qa-stats.json: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[promptwheel] failed to parse qa-stats.json: ${err instanceof Error ? err.message : String(err)}`);
     return { commands: {}, lastUpdated: 0, disabledCommands: [], lastCalibratedQualityRate: null };
   }
 }

@@ -1,12 +1,12 @@
 /**
  * Event Processor — handles ingested events and triggers state transitions.
  *
- * When the client calls `blockspool_ingest_event`, this module processes
+ * When the client calls `promptwheel_ingest_event`, this module processes
  * the event and updates RunState accordingly (phase transitions, counters, etc).
  */
 
-import type { DatabaseAdapter } from '@blockspool/core';
-import type { Project } from '@blockspool/core';
+import type { DatabaseAdapter } from '@promptwheel/core';
+import type { Project } from '@promptwheel/core';
 import { RunManager } from './run-manager.js';
 import type { EventType } from './types.js';
 import { filterAndCreateTickets } from './proposals.js';
@@ -39,8 +39,8 @@ export async function processEvent(
   // ---------------------------------------------------------------------------
   // When in PARALLEL_EXECUTE phase, events like PR_CREATED, TICKET_RESULT, etc.
   // should be routed to the ticket worker, not processed at session level.
-  // This handles the case where the user calls blockspool_ingest_event instead
-  // of blockspool_ticket_event for ticket completion.
+  // This handles the case where the user calls promptwheel_ingest_event instead
+  // of promptwheel_ticket_event for ticket completion.
   const TICKET_WORKER_EVENTS = new Set([
     'PR_CREATED', 'TICKET_RESULT', 'PLAN_SUBMITTED', 'QA_PASSED', 'QA_FAILED', 'QA_COMMAND_RESULT',
   ]);

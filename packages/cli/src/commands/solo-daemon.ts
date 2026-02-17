@@ -1,11 +1,11 @@
 /**
  * Daemon CLI commands: start, stop, status, logs.
  *
- * blockspool solo daemon start [--interval 30] [--formula deep] [--scope src/**]
- * blockspool solo daemon stop
- * blockspool solo daemon status [--json]
- * blockspool solo daemon logs [-n 50] [-f]
- * blockspool solo daemon __run  (hidden — invoked by forked child)
+ * promptwheel solo daemon start [--interval 30] [--formula deep] [--scope src/**]
+ * promptwheel solo daemon stop
+ * promptwheel solo daemon status [--json]
+ * promptwheel solo daemon logs [-n 50] [-f]
+ * promptwheel solo daemon __run  (hidden — invoked by forked child)
  */
 
 import { Command } from 'commander';
@@ -35,7 +35,7 @@ async function resolveRepoRoot(): Promise<string> {
     process.exit(1);
   }
   if (!isInitialized(repoRoot)) {
-    console.error(chalk.red('BlockSpool not initialized. Run: blockspool solo init'));
+    console.error(chalk.red('PromptWheel not initialized. Run: promptwheel solo init'));
     process.exit(1);
   }
   return repoRoot;
@@ -68,7 +68,7 @@ export function registerDaemonCommands(solo: Command): void {
       if (isDaemonRunning(repoRoot)) {
         const pid = readDaemonPid(repoRoot);
         console.log(chalk.yellow(`Daemon already running (pid=${pid})`));
-        console.log(chalk.gray('  Stop it first: blockspool solo daemon stop'));
+        console.log(chalk.gray('  Stop it first: promptwheel solo daemon stop'));
         process.exit(1);
       }
 
@@ -83,8 +83,8 @@ export function registerDaemonCommands(solo: Command): void {
       console.log(chalk.gray(`  Interval: ${interval}m`));
       if (options.formula) console.log(chalk.gray(`  Formula: ${options.formula}`));
       if (options.scope) console.log(chalk.gray(`  Scope: ${options.scope}`));
-      console.log(chalk.gray(`  Logs: blockspool solo daemon logs -f`));
-      console.log(chalk.gray(`  Stop: blockspool solo daemon stop`));
+      console.log(chalk.gray(`  Logs: promptwheel solo daemon logs -f`));
+      console.log(chalk.gray(`  Stop: promptwheel solo daemon stop`));
     });
 
   // ── stop ───────────────────────────────────────────────────────────────────

@@ -1,15 +1,15 @@
-# @blockspool/mcp — MCP Server
+# @promptwheel/mcp — MCP Server
 
-Stateful MCP server that powers BlockSpool's improvement loop. Exposes tools for session management, scouting, execution, and git operations.
+Stateful MCP server that powers PromptWheel's improvement loop. Exposes tools for session management, scouting, execution, and git operations.
 
 ## Quick Start
 
 ```bash
 # As stdio MCP server (for Claude Code plugin)
-npx @blockspool/mcp
+npx @promptwheel/mcp
 
 # Or via the DirectClient API (for any LLM)
-import { DirectClient } from '@blockspool/mcp/direct-client';
+import { DirectClient } from '@promptwheel/mcp/direct-client';
 
 const client = await DirectClient.create({ projectPath: '.' });
 client.startSession({ scope: 'src/**', formula: 'security-audit' });
@@ -31,29 +31,29 @@ await client.close();
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `blockspool_start_session` | Initialize a session | `hours?`, `formula?`, `deep?`, `scope?`, `categories?`, `min_confidence?`, `max_prs?`, `step_budget?`, `ticket_step_budget?`, `draft_prs?` |
-| `blockspool_advance` | Get next action (main loop driver) | — |
-| `blockspool_ingest_event` | Report event, trigger state transitions | `type`, `payload` |
-| `blockspool_session_status` | Current session state | — |
-| `blockspool_end_session` | Finalize session | — |
-| `blockspool_nudge` | Add hint for next scout cycle | `hint` |
-| `blockspool_list_formulas` | List available formulas | — |
-| `blockspool_get_scope_policy` | Get scope policy for current ticket | `file_path?` |
+| `promptwheel_start_session` | Initialize a session | `hours?`, `formula?`, `deep?`, `scope?`, `categories?`, `min_confidence?`, `max_prs?`, `step_budget?`, `ticket_step_budget?`, `draft_prs?` |
+| `promptwheel_advance` | Get next action (main loop driver) | — |
+| `promptwheel_ingest_event` | Report event, trigger state transitions | `type`, `payload` |
+| `promptwheel_session_status` | Current session state | — |
+| `promptwheel_end_session` | Finalize session | — |
+| `promptwheel_nudge` | Add hint for next scout cycle | `hint` |
+| `promptwheel_list_formulas` | List available formulas | — |
+| `promptwheel_get_scope_policy` | Get scope policy for current ticket | `file_path?` |
 
 ### Execution
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `blockspool_next_ticket` | Get next ticket to work on | — |
-| `blockspool_validate_scope` | Check changed files against scope | `ticketId`, `changedFiles[]` |
-| `blockspool_complete_ticket` | Mark ticket done, run QA | `ticketId`, `runId`, `summary?` |
-| `blockspool_fail_ticket` | Mark ticket failed | `ticketId`, `runId`, `reason` |
+| `promptwheel_next_ticket` | Get next ticket to work on | — |
+| `promptwheel_validate_scope` | Check changed files against scope | `ticketId`, `changedFiles[]` |
+| `promptwheel_complete_ticket` | Mark ticket done, run QA | `ticketId`, `runId`, `summary?` |
+| `promptwheel_fail_ticket` | Mark ticket failed | `ticketId`, `runId`, `reason` |
 
 ### Git
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `blockspool_git_setup` | Create/checkout branch for ticket | `ticketId`, `baseBranch?` |
+| `promptwheel_git_setup` | Create/checkout branch for ticket | `ticketId`, `baseBranch?` |
 
 ## Canonical Loop Protocol
 
@@ -102,7 +102,7 @@ Built-in formulas customize scout behavior:
 
 ### Custom Formulas
 
-Create `.blockspool/formulas/<name>.yaml`:
+Create `.promptwheel/formulas/<name>.yaml`:
 
 ```yaml
 description: Find and fix error handling issues
@@ -118,10 +118,10 @@ tags: [quality]
 
 ## Run Folder Anatomy
 
-Each session creates a run folder at `.blockspool/runs/<run_id>/`:
+Each session creates a run folder at `.promptwheel/runs/<run_id>/`:
 
 ```
-.blockspool/runs/run_abc123/
+.promptwheel/runs/run_abc123/
 ├── state.json          # Current RunState (overwritten each step)
 ├── events.ndjson       # Append-only event log (one JSON per line)
 ├── diffs/              # Patch files per step
@@ -135,11 +135,11 @@ Each session creates a run folder at `.blockspool/runs/<run_id>/`:
 
 ### Debugging a Failed Run
 
-1. **Check phase**: `cat .blockspool/runs/<id>/state.json | jq .phase`
-2. **Read events**: `cat .blockspool/runs/<id>/events.ndjson | jq .`
-3. **Find the failure**: `grep FAILED .blockspool/runs/<id>/events.ndjson`
-4. **Check spindle**: `cat .blockspool/runs/<id>/state.json | jq .spindle`
-5. **Read QA logs**: `cat .blockspool/runs/<id>/artifacts/*qa*`
+1. **Check phase**: `cat .promptwheel/runs/<id>/state.json | jq .phase`
+2. **Read events**: `cat .promptwheel/runs/<id>/events.ndjson | jq .`
+3. **Find the failure**: `grep FAILED .promptwheel/runs/<id>/events.ndjson`
+4. **Check spindle**: `cat .promptwheel/runs/<id>/state.json | jq .spindle`
+5. **Read QA logs**: `cat .promptwheel/runs/<id>/artifacts/*qa*`
 
 ### state.json Fields
 
@@ -157,7 +157,7 @@ Each session creates a run folder at `.blockspool/runs/<run_id>/`:
 
 ```
 Claude Code / Any LLM
-  └─ MCP: @blockspool/mcp (stdio)
+  └─ MCP: @promptwheel/mcp (stdio)
        ├─ advance()          — deterministic state machine
        ├─ processEvent()     — event-driven transitions
        ├─ checkSpindle()     — loop detection

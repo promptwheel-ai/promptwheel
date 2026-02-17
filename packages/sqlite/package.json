@@ -1,16 +1,16 @@
 {
-  "name": "@blockspool/sqlite",
+  "name": "@promptwheel/sqlite",
   "version": "0.6.0",
-  "description": "SQLite adapter for BlockSpool - zero-config local mode",
-  "author": "BlockSpool",
-  "homepage": "https://blockspool.com",
+  "description": "SQLite adapter for PromptWheel - zero-config local mode",
+  "author": "PromptWheel",
+  "homepage": "https://promptwheel.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/blockspool/blockspool.git",
+    "url": "git+https://github.com/promptwheel-ai/promptwheel.git",
     "directory": "packages/sqlite"
   },
   "bugs": {
-    "url": "https://github.com/blockspool/blockspool/issues"
+    "url": "https://github.com/promptwheel-ai/promptwheel/issues"
   },
   "type": "module",
   "main": "dist/index.js",
@@ -31,7 +31,7 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "blockspool",
+    "promptwheel",
     "sqlite",
     "database",
     "adapter",
@@ -39,7 +39,7 @@
   ],
   "license": "Apache-2.0",
   "dependencies": {
-    "@blockspool/core": "^0.6.0",
+    "@promptwheel/core": "^0.6.0",
     "better-sqlite3": "^12.6.2"
   },
   "devDependencies": {
@@ -47,6 +47,6 @@
     "typescript": "^5.7.3"
   },
   "peerDependencies": {
-    "@blockspool/core": ">=0.6.0"
+    "@promptwheel/core": ">=0.6.0"
   }
 }

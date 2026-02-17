@@ -43,7 +43,7 @@ export class McpBatchServer {
     this.batches = opts.batchPrompts.map((p, i) => ({ id: i, prompt: p }));
 
     this.server = new Server(
-      { name: 'blockspool-batch-server', version: '1.0.0' },
+      { name: 'promptwheel-batch-server', version: '1.0.0' },
       { capabilities: { tools: {} } },
     );
 

@@ -2,7 +2,7 @@
  * Execution backend types
  */
 
-import type { StreamJsonEvent } from '@blockspool/core/trace/shared';
+import type { StreamJsonEvent } from '@promptwheel/core/trace/shared';
 
 /**
  * Execution result with full details for artifact storage

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
 import * as projects from '../repos/projects.js';
 import * as tickets from '../repos/tickets.js';
 import * as runs from '../repos/runs.js';
@@ -73,7 +73,7 @@ function makeQaConfig(overrides?: Partial<QaConfig>): QaConfig {
       { name: 'build', cmd: 'npm run build' },
       { name: 'test', cmd: 'npm test' },
     ],
-    artifacts: { dir: '.blockspool/artifacts', maxLogBytes: 1_000_000, tailBytes: 4096 },
+    artifacts: { dir: '.promptwheel/artifacts', maxLogBytes: 1_000_000, tailBytes: 4096 },
     retry: { enabled: false, maxAttempts: 1 },
     ...overrides,
   };

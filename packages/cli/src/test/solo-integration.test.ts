@@ -17,8 +17,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { execSync } from 'node:child_process';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import { projects, tickets, runs, runSteps, type StepKind } from '@blockspool/core/repos';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import { projects, tickets, runs, runSteps, type StepKind } from '@promptwheel/core/repos';
 import {
   writeJsonArtifact,
   readJsonArtifact,
@@ -36,11 +36,11 @@ describe('Solo Mode Integration', () => {
 
   beforeEach(() => {
     // Create temporary directory
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'blockspool-test-'));
-    dbUrl = `sqlite://${path.join(tempDir, '.blockspool', 'state.sqlite')}`;
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwheel-test-'));
+    dbUrl = `sqlite://${path.join(tempDir, '.promptwheel', 'state.sqlite')}`;
 
-    // Create .blockspool directory
-    fs.mkdirSync(path.join(tempDir, '.blockspool'), { recursive: true });
+    // Create .promptwheel directory
+    fs.mkdirSync(path.join(tempDir, '.promptwheel'), { recursive: true });
 
     // Initialize git repo
     execSync('git init', { cwd: tempDir, stdio: 'ignore' });
@@ -288,7 +288,7 @@ describe('Solo Mode Integration', () => {
 
   describe('Artifact System', () => {
     it('writes and reads JSON artifacts', () => {
-      const baseDir = path.join(tempDir, '.blockspool');
+      const baseDir = path.join(tempDir, '.promptwheel');
       const runId = 'run_test123';
 
       // Write artifact
@@ -313,7 +313,7 @@ describe('Solo Mode Integration', () => {
     });
 
     it('lists artifacts by type', () => {
-      const baseDir = path.join(tempDir, '.blockspool');
+      const baseDir = path.join(tempDir, '.promptwheel');
 
       // Write multiple artifacts
       writeJsonArtifact({ baseDir, type: 'executions', id: 'run_1', data: { id: 1 } });
@@ -329,7 +329,7 @@ describe('Solo Mode Integration', () => {
     });
 
     it('gets all artifacts for a run', () => {
-      const baseDir = path.join(tempDir, '.blockspool');
+      const baseDir = path.join(tempDir, '.promptwheel');
       const runId = 'run_golden';
 
       // Write artifacts of different types
@@ -366,7 +366,7 @@ describe('Solo Mode Integration', () => {
     });
 
     it('creates run summary artifact with correct structure', () => {
-      const baseDir = path.join(tempDir, '.blockspool');
+      const baseDir = path.join(tempDir, '.promptwheel');
       const runId = 'run_summary_test';
 
       const summary: RunSummaryArtifact = {
@@ -378,7 +378,7 @@ describe('Solo Mode Integration', () => {
         startedAt: '2024-01-01T00:00:00Z',
         completedAt: '2024-01-01T00:01:00Z',
         durationMs: 60000,
-        branchName: 'blockspool/ticket_123',
+        branchName: 'promptwheel/ticket_123',
         steps: [
           { name: 'worktree', status: 'success', durationMs: 1000 },
           { name: 'agent', status: 'success', durationMs: 50000 },
@@ -406,7 +406,7 @@ describe('Solo Mode Integration', () => {
     });
 
     it('creates violations artifact with correct structure', () => {
-      const baseDir = path.join(tempDir, '.blockspool');
+      const baseDir = path.join(tempDir, '.promptwheel');
       const runId = 'run_violations_test';
 
       const violations: ViolationsArtifact = {
@@ -497,7 +497,7 @@ R  src/old.ts -> src/new.ts
   describe('End-to-End Workflow Simulation', () => {
     it('simulates complete ticket execution flow', async () => {
       const adapter = await createSQLiteAdapter({ url: dbUrl });
-      const baseDir = path.join(tempDir, '.blockspool');
+      const baseDir = path.join(tempDir, '.promptwheel');
 
       try {
         // 1. Create project
@@ -557,7 +557,7 @@ R  src/old.ts -> src/new.ts
         const worktreeStep = stepRecords.get('worktree')!;
         await runSteps.markStarted(adapter, worktreeStep.id);
         await runSteps.markSuccess(adapter, worktreeStep.id, {
-          metadata: { branchName: `blockspool/${ticket.id}` },
+          metadata: { branchName: `promptwheel/${ticket.id}` },
         });
 
         // Agent step
@@ -631,7 +631,7 @@ R  src/old.ts -> src/new.ts
 
         // 7. Mark run successful
         await runs.markSuccess(adapter, run.id, {
-          branchName: `blockspool/${ticket.id}`,
+          branchName: `promptwheel/${ticket.id}`,
           durationMs: 10000,
         });
 
@@ -645,7 +645,7 @@ R  src/old.ts -> src/new.ts
           startedAt: new Date(Date.now() - 10000).toISOString(),
           completedAt: new Date().toISOString(),
           durationMs: 10000,
-          branchName: `blockspool/${ticket.id}`,
+          branchName: `promptwheel/${ticket.id}`,
           steps: [
             { name: 'worktree', status: 'success', durationMs: 500 },
             { name: 'agent', status: 'success', durationMs: 5000 },
@@ -719,7 +719,7 @@ R  src/old.ts -> src/new.ts
 
     it('simulates scope violation failure flow', async () => {
       const adapter = await createSQLiteAdapter({ url: dbUrl });
-      const baseDir = path.join(tempDir, '.blockspool');
+      const baseDir = path.join(tempDir, '.promptwheel');
 
       try {
         const project = await projects.ensureForRepo(adapter, {

@@ -7,7 +7,7 @@
  * Pure algorithms (classification, import extraction, formatting) live in ./shared.ts.
  * This file provides the I/O-heavy functions that use the filesystem and git.
  *
- * Single source of truth — imported by both @blockspool/cli and @blockspool/mcp.
+ * Single source of truth — imported by both @promptwheel/cli and @promptwheel/mcp.
  */
 
 import * as fs from 'node:fs';

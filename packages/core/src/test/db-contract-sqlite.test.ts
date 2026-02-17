@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
 import * as projects from '../repos/projects.js';
 import * as tickets from '../repos/tickets.js';
 import * as runs from '../repos/runs.js';
@@ -12,7 +12,7 @@ let db: DatabaseAdapter;
 let tmpDir: string;
 
 beforeAll(async () => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'blockspool-test-'));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'promptwheel-test-'));
   const dbPath = path.join(tmpDir, 'test.db');
   db = await createSQLiteAdapter({ url: dbPath });
 });

@@ -5,8 +5,8 @@
  * Each MCP server instance has at most one active run.
  */
 
-import type { DatabaseAdapter } from '@blockspool/core';
-import type { Project } from '@blockspool/core';
+import type { DatabaseAdapter } from '@promptwheel/core';
+import type { Project } from '@promptwheel/core';
 import { RunManager } from './run-manager.js';
 import type { RunState, SessionConfig } from './types.js';
 

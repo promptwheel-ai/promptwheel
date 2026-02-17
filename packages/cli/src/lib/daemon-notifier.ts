@@ -32,7 +32,7 @@ export interface Notifier {
 function formatSlack(s: SessionNotification): object {
   const elapsed = Math.round((s.endTime - s.startTime) / 60_000);
   const lines = [
-    `*BlockSpool* completed a cycle on \`${s.repoName}\``,
+    `*PromptWheel* completed a cycle on \`${s.repoName}\``,
     `> Trigger: ${s.trigger} | Duration: ${elapsed}m`,
     `> Cycles: ${s.cyclesCompleted} | Tickets: ${s.ticketsCompleted} done, ${s.ticketsFailed} failed`,
   ];
@@ -50,7 +50,7 @@ function formatDiscord(s: SessionNotification): object {
   const elapsed = Math.round((s.endTime - s.startTime) / 60_000);
   return {
     embeds: [{
-      title: `BlockSpool - ${s.repoName}`,
+      title: `PromptWheel - ${s.repoName}`,
       description: [
         `**Trigger:** ${s.trigger}`,
         `**Duration:** ${elapsed}m`,
@@ -66,7 +66,7 @@ function formatDiscord(s: SessionNotification): object {
 function formatTelegram(s: SessionNotification): object {
   const elapsed = Math.round((s.endTime - s.startTime) / 60_000);
   const lines = [
-    `*BlockSpool* \u2014 \`${s.repoName}\``,
+    `*PromptWheel* \u2014 \`${s.repoName}\``,
     `Trigger: ${s.trigger} | Duration: ${elapsed}m`,
     `Cycles: ${s.cyclesCompleted} | Tickets: ${s.ticketsCompleted} done, ${s.ticketsFailed} failed`,
   ];
@@ -81,7 +81,7 @@ function formatTelegram(s: SessionNotification): object {
 
 function formatGeneric(s: SessionNotification): object {
   return {
-    event: 'blockspool.daemon.wake_complete',
+    event: 'promptwheel.daemon.wake_complete',
     repo: s.repoName,
     trigger: s.trigger,
     startTime: s.startTime,
@@ -132,7 +132,7 @@ class WebhookNotifier implements Notifier {
 
 class DesktopNotifier implements Notifier {
   async notify(summary: SessionNotification): Promise<void> {
-    const title = 'BlockSpool';
+    const title = 'PromptWheel';
     const msg = `${summary.ticketsCompleted} tickets completed on ${summary.repoName}`;
 
     const platform = process.platform;

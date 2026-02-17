@@ -6,8 +6,8 @@
  * and Postgres adapters to ensure consistent behavior.
  *
  * Usage:
- *   import { runAdapterContract } from '@blockspool/core/db/contract';
- *   import { createSQLiteAdapter } from '@blockspool/sqlite';
+ *   import { runAdapterContract } from '@promptwheel/core/db/contract';
+ *   import { createSQLiteAdapter } from '@promptwheel/sqlite';
  *
  *   describe('SQLite Adapter', () => {
  *     runAdapterContract(() => createSQLiteAdapter({ url: ':memory:' }));

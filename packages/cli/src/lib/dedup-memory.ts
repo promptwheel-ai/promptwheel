@@ -1,10 +1,10 @@
 /**
  * Cross-run dedup memory with temporal decay.
  *
- * Persists completed/rejected proposal titles to `.blockspool/dedup-memory.json`
+ * Persists completed/rejected proposal titles to `.promptwheel/dedup-memory.json`
  * so the scout prompt knows what NOT to propose.
  *
- * Pure algorithms (decay, entry management) live in @blockspool/core/dedup/shared.
+ * Pure algorithms (decay, entry management) live in @promptwheel/core/dedup/shared.
  * This file wraps them with filesystem I/O and adds CLI-specific extensions
  * (failureReason, relatedTitles, metrics).
  */
@@ -16,7 +16,7 @@ import {
   type DedupEntry as CoreDedupEntry,
   applyDecay,
   DEDUP_DEFAULTS,
-} from '@blockspool/core/dedup/shared';
+} from '@promptwheel/core/dedup/shared';
 
 // ---------------------------------------------------------------------------
 // Types (extends core with CLI-specific fields)
@@ -45,7 +45,7 @@ const DEFAULT_BUDGET = DEDUP_DEFAULTS.DEFAULT_BUDGET;
 // ---------------------------------------------------------------------------
 
 function dedupPath(projectRoot: string): string {
-  return path.join(projectRoot, '.blockspool', DEDUP_FILE);
+  return path.join(projectRoot, '.promptwheel', DEDUP_FILE);
 }
 
 function readEntries(projectRoot: string): DedupEntry[] {

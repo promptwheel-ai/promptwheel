@@ -7,7 +7,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import chalk from 'chalk';
 import type { SoloConfig } from './solo-config.js';
-import { getBlockspoolDir } from './solo-config.js';
+import { getPromptwheelDir } from './solo-config.js';
 import { normalizeQaConfig } from './solo-utils.js';
 import { resetQaStatsForSession } from './qa-stats.js';
 import { captureQaBaseline, baselineToPassFail } from './solo-ticket-qa.js';
@@ -191,7 +191,7 @@ Read the error output above, then fix the source code. Minimal, targeted changes
         output: result?.output ?? '',
       };
     }
-    const baselinePath = path.join(getBlockspoolDir(repoRoot), 'qa-baseline.json');
+    const baselinePath = path.join(getPromptwheelDir(repoRoot), 'qa-baseline.json');
     fs.writeFileSync(baselinePath, JSON.stringify({
       failures: baselineFailures,
       details: baselineDetails,

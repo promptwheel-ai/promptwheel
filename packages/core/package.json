@@ -1,16 +1,16 @@
 {
-  "name": "@blockspool/core",
+  "name": "@promptwheel/core",
   "version": "0.6.0",
-  "description": "Core business logic and database adapter interface for BlockSpool",
-  "author": "BlockSpool",
-  "homepage": "https://blockspool.com",
+  "description": "Core business logic and database adapter interface for PromptWheel",
+  "author": "PromptWheel",
+  "homepage": "https://promptwheel.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/blockspool/blockspool.git",
+    "url": "git+https://github.com/promptwheel-ai/promptwheel.git",
     "directory": "packages/core"
   },
   "bugs": {
-    "url": "https://github.com/blockspool/blockspool/issues"
+    "url": "https://github.com/promptwheel-ai/promptwheel/issues"
   },
   "type": "module",
   "main": "dist/index.js",
@@ -111,7 +111,7 @@
     "prepublishOnly": "npm run build"
   },
   "keywords": [
-    "blockspool",
+    "promptwheel",
     "core",
     "database",
     "adapter"

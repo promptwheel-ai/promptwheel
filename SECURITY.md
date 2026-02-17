@@ -8,7 +8,7 @@ We take security seriously. If you discover a security vulnerability, please rep
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email: **security@blockspool.com**
+Instead, please email: **security@promptwheel.com**
 
 Include:
 - Description of the vulnerability
@@ -25,9 +25,9 @@ Include:
 ### Scope
 
 This policy applies to:
-- `@blockspool/cli`
-- `@blockspool/core`
-- `@blockspool/sqlite`
+- `@promptwheel/cli`
+- `@promptwheel/core`
+- `@promptwheel/sqlite`
 
 ### Out of Scope
 
@@ -37,12 +37,12 @@ This policy applies to:
 
 ## Security Best Practices
 
-When using BlockSpool:
+When using PromptWheel:
 
 1. **API Keys**: Never commit API keys. Use environment variables.
-2. **Allowed Paths**: Configure `allowed_paths` to restrict what BlockSpool can modify.
+2. **Allowed Paths**: Configure `allowed_paths` to restrict what PromptWheel can modify.
 3. **Review Changes**: Always review generated PRs before merging.
-4. **Credentials**: Don't store credentials in `.blockspool/` directory.
+4. **Credentials**: Don't store credentials in `.promptwheel/` directory.
 
 ## Supported Versions
 

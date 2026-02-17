@@ -1,11 +1,11 @@
 /**
  * Cross-run dedup memory with temporal decay.
  *
- * Persists completed/rejected proposal titles to `.blockspool/dedup-memory.json`
+ * Persists completed/rejected proposal titles to `.promptwheel/dedup-memory.json`
  * so the scout prompt knows what NOT to propose.
  *
  * Pure algorithms (decay, entry management, formatting) live in
- * @blockspool/core/dedup/shared. This file wraps them with file I/O.
+ * @promptwheel/core/dedup/shared. This file wraps them with file I/O.
  */
 
 import * as fs from 'node:fs';
@@ -16,11 +16,11 @@ import {
   recordEntry as coreRecordEntry,
   recordEntries as coreRecordEntries,
   DEDUP_DEFAULTS,
-} from '@blockspool/core/dedup/shared';
+} from '@promptwheel/core/dedup/shared';
 
 // Re-export types and pure functions for existing consumers
-export type { DedupEntry } from '@blockspool/core/dedup/shared';
-export { formatDedupForPrompt } from '@blockspool/core/dedup/shared';
+export type { DedupEntry } from '@promptwheel/core/dedup/shared';
+export { formatDedupForPrompt } from '@promptwheel/core/dedup/shared';
 
 const DEDUP_FILE = 'dedup-memory.json';
 
@@ -29,7 +29,7 @@ const DEDUP_FILE = 'dedup-memory.json';
 // ---------------------------------------------------------------------------
 
 function dedupPath(projectRoot: string): string {
-  return path.join(projectRoot, '.blockspool', DEDUP_FILE);
+  return path.join(projectRoot, '.promptwheel', DEDUP_FILE);
 }
 
 function readEntries(projectRoot: string): DedupEntry[] {
@@ -40,7 +40,7 @@ function readEntries(projectRoot: string): DedupEntry[] {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
-    console.warn(`[blockspool] failed to parse dedup-memory.json: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[promptwheel] failed to parse dedup-memory.json: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }

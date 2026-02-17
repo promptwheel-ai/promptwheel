@@ -3,7 +3,7 @@
  */
 
 import chalk from 'chalk';
-import type { Logger } from '@blockspool/core/services';
+import type { Logger } from '@promptwheel/core/services';
 
 export interface LoggerOptions {
   verbose?: boolean;

@@ -14,7 +14,7 @@ export const kimi: ProviderConfig = {
   defaultScoutConcurrency: 3,
   defaultBatchTokenBudget: 40_000,
   async createScoutBackend(opts) {
-    const { KimiScoutBackend } = await import('@blockspool/core/scout');
+    const { KimiScoutBackend } = await import('@promptwheel/core/scout');
     return new KimiScoutBackend({ apiKey: opts.apiKey, model: opts.model });
   },
   async createExecutionBackend(opts) {

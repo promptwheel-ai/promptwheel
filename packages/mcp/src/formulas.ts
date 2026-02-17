@@ -2,7 +2,7 @@
  * Formulas — typed, versioned, testable sweep recipes.
  *
  * Pure definitions (BUILTIN_FORMULAS, YAML parsing) live in
- * @blockspool/core/formulas/shared. This file wraps them with
+ * @promptwheel/core/formulas/shared. This file wraps them with
  * filesystem I/O and adds MCP-specific formula application logic.
  */
 
@@ -14,11 +14,11 @@ import {
   BUILTIN_FORMULAS as CORE_BUILTINS,
   parseSimpleYaml,
   parseStringList,
-} from '@blockspool/core/formulas/shared';
+} from '@promptwheel/core/formulas/shared';
 
 // Re-export core types and constants
-export type { Formula } from '@blockspool/core/formulas/shared';
-export { BUILTIN_FORMULAS, parseSimpleYaml, parseStringList } from '@blockspool/core/formulas/shared';
+export type { Formula } from '@promptwheel/core/formulas/shared';
+export { BUILTIN_FORMULAS, parseSimpleYaml, parseStringList } from '@promptwheel/core/formulas/shared';
 
 // Use core's Formula type locally
 type Formula = CoreFormula;
@@ -29,7 +29,7 @@ type Formula = CoreFormula;
 
 /**
  * Load a formula by name.
- * Search order: user formulas in `.blockspool/formulas/`, then built-ins.
+ * Search order: user formulas in `.promptwheel/formulas/`, then built-ins.
  */
 export function loadFormula(name: string, projectPath?: string): Formula | null {
   const userFormula = loadUserFormula(name, projectPath);
@@ -68,7 +68,7 @@ export function applyFormula(formula: Formula, config: SessionConfig): SessionCo
 
 function getFormulasDir(projectPath?: string): string {
   const base = projectPath ?? process.cwd();
-  return path.join(base, '.blockspool', 'formulas');
+  return path.join(base, '.promptwheel', 'formulas');
 }
 
 function loadUserFormula(name: string, projectPath?: string): Formula | null {
@@ -122,7 +122,7 @@ function parseFormulaFile(filePath: string, name: string): Formula | null {
     };
   } catch (err) {
     if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
-      console.warn(`[blockspool] failed to parse formula file ${filePath}: ${err.message}`);
+      console.warn(`[promptwheel] failed to parse formula file ${filePath}: ${err.message}`);
     }
     return null;
   }

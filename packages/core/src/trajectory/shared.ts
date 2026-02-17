@@ -1,8 +1,8 @@
 /**
  * Pure trajectory algorithms — no filesystem.
  *
- * Shared by both @blockspool/cli and @blockspool/mcp.
- * Callers handle file I/O (reading YAML files from .blockspool/trajectories/).
+ * Shared by both @promptwheel/cli and @promptwheel/mcp.
+ * Callers handle file I/O (reading YAML files from .promptwheel/trajectories/).
  *
  * A trajectory is a DAG of ordered steps that the wheel follows across cycles.
  * Each step constrains the scout's scope, categories, and acceptance criteria.

@@ -1,7 +1,7 @@
 /**
  * Project Taste Profile — learns what the codebase responds to.
  *
- * Persisted in `.blockspool/taste-profile.json`, rebuilt every 10 cycles.
+ * Persisted in `.promptwheel/taste-profile.json`, rebuilt every 10 cycles.
  */
 
 import * as fs from 'node:fs';
@@ -25,7 +25,7 @@ export interface TasteProfile {
 const TASTE_FILE = 'taste-profile.json';
 
 function tastePath(projectRoot: string): string {
-  return path.join(projectRoot, '.blockspool', TASTE_FILE);
+  return path.join(projectRoot, '.promptwheel', TASTE_FILE);
 }
 
 // ---------------------------------------------------------------------------

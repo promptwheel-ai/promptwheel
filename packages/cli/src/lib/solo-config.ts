@@ -5,10 +5,10 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import chalk from 'chalk';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import { getDefaultDatabaseUrl, type DatabaseAdapter } from '@blockspool/core/db';
-import type { ScoutDeps, ScoutProgress } from '@blockspool/core/services';
-import type { TicketProposal, ProposalCategory } from '@blockspool/core/scout';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import { getDefaultDatabaseUrl, type DatabaseAdapter } from '@promptwheel/core/db';
+import type { ScoutDeps, ScoutProgress } from '@promptwheel/core/services';
+import type { TicketProposal, ProposalCategory } from '@promptwheel/core/scout';
 import { createGitService } from './git.js';
 import { createLogger } from './logger.js';
 import type { SpindleConfig } from './spindle/index.js';
@@ -21,7 +21,7 @@ import { LINTER_COMMANDS, TYPE_CHECKER_COMMANDS } from './tool-command-map.js';
  * All values are item counts (not time-based), except maxStaleBranchDays.
  */
 export interface RetentionConfig {
-  /** Keep last N run folders in .blockspool/runs/ (default 50) */
+  /** Keep last N run folders in .promptwheel/runs/ (default 50) */
   maxRuns: number;
   /** Keep last N lines in history.ndjson (default 100) */
   maxHistoryEntries: number;
@@ -35,9 +35,9 @@ export interface RetentionConfig {
   maxCompletedTickets: number;
   /** Cap file_edit_counts keys in spindle state (default 50) */
   maxSpindleFileEditKeys: number;
-  /** Keep last N local blockspool/* branches (default 10) */
+  /** Keep last N local promptwheel/* branches (default 10) */
   maxMergedBranches: number;
-  /** Delete unmerged blockspool/tkt_* branches older than N days (default 7) */
+  /** Delete unmerged promptwheel/tkt_* branches older than N days (default 7) */
   maxStaleBranchDays: number;
   /** Rotate tui.log when it exceeds this size in bytes (default 1MB) */
   maxLogSizeBytes: number;
@@ -110,7 +110,7 @@ export interface AutoConfig {
   categoryTimeouts?: Record<string, number>;
   /** Delivery mode: how completed work is shipped */
   deliveryMode?: 'direct' | 'pr' | 'auto-merge';
-  /** Branch name for direct mode (default: 'blockspool') */
+  /** Branch name for direct mode (default: 'promptwheel') */
   directBranch?: string;
   /** End-of-session action for direct mode: pr | merge | none (default: 'pr') */
   directFinalize?: 'pr' | 'merge' | 'none';
@@ -212,21 +212,21 @@ export interface DetectedQaCommand {
 }
 
 /**
- * Get the .blockspool directory path (repo-local or global)
+ * Get the .promptwheel directory path (repo-local or global)
  */
-export function getBlockspoolDir(repoRoot?: string): string {
+export function getPromptwheelDir(repoRoot?: string): string {
   if (repoRoot) {
-    return path.join(repoRoot, '.blockspool');
+    return path.join(repoRoot, '.promptwheel');
   }
   const home = process.env.HOME || process.env.USERPROFILE || '.';
-  return path.join(home, '.blockspool');
+  return path.join(home, '.promptwheel');
 }
 
 /**
  * Get database path
  */
 export function getDbPath(repoRoot?: string): string {
-  const dir = getBlockspoolDir(repoRoot);
+  const dir = getPromptwheelDir(repoRoot);
   return path.join(dir, 'state.sqlite');
 }
 
@@ -234,7 +234,7 @@ export function getDbPath(repoRoot?: string): string {
  * Check if solo mode is initialized for a repo
  */
 export function isInitialized(repoRoot: string): boolean {
-  const configPath = path.join(getBlockspoolDir(repoRoot), 'config.json');
+  const configPath = path.join(getPromptwheelDir(repoRoot), 'config.json');
   return fs.existsSync(configPath);
 }
 
@@ -380,7 +380,7 @@ export function detectSetupCommand(repoRoot: string): string | null {
  * Initialize solo mode for a repository
  */
 export async function initSolo(repoRoot: string): Promise<{ config: SoloConfig; detectedQa: DetectedQaCommand[] }> {
-  const dir = getBlockspoolDir(repoRoot);
+  const dir = getPromptwheelDir(repoRoot);
   const configPath = path.join(dir, 'config.json');
   const dbPath = getDbPath(repoRoot);
 
@@ -427,8 +427,8 @@ export async function initSolo(repoRoot: string): Promise<{ config: SoloConfig; 
   const gitignorePath = path.join(repoRoot, '.gitignore');
   if (fs.existsSync(gitignorePath)) {
     const content = fs.readFileSync(gitignorePath, 'utf-8');
-    if (!content.includes('.blockspool')) {
-      fs.appendFileSync(gitignorePath, '\n# BlockSpool local state\n.blockspool/\n');
+    if (!content.includes('.promptwheel')) {
+      fs.appendFileSync(gitignorePath, '\n# PromptWheel local state\n.promptwheel/\n');
     }
   }
 
@@ -439,7 +439,7 @@ export async function initSolo(repoRoot: string): Promise<{ config: SoloConfig; 
  * Load solo config
  */
 export function loadConfig(repoRoot: string): SoloConfig | null {
-  const configPath = path.join(getBlockspoolDir(repoRoot), 'config.json');
+  const configPath = path.join(getPromptwheelDir(repoRoot), 'config.json');
   if (!fs.existsSync(configPath)) {
     return null;
   }
@@ -461,7 +461,7 @@ export function loadConfig(repoRoot: string): SoloConfig | null {
  * Save solo config (merges updates into existing config)
  */
 export function saveConfig(repoRoot: string, updates: Partial<SoloConfig>): void {
-  const configPath = path.join(getBlockspoolDir(repoRoot), 'config.json');
+  const configPath = path.join(getPromptwheelDir(repoRoot), 'config.json');
   const existing = loadConfig(repoRoot);
   if (!existing) return;
   const merged = { ...existing, ...updates };

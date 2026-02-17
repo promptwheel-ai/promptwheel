@@ -1,7 +1,7 @@
 /**
  * Per-command QA statistics tracking.
  *
- * Persists to `.blockspool/qa-stats.json` and provides:
+ * Persists to `.promptwheel/qa-stats.json` and provides:
  * - Per-command success/failure/timeout tracking
  * - Baseline result ring buffer for health monitoring
  * - Auto-tuning of QA config (timeout adjustment)
@@ -83,7 +83,7 @@ function withWriteLock<T>(fn: () => T): Promise<T> {
 // ---------------------------------------------------------------------------
 
 function statsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.blockspool', QA_STATS_FILE);
+  return path.join(projectRoot, '.promptwheel', QA_STATS_FILE);
 }
 
 export function loadQaStats(projectRoot: string): QaStatsStore {
@@ -353,7 +353,7 @@ export function calibrateConfidence(
 // ---------------------------------------------------------------------------
 
 export function buildBaselineHealthBlock(projectRoot: string, currentScope?: string): string {
-  const baselinePath = path.join(projectRoot, '.blockspool', 'qa-baseline.json');
+  const baselinePath = path.join(projectRoot, '.promptwheel', 'qa-baseline.json');
   if (!fs.existsSync(baselinePath)) return '';
   let data: any;
   try {

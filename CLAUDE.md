@@ -1,17 +1,17 @@
-# BlockSpool - Claude Guide
+# PromptWheel - Claude Guide
 
-## What is BlockSpool?
+## What is PromptWheel?
 
-BlockSpool is a coding tool that scouts your codebase for improvements, executes them in parallel, and creates PRs — all running locally with zero external infrastructure.
+PromptWheel is a coding tool that scouts your codebase for improvements, executes them in parallel, and creates PRs — all running locally with zero external infrastructure.
 
 ## Quick Start
 
 ```bash
-blockspool init                               # Initialize SQLite database
-blockspool                                     # Scout + fix + PR (single cycle)
-blockspool --hours 8 --batch-size 30           # Long run with milestone PRs
-blockspool --wheel                             # Wheel mode — run until stopped (Ctrl+C)
-blockspool nudge "focus on auth"               # Steer a running session
+promptwheel init                               # Initialize SQLite database
+promptwheel                                     # Scout + fix + PR (single cycle)
+promptwheel --hours 8 --batch-size 30           # Long run with milestone PRs
+promptwheel --wheel                             # Wheel mode — run until stopped (Ctrl+C)
+promptwheel nudge "focus on auth"               # Steer a running session
 ```
 
 ### Features
@@ -44,7 +44,7 @@ blockspool nudge "focus on auth"               # Steer a running session
 ## How It Works
 
 ```
-blockspool --hours 4
+promptwheel --hours 4
 ```
 
 1. **Scout** — scans your codebase for improvement opportunities
@@ -77,11 +77,11 @@ packages/
 
 ## TOS Compliance
 
-BlockSpool uses the **official Claude Code CLI** on the user's own machine with their own credentials. This is the same as running `claude` in a shell script or CI pipeline — explicitly permitted.
+PromptWheel uses the **official Claude Code CLI** on the user's own machine with their own credentials. This is the same as running `claude` in a shell script or CI pipeline — explicitly permitted.
 
 - Each user uses their own API key/subscription
 - No credentials are shared, proxied, or stored
-- BlockSpool is a workflow tool, not an AI service
+- PromptWheel is a workflow tool, not an AI service
 
 ## Key Commands
 
@@ -104,7 +104,7 @@ npm run lint
 | **Scout** | The discovery phase. Scans code to find improvement opportunities. |
 | **Ticket** | A unit of work. Created from a proposal, executed in isolation. |
 | **Proposal** | A candidate improvement found by scouting. Becomes a ticket when approved. |
-| **Formula** | A recipe for what to scout for. Built-ins: `security-audit`, `test-coverage`, `type-safety`, `cleanup`, `docs`, `deep`. User-defined formulas live in `.blockspool/formulas/`. |
+| **Formula** | A recipe for what to scout for. Built-ins: `security-audit`, `test-coverage`, `type-safety`, `cleanup`, `docs`, `deep`. User-defined formulas live in `.promptwheel/formulas/`. |
 | **Deep** | Built-in formula (`--deep`) for principal-engineer-style architectural review. Auto-staggered every 5th cycle in wheel mode. |
 | **Impact Score** | 1-10 rating of how much a proposal matters. Proposals ranked by `impact x confidence`. |
 | **Spindle** | Loop detection system. Catches QA ping-pong, command failure loops, and file churn. |

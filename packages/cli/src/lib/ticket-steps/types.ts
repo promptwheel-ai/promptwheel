@@ -5,9 +5,9 @@
  * Each step returns a StepResult indicating whether to continue.
  */
 
-import type { DatabaseAdapter } from '@blockspool/core/db';
-import type { runSteps } from '@blockspool/core/repos';
-import type { TraceAnalysis } from '@blockspool/core/trace/shared';
+import type { DatabaseAdapter } from '@promptwheel/core/db';
+import type { runSteps } from '@promptwheel/core/repos';
+import type { TraceAnalysis } from '@promptwheel/core/trace/shared';
 import type { SoloConfig } from '../solo-config.js';
 import type { ExecutionBackend } from '../execution-backends/index.js';
 import type { SpindleConfig, SpindleState } from '../spindle/index.js';

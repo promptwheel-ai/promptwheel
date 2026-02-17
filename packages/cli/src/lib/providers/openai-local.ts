@@ -17,7 +17,7 @@ export const openaiLocal: ProviderConfig = {
   defaultScoutConcurrency: 2,
   defaultBatchTokenBudget: 40_000,
   async createScoutBackend(opts) {
-    const { OpenAILocalScoutBackend } = await import('@blockspool/core/scout');
+    const { OpenAILocalScoutBackend } = await import('@promptwheel/core/scout');
     const baseUrl = opts.baseUrl || DEFAULT_BASE_URL;
     const model = opts.model || 'llama3';
     const apiKey = process.env.LOCAL_API_KEY || process.env.OPENAI_API_KEY;

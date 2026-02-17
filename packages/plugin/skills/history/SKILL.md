@@ -1,6 +1,6 @@
 ---
 name: history
-description: View recent BlockSpool session runs and outcomes
+description: View recent PromptWheel session runs and outcomes
 argument-hint: "[limit=N]"
 ---
 
@@ -13,7 +13,7 @@ Parse from `$ARGUMENTS` (optional):
 
 ## Implementation
 
-1. Call `blockspool_history` MCP tool with `limit` if provided
+1. Call `promptwheel_history` MCP tool with `limit` if provided
 2. Display results in a formatted summary
 
 ## Output Format
@@ -30,4 +30,4 @@ Total runs: N | Success: N | Failed: N | Success rate: N%
 ...
 ```
 
-If no runs exist, inform the user: "No session history yet. Run `/blockspool:run` to start."
+If no runs exist, inform the user: "No session history yet. Run `/promptwheel:run` to start."

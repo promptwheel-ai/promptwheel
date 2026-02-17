@@ -16,7 +16,7 @@ const COOLDOWN_FILE = 'file-cooldown.json';
 const TTL_MS = 48 * 60 * 60 * 1000; // 48 hours
 
 function cooldownPath(repoRoot: string): string {
-  return path.join(repoRoot, '.blockspool', COOLDOWN_FILE);
+  return path.join(repoRoot, '.promptwheel', COOLDOWN_FILE);
 }
 
 function readEntries(repoRoot: string): CooldownEntry[] {

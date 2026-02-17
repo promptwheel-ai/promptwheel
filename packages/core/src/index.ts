@@ -1,7 +1,7 @@
 /**
- * @blockspool/core
+ * @promptwheel/core
  *
- * Core business logic and shared types for BlockSpool.
+ * Core business logic and shared types for PromptWheel.
  * This package is open source (Apache-2.0) and provides:
  *
  * - Database adapter interface (works with Postgres or SQLite)

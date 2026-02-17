@@ -20,7 +20,7 @@ import {
 let tmpDir: string;
 
 function sectorsFile(): string {
-  return path.join(tmpDir, '.blockspool', 'sectors.json');
+  return path.join(tmpDir, '.promptwheel', 'sectors.json');
 }
 
 function makeModules(...names: string[]): CodebaseModuleLike[] {
@@ -68,7 +68,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('saveSectors', () => {
-  it('creates .blockspool directory and writes sectors.json', () => {
+  it('creates .promptwheel directory and writes sectors.json', () => {
     const state = makeSectorState(['src/lib']);
     saveSectors(tmpDir, state);
 

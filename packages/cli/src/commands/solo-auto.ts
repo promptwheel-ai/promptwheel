@@ -23,12 +23,12 @@ Auto-detects backend from environment:
   codex login        → Codex CLI
 
 Examples:
-  blockspool                    # Scout all, approve roadmap, execute
-  blockspool --wheel            # Wheel mode (run until Ctrl+C)
-  blockspool --wheel --hours 4  # Timed wheel
-  blockspool --pr               # Create PRs instead of direct commits
-  blockspool --formula deep     # Architectural review
-  blockspool ci                 # Fix CI failures
+  promptwheel                    # Scout all, approve roadmap, execute
+  promptwheel --wheel            # Wheel mode (run until Ctrl+C)
+  promptwheel --wheel --hours 4  # Timed wheel
+  promptwheel --pr               # Create PRs instead of direct commits
+  promptwheel --formula deep     # Architectural review
+  promptwheel ci                 # Fix CI failures
 `)
     // Primary options (visible in help)
     .option('--wheel', 'Wheel mode — scout, fix, repeat (run until Ctrl+C or --hours expires)')

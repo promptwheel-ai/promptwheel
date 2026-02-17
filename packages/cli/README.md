@@ -1,4 +1,4 @@
-# BlockSpool CLI
+# PromptWheel CLI
 
 Zero-config continuous improvement tool. Works locally with any git repository.
 
@@ -6,33 +6,33 @@ Zero-config continuous improvement tool. Works locally with any git repository.
 
 ```bash
 # Install globally
-npm install -g @blockspool/cli
+npm install -g @promptwheel/cli
 
 # Navigate to any git repo
 cd your-project
 
 # Check prerequisites
-blockspool solo doctor
+promptwheel solo doctor
 
 # Initialize (auto-detects QA commands from package.json)
-blockspool solo init
+promptwheel solo init
 
 # Scan for improvement opportunities
-blockspool solo scout .
+promptwheel solo scout .
 
 # Approve proposals (e.g., 1-3)
-blockspool solo approve 1-3
+promptwheel solo approve 1-3
 
 # Execute a ticket with Claude
-blockspool solo run tkt_abc123
+promptwheel solo run tkt_abc123
 
 # Or execute and create a PR
-blockspool solo run tkt_abc123 --pr
+promptwheel solo run tkt_abc123 --pr
 ```
 
 ## Prerequisites
 
-Run `blockspool solo doctor` to check all prerequisites:
+Run `promptwheel solo doctor` to check all prerequisites:
 
 | Requirement | Purpose | Install |
 |-------------|---------|---------|
@@ -44,7 +44,7 @@ Run `blockspool solo doctor` to check all prerequisites:
 ## Commands
 
 ### `solo init`
-Initialize BlockSpool in your repository. Creates `.blockspool/` directory with:
+Initialize PromptWheel in your repository. Creates `.promptwheel/` directory with:
 - `config.json` - Configuration (auto-detects QA commands)
 - `state.sqlite` - Local database
 
@@ -57,9 +57,9 @@ Scan codebase for improvement opportunities:
 
 ### `solo approve <selection>`
 Convert proposals to tickets. Examples:
-- `blockspool solo approve 1` - Approve proposal #1
-- `blockspool solo approve 1-3` - Approve proposals 1, 2, and 3
-- `blockspool solo approve all` - Approve all proposals
+- `promptwheel solo approve 1` - Approve proposal #1
+- `promptwheel solo approve 1-3` - Approve proposals 1, 2, and 3
+- `promptwheel solo approve all` - Approve all proposals
 
 ### `solo run <ticketId>`
 Execute a ticket using Claude Code CLI:
@@ -85,20 +85,20 @@ Check prerequisites and environment health:
 
 ### `solo nudge [text...]`
 Steer a running auto session with live hints:
-- `blockspool solo nudge "focus on auth"` — Add a hint
-- `blockspool solo nudge --list` — Show pending hints
-- `blockspool solo nudge --clear` — Clear all hints
+- `promptwheel solo nudge "focus on auth"` — Add a hint
+- `promptwheel solo nudge --list` — Show pending hints
+- `promptwheel solo nudge --clear` — Clear all hints
 
 Hints are consumed in the next scout cycle. In continuous mode, you can also type hints directly into stdin.
 
 ### `solo qa`
 Run QA commands manually:
-- Uses commands from `.blockspool/config.json`
+- Uses commands from `.promptwheel/config.json`
 - Records results in database
 
 ## Configuration
 
-Configuration lives in `.blockspool/config.json`:
+Configuration lives in `.promptwheel/config.json`:
 
 ```json
 {
@@ -131,7 +131,7 @@ Auto-detected from `package.json` during `solo init`:
 
 ### Project Guidelines Context
 
-BlockSpool automatically loads your project guidelines and injects them into every scout and execution prompt so agents respect your conventions.
+PromptWheel automatically loads your project guidelines and injects them into every scout and execution prompt so agents respect your conventions.
 
 **File selection by backend:**
 
@@ -147,7 +147,7 @@ BlockSpool automatically loads your project guidelines and injects them into eve
 - **Refresh:** During long runs, re-reads every N cycles (default 10, configurable)
 - **Format:** Wrapped in `<project-guidelines>` XML tags in the prompt
 
-Configure in `.blockspool/config.json`:
+Configure in `.promptwheel/config.json`:
 
 ```json
 {
@@ -174,15 +174,15 @@ Prevents runaway agent execution:
 
 ## Push Safety
 
-BlockSpool records your `origin` remote URL when you run `solo init`.
+PromptWheel records your `origin` remote URL when you run `solo init`.
 Every push and PR creation validates the current origin still matches.
 SSH and HTTPS URLs for the same repo are treated as equivalent.
 
 If your origin changes (e.g., you switch from HTTPS to SSH), re-initialize:
 
-    blockspool solo init --force
+    promptwheel solo init --force
 
-Or edit `.blockspool/config.json` directly:
+Or edit `.promptwheel/config.json` directly:
 
     { "allowedRemote": "git@github.com:you/your-repo.git" }
 
@@ -197,7 +197,7 @@ Or edit `.blockspool/config.json` directly:
 
 ## Artifacts
 
-Run artifacts are stored in `.blockspool/artifacts/`:
+Run artifacts are stored in `.promptwheel/artifacts/`:
 - `runs/` - Run summaries
 - `executions/` - Agent output logs
 - `diffs/` - Git diff snapshots
@@ -206,8 +206,8 @@ Run artifacts are stored in `.blockspool/artifacts/`:
 
 View artifacts with:
 ```bash
-blockspool solo artifacts
-blockspool solo artifacts --type runs
+promptwheel solo artifacts
+promptwheel solo artifacts --type runs
 ```
 
 ## License

@@ -136,12 +136,12 @@ export async function createMilestoneBranch(
   baseBranch: string
 ): Promise<{ milestoneBranch: string; milestoneWorktreePath: string }> {
   const ts = Date.now().toString(36);
-  const milestoneBranch = `blockspool/milestone-${ts}`;
-  const milestoneWorktreePath = path.join(repoRoot, '.blockspool', 'worktrees', '_milestone');
+  const milestoneBranch = `promptwheel/milestone-${ts}`;
+  const milestoneWorktreePath = path.join(repoRoot, '.promptwheel', 'worktrees', '_milestone');
 
   await withGitMutex(async () => {
     // Ensure worktrees dir exists
-    const worktreesDir = path.join(repoRoot, '.blockspool', 'worktrees');
+    const worktreesDir = path.join(repoRoot, '.promptwheel', 'worktrees');
     if (!fs.existsSync(worktreesDir)) {
       fs.mkdirSync(worktreesDir, { recursive: true });
     }
@@ -252,7 +252,7 @@ export async function pushAndPrMilestone(
   // Build PR body
   const bulletList = summaries.map(s => `- ${s}`).join('\n');
   const title = `Milestone #${milestoneNumber}: ${ticketCount} improvements`;
-  const body = `## Milestone #${milestoneNumber}\n\n${ticketCount} tickets merged:\n\n${bulletList}\n\n---\n_Created by BlockSpool (milestone mode)_`;
+  const body = `## Milestone #${milestoneNumber}\n\n${ticketCount} tickets merged:\n\n${bulletList}\n\n---\n_Created by PromptWheel (milestone mode)_`;
 
   try {
     const prOutput = (await gitExecFile(
@@ -281,7 +281,7 @@ export async function pushAndPrMilestone(
  * Clean up the milestone worktree (but not the branch, which may have a PR).
  */
 export async function cleanupMilestone(repoRoot: string): Promise<void> {
-  const milestoneWorktreePath = path.join(repoRoot, '.blockspool', 'worktrees', '_milestone');
+  const milestoneWorktreePath = path.join(repoRoot, '.promptwheel', 'worktrees', '_milestone');
   await cleanupWorktree(repoRoot, milestoneWorktreePath);
 }
 
@@ -354,7 +354,7 @@ export async function ensureDirectBranch(repoRoot: string, branchName: string, b
           throw new Error(
             `Cannot create branch "${branchName}" — a conflicting ref exists (e.g. "${branchName}/*" branches).\n` +
             `This happens when milestone or ticket branches like "${branchName}/milestone-*" exist.\n` +
-            `Fix: delete the conflicting branches with \`git branch -D <branch>\` or set a different \`directBranch\` in .blockspool/config.json.`
+            `Fix: delete the conflicting branches with \`git branch -D <branch>\` or set a different \`directBranch\` in .promptwheel/config.json.`
           );
         }
         throw err;

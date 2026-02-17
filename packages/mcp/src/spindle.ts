@@ -19,7 +19,7 @@ import {
   detectCommandFailure,
   extractFilesFromDiff,
   getFileEditWarnings as _getFileEditWarnings,
-} from '@blockspool/core/spindle/shared';
+} from '@promptwheel/core/spindle/shared';
 
 // ---------------------------------------------------------------------------
 // Config

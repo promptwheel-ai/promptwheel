@@ -6,9 +6,9 @@
  */
 
 import * as crypto from 'node:crypto';
-import type { DatabaseAdapter } from '@blockspool/core/db';
-import { projects, tickets, runs, runSteps } from '@blockspool/core/repos';
-import type { TicketStatus, RunStatus } from '@blockspool/core/repos';
+import type { DatabaseAdapter } from '@promptwheel/core/db';
+import { projects, tickets, runs, runSteps } from '@promptwheel/core/repos';
+import type { TicketStatus, RunStatus } from '@promptwheel/core/repos';
 
 export type TuiSnapshot = {
   generatedAtMs: number;

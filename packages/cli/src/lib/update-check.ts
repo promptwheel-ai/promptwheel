@@ -10,9 +10,9 @@ import * as os from 'node:os';
 import { spawn } from 'node:child_process';
 import chalk from 'chalk';
 
-const PACKAGE_NAME = '@blockspool/cli';
+const PACKAGE_NAME = '@promptwheel/cli';
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
-const CACHE_FILE = path.join(os.homedir(), '.blockspool', 'update-check.json');
+const CACHE_FILE = path.join(os.homedir(), '.promptwheel', 'update-check.json');
 
 interface UpdateCache {
   lastCheck: number;
@@ -151,8 +151,8 @@ export function printUpdateNotification(currentVersion: string, latestVersion: s
   console.log();
   console.log(chalk.yellow('┌─────────────────────────────────────────────────────┐'));
   console.log(chalk.yellow('│') + chalk.bold('  Update available! ') + chalk.gray(`${currentVersion} → `) + chalk.green(latestVersion) + chalk.yellow('                │'));
-  console.log(chalk.yellow('│') + chalk.gray('  Run ') + chalk.cyan('npm install -g @blockspool/cli') + chalk.gray(' to update') + chalk.yellow('    │'));
-  console.log(chalk.yellow('│') + chalk.gray('  Or:  ') + chalk.cyan('blockspool update') + chalk.yellow('                            │'));
+  console.log(chalk.yellow('│') + chalk.gray('  Run ') + chalk.cyan('npm install -g @promptwheel/cli') + chalk.gray(' to update') + chalk.yellow('    │'));
+  console.log(chalk.yellow('│') + chalk.gray('  Or:  ') + chalk.cyan('promptwheel update') + chalk.yellow('                            │'));
   console.log(chalk.yellow('└─────────────────────────────────────────────────────┘'));
   console.log();
 }
@@ -161,7 +161,7 @@ export function printUpdateNotification(currentVersion: string, latestVersion: s
  * Run the self-update command.
  */
 export async function runSelfUpdate(): Promise<boolean> {
-  console.log(chalk.cyan('Updating @blockspool/cli...'));
+  console.log(chalk.cyan('Updating @promptwheel/cli...'));
   console.log();
 
   return new Promise((resolve) => {

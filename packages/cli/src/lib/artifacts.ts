@@ -1,7 +1,7 @@
 /**
  * Artifact persistence helpers
  *
- * Writes structured data as JSON files in .blockspool/artifacts/
+ * Writes structured data as JSON files in .promptwheel/artifacts/
  * Used for proposals, run outputs, and other debugging data.
  *
  * Artifact Types:
@@ -82,7 +82,7 @@ export interface ViolationsArtifact {
  * Options for writing an artifact
  */
 interface WriteArtifactOptions {
-  /** Base directory (usually .blockspool) */
+  /** Base directory (usually .promptwheel) */
   baseDir: string;
   /** Artifact type (creates subfolder) */
   type: string;

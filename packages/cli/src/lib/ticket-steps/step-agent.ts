@@ -10,7 +10,7 @@ import { loadTriggerRules } from '../trigger-config.js';
 import {
   analyzeTrace,
   computeLiveness,
-} from '@blockspool/core/trace/shared';
+} from '@promptwheel/core/trace/shared';
 import type { RunTicketResult } from '../solo-ticket-types.js';
 import type { TicketContext, StepResult } from './types.js';
 
@@ -70,7 +70,7 @@ export async function run(ctx: TicketContext): Promise<StepResult> {
       errorParts.push('Consider breaking down the ticket into smaller tasks.');
     }
 
-    errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
+    errorParts.push(`To retry: promptwheel solo run ${ticket.id}`);
     errorParts.push(`Execution logs: ${agentArtifactPath}`);
 
     const result: RunTicketResult = {

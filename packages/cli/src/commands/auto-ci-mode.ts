@@ -4,7 +4,7 @@
 
 import * as path from 'node:path';
 import chalk from 'chalk';
-import { projects, tickets } from '@blockspool/core/repos';
+import { projects, tickets } from '@promptwheel/core/repos';
 import {
   isInitialized,
   loadConfig,
@@ -19,7 +19,7 @@ export async function handleCiMode(options: {
   verbose?: boolean;
   branch?: string;
 }): Promise<void> {
-  console.log(chalk.blue('🧵 BlockSpool Auto - CI Fix'));
+  console.log(chalk.blue('🧵 PromptWheel Auto - CI Fix'));
   console.log();
 
   const git = createGitService();
@@ -31,8 +31,8 @@ export async function handleCiMode(options: {
   }
 
   if (!isInitialized(repoRoot)) {
-    console.error(chalk.red('✗ BlockSpool not initialized'));
-    console.error(chalk.gray('  Run: blockspool solo init'));
+    console.error(chalk.red('✗ PromptWheel not initialized'));
+    console.error(chalk.gray('  Run: promptwheel solo init'));
     process.exit(1);
   }
 
@@ -186,7 +186,7 @@ export async function handleCiMode(options: {
     console.log('Next steps:');
     if (!result.prUrl) {
       console.log('  • Review the changes on the branch');
-      console.log('  • Create a PR: blockspool solo run ' + ciTicketId + ' --pr');
+      console.log('  • Create a PR: promptwheel solo run ' + ciTicketId + ' --pr');
     } else {
       console.log('  • Review and merge the PR');
     }
@@ -202,7 +202,7 @@ export async function handleCiMode(options: {
     console.log();
     console.log("Here's what I tried:");
     console.log(chalk.gray(`  Ticket: ${ciTicketId}`));
-    console.log(chalk.gray(`  View: blockspool solo artifacts --run ${runId}`));
+    console.log(chalk.gray(`  View: promptwheel solo artifacts --run ${runId}`));
   }
 
   process.exit(result.success ? 0 : 1);

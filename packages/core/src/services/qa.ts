@@ -96,7 +96,7 @@ export async function runQa(
   const { projectId, repoRoot, config, signal } = opts;
 
   if (!config.commands?.length) {
-    throw new Error('QA config has no commands. Add qa.commands to .blockspool/config.json');
+    throw new Error('QA config has no commands. Add qa.commands to .promptwheel/config.json');
   }
 
   // Validate unique step names

@@ -13,7 +13,7 @@ export const claude: ProviderConfig = {
   defaultScoutConcurrency: 3,
   defaultBatchTokenBudget: 40_000,
   async createScoutBackend() {
-    const { ClaudeScoutBackend } = await import('@blockspool/core/scout');
+    const { ClaudeScoutBackend } = await import('@promptwheel/core/scout');
     return new ClaudeScoutBackend();
   },
   async createExecutionBackend() {

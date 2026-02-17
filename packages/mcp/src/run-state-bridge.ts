@@ -1,7 +1,7 @@
 /**
  * Thin bridge for recording quality signals from the MCP/plugin path.
  *
- * Reads and writes `.blockspool/run-state.json` directly using the same
+ * Reads and writes `.promptwheel/run-state.json` directly using the same
  * format as CLI's `packages/cli/src/lib/run-state.ts`. Uses tmp+rename
  * atomic write pattern. No mutex needed — MCP and CLI don't run
  * simultaneously on the same project.
@@ -40,7 +40,7 @@ interface RunState {
 const RUN_STATE_FILE = 'run-state.json';
 
 function statePath(projectRoot: string): string {
-  return path.join(projectRoot, '.blockspool', RUN_STATE_FILE);
+  return path.join(projectRoot, '.promptwheel', RUN_STATE_FILE);
 }
 
 function readRunState(projectRoot: string): RunState {
@@ -70,7 +70,7 @@ function readRunState(projectRoot: string): RunState {
       qualitySignals: parsed.qualitySignals ?? undefined,
     };
   } catch (err) {
-    console.warn(`[blockspool] failed to parse run-state.json: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[promptwheel] failed to parse run-state.json: ${err instanceof Error ? err.message : String(err)}`);
     return {
       totalCycles: 0,
       lastDocsAuditCycle: 0,

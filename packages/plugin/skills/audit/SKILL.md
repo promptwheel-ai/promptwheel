@@ -4,7 +4,7 @@ description: Audit ticket quality and throughput across the current project
 argument-hint: "[status=ready|blocked|done] [days=N]"
 ---
 
-Analyze ticket health and throughput metrics for the current BlockSpool project.
+Analyze ticket health and throughput metrics for the current PromptWheel project.
 
 ## Arguments
 
@@ -14,8 +14,8 @@ Parse from `$ARGUMENTS` (all optional):
 
 ## Implementation
 
-1. Call `blockspool_audit_tickets` MCP tool (pass `status_filter` if provided)
-2. Call `blockspool_ticket_stats` MCP tool (pass `days` if provided)
+1. Call `promptwheel_audit_tickets` MCP tool (pass `status_filter` if provided)
+2. Call `promptwheel_ticket_stats` MCP tool (pass `days` if provided)
 3. Combine results into a unified report
 
 ## Output Format

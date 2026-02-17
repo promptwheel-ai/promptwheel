@@ -6,9 +6,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import { repos } from '@blockspool/core';
-import type { DatabaseAdapter, Project } from '@blockspool/core';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import { repos } from '@promptwheel/core';
+import type { DatabaseAdapter, Project } from '@promptwheel/core';
 import { RunManager } from '../run-manager.js';
 import { buildProposalReviewPrompt } from '../proposals.js';
 import type { ValidatedProposal, RawProposal } from '../proposals.js';
@@ -220,10 +220,10 @@ describe('PROPOSALS_REVIEWED creates tickets from reviewed proposals', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildProposalReviewPrompt MCP instructions', () => {
-  it('includes blockspool_ingest_event call instruction', () => {
+  it('includes promptwheel_ingest_event call instruction', () => {
     const prompt = buildProposalReviewPrompt([makeValidated()]);
 
-    expect(prompt).toContain('blockspool_ingest_event');
+    expect(prompt).toContain('promptwheel_ingest_event');
     expect(prompt).toContain('PROPOSALS_REVIEWED');
     expect(prompt).toContain('reviewed_proposals');
   });

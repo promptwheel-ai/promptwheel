@@ -13,7 +13,7 @@ import {
   collectApprovePatterns,
   collectConstraintNotes,
   type ToolPhase,
-} from '@blockspool/core/tools/shared';
+} from '@promptwheel/core/tools/shared';
 import { ToolRegistry, getRegistry } from '../tool-registry.js';
 
 // ---------------------------------------------------------------------------
@@ -203,7 +203,7 @@ describe('ToolRegistry with custom tools', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bs-tool-registry-'));
-    const toolsDir = path.join(tmpDir, '.blockspool', 'tools');
+    const toolsDir = path.join(tmpDir, '.promptwheel', 'tools');
     fs.mkdirSync(toolsDir, { recursive: true });
   });
 
@@ -211,7 +211,7 @@ describe('ToolRegistry with custom tools', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('loads valid custom tool from .blockspool/tools/', () => {
+  it('loads valid custom tool from .promptwheel/tools/', () => {
     const customTool = {
       name: 'Bash:lint',
       description: 'Run project linter',
@@ -220,7 +220,7 @@ describe('ToolRegistry with custom tools', () => {
       trust_levels: ['safe', 'default', 'full'],
     };
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'tools', 'lint.json'),
+      path.join(tmpDir, '.promptwheel', 'tools', 'lint.json'),
       JSON.stringify(customTool),
     );
 
@@ -235,11 +235,11 @@ describe('ToolRegistry with custom tools', () => {
 
   it('skips invalid custom tool files', () => {
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'tools', 'bad.json'),
+      path.join(tmpDir, '.promptwheel', 'tools', 'bad.json'),
       'not valid json',
     );
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'tools', 'empty.json'),
+      path.join(tmpDir, '.promptwheel', 'tools', 'empty.json'),
       JSON.stringify({}),
     );
 
@@ -251,7 +251,7 @@ describe('ToolRegistry with custom tools', () => {
 
   it('skips non-json files in tools directory', () => {
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'tools', 'readme.txt'),
+      path.join(tmpDir, '.promptwheel', 'tools', 'readme.txt'),
       'not a tool',
     );
 
@@ -267,7 +267,7 @@ describe('ToolRegistry with custom tools', () => {
       phase_access: ['EXECUTE'],
     };
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'tools', 'lint.json'),
+      path.join(tmpDir, '.promptwheel', 'tools', 'lint.json'),
       JSON.stringify(customTool),
     );
 

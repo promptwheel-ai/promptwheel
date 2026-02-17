@@ -2,7 +2,7 @@
  * Run History - Audit trail for auto runs
  *
  * Appends a structured summary after each auto run to
- * .blockspool/history.ndjson for post-run analysis.
+ * .promptwheel/history.ndjson for post-run analysis.
  */
 
 import * as fs from 'node:fs';
@@ -52,7 +52,7 @@ export function appendRunHistory(
   entry: RunHistoryEntry,
   repoPath?: string
 ): string {
-  const dir = path.join(repoPath || process.cwd(), '.blockspool');
+  const dir = path.join(repoPath || process.cwd(), '.promptwheel');
   const filePath = path.join(dir, 'history.ndjson');
 
   // Ensure directory exists
@@ -73,7 +73,7 @@ export function readRunHistory(
   repoPath?: string,
   limit?: number
 ): RunHistoryEntry[] {
-  const filePath = path.join(repoPath || process.cwd(), '.blockspool', 'history.ndjson');
+  const filePath = path.join(repoPath || process.cwd(), '.promptwheel', 'history.ndjson');
 
   if (!fs.existsSync(filePath)) return [];
 
@@ -151,7 +151,7 @@ export function getBillingReminder(repoPath?: string): string | null {
     `│  Tickets completed this project: ${String(totalCompleted).padEnd(27)}│`,
     '│  API usage is billed per-token by your provider.            │',
     '│  Alternatives to reduce cost:                               │',
-    '│    - BlockSpool plugin (/blockspool:run) — uses your        │',
+    '│    - PromptWheel plugin (/promptwheel:run) — uses your        │',
     '│      Claude Pro/Max subscription, no API key needed         │',
     '│    - --provider codex — uses your Codex subscription        │',
     '└──────────────────────────────────────────────────────────────┘',

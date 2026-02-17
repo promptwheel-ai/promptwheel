@@ -4,14 +4,14 @@ import path from 'node:path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@blockspool/core/services': path.resolve(__dirname, 'packages/core/src/services/index.ts'),
-      '@blockspool/core/repos': path.resolve(__dirname, 'packages/core/src/repos/index.ts'),
-      '@blockspool/core/scout': path.resolve(__dirname, 'packages/core/src/scout/index.ts'),
-      '@blockspool/core/db': path.resolve(__dirname, 'packages/core/src/db/index.ts'),
-      '@blockspool/core/utils': path.resolve(__dirname, 'packages/core/src/utils/index.ts'),
-      '@blockspool/core/exec': path.resolve(__dirname, 'packages/core/src/exec/index.ts'),
-      '@blockspool/core': path.resolve(__dirname, 'packages/core/src/index.ts'),
-      '@blockspool/sqlite': path.resolve(__dirname, 'packages/sqlite/src/index.ts'),
+      '@promptwheel/core/services': path.resolve(__dirname, 'packages/core/src/services/index.ts'),
+      '@promptwheel/core/repos': path.resolve(__dirname, 'packages/core/src/repos/index.ts'),
+      '@promptwheel/core/scout': path.resolve(__dirname, 'packages/core/src/scout/index.ts'),
+      '@promptwheel/core/db': path.resolve(__dirname, 'packages/core/src/db/index.ts'),
+      '@promptwheel/core/utils': path.resolve(__dirname, 'packages/core/src/utils/index.ts'),
+      '@promptwheel/core/exec': path.resolve(__dirname, 'packages/core/src/exec/index.ts'),
+      '@promptwheel/core': path.resolve(__dirname, 'packages/core/src/index.ts'),
+      '@promptwheel/sqlite': path.resolve(__dirname, 'packages/sqlite/src/index.ts'),
     },
   },
   test: {

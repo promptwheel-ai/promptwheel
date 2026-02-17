@@ -19,11 +19,11 @@ import {
 let tmpDir: string;
 
 function metricsFile(): string {
-  return path.join(tmpDir, '.blockspool', 'metrics.ndjson');
+  return path.join(tmpDir, '.promptwheel', 'metrics.ndjson');
 }
 
 function writeMetricsFile(events: MetricEvent[]): void {
-  fs.mkdirSync(path.join(tmpDir, '.blockspool'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, '.promptwheel'), { recursive: true });
   const lines = events.map(e => JSON.stringify(e)).join('\n') + '\n';
   fs.writeFileSync(metricsFile(), lines, 'utf-8');
 }
@@ -62,7 +62,7 @@ describe('readMetrics', () => {
   });
 
   it('skips malformed lines', () => {
-    fs.mkdirSync(path.join(tmpDir, '.blockspool'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.promptwheel'), { recursive: true });
     fs.writeFileSync(metricsFile(), [
       JSON.stringify({ ts: 1000, system: 'spindle', event: 'check_passed' }),
       'not valid json',
@@ -77,7 +77,7 @@ describe('readMetrics', () => {
   });
 
   it('returns empty array for completely invalid file', () => {
-    fs.mkdirSync(path.join(tmpDir, '.blockspool'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.promptwheel'), { recursive: true });
     fs.writeFileSync(metricsFile(), 'garbage\nnot json\n', 'utf-8');
 
     expect(readMetrics(tmpDir)).toEqual([]);
@@ -137,12 +137,12 @@ describe('analyzeMetrics', () => {
 // ---------------------------------------------------------------------------
 
 describe('metric buffering lifecycle', () => {
-  it('initMetrics creates .blockspool directory and sets up metrics path', () => {
+  it('initMetrics creates .promptwheel directory and sets up metrics path', () => {
     initMetrics(tmpDir);
     // After init, flushing should work (even with no buffered events)
     flushMetrics();
     // File may not exist yet (no events buffered), but dir should exist
-    expect(fs.existsSync(path.join(tmpDir, '.blockspool'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.promptwheel'))).toBe(true);
   });
 
   it('metric + flushMetrics writes events to NDJSON file', () => {

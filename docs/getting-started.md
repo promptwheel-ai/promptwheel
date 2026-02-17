@@ -1,10 +1,10 @@
-# Getting Started with BlockSpool
+# Getting Started with PromptWheel
 
-This guide will help you set up BlockSpool and run your first automated code improvement.
+This guide will help you set up PromptWheel and run your first automated code improvement.
 
 ## Prerequisites
 
-Before installing BlockSpool, ensure you have:
+Before installing PromptWheel, ensure you have:
 
 | Requirement | Version | Purpose | Installation |
 |-------------|---------|---------|--------------|
@@ -16,13 +16,13 @@ Before installing BlockSpool, ensure you have:
 ## Installation
 
 ```bash
-npm install -g @blockspool/cli
+npm install -g @promptwheel/cli
 ```
 
 Verify the installation:
 
 ```bash
-blockspool --version
+promptwheel --version
 ```
 
 ## Quick Start
@@ -33,18 +33,18 @@ Navigate to your project and run the doctor command:
 
 ```bash
 cd your-project
-blockspool solo doctor
+promptwheel solo doctor
 ```
 
 This checks all prerequisites and shows any issues.
 
-### 2. Initialize BlockSpool
+### 2. Initialize PromptWheel
 
 ```bash
-blockspool solo init
+promptwheel solo init
 ```
 
-This creates `.blockspool/config.json` with:
+This creates `.promptwheel/config.json` with:
 - Auto-detected QA commands from your `package.json`
 - SQLite database for local state
 - Default scout configuration
@@ -52,10 +52,10 @@ This creates `.blockspool/config.json` with:
 ### 3. Scout for Improvements
 
 ```bash
-blockspool solo scout .
+promptwheel solo scout .
 ```
 
-BlockSpool scans your codebase and identifies:
+PromptWheel scans your codebase and identifies:
 - Security vulnerabilities
 - Performance optimizations
 - Missing tests
@@ -65,7 +65,7 @@ BlockSpool scans your codebase and identifies:
 ### 4. Review Proposals
 
 ```bash
-blockspool solo status
+promptwheel solo status
 ```
 
 You'll see a list of proposals. Each proposal includes:
@@ -80,26 +80,26 @@ Convert proposals to tickets:
 
 ```bash
 # Approve specific proposals
-blockspool solo approve 1,3,5
+promptwheel solo approve 1,3,5
 
 # Approve a range
-blockspool solo approve 1-5
+promptwheel solo approve 1-5
 
 # Approve all
-blockspool solo approve all
+promptwheel solo approve all
 ```
 
 ### 6. Execute a Ticket
 
 ```bash
 # Execute without PR
-blockspool solo run tkt_abc123
+promptwheel solo run tkt_abc123
 
 # Execute and create PR
-blockspool solo run tkt_abc123 --pr
+promptwheel solo run tkt_abc123 --pr
 ```
 
-BlockSpool will:
+PromptWheel will:
 1. Create a new branch
 2. Run Claude CLI to implement the fix
 3. Run your QA commands to verify
@@ -109,7 +109,7 @@ BlockSpool will:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         BLOCKSPOOL WORKFLOW                              │
+│                         PROMPTWHEEL WORKFLOW                              │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
 │   ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐          │
@@ -155,7 +155,7 @@ BlockSpool will:
 ## Next Steps
 
 - [CLI Reference](./cli-reference.md) - Full command documentation
-- [Configuration](./configuration.md) - Customize BlockSpool
+- [Configuration](./configuration.md) - Customize PromptWheel
 - [Troubleshooting](./troubleshooting.md) - Common issues and solutions
 
 ## Auto Mode
@@ -164,10 +164,10 @@ For hands-off operation, use auto:
 
 ```bash
 # Run in wheel mode, fixing issues as they're found
-blockspool --wheel
+promptwheel --wheel
 
 # Just fix CI failures
-blockspool solo auto ci
+promptwheel solo auto ci
 ```
 
 ## Interactive TUI
@@ -175,7 +175,7 @@ blockspool solo auto ci
 For a visual dashboard:
 
 ```bash
-blockspool solo tui
+promptwheel solo tui
 ```
 
 This shows:

@@ -3,35 +3,35 @@
  *
  * Mirrors the CLI's trajectory I/O helpers but lives in the MCP package
  * to avoid cross-package imports. Pure algorithms are imported from
- * @blockspool/core/trajectory/shared.
+ * @promptwheel/core/trajectory/shared.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Trajectory, TrajectoryState } from '@blockspool/core/trajectory/shared';
+import type { Trajectory, TrajectoryState } from '@promptwheel/core/trajectory/shared';
 import {
   parseTrajectoryYaml,
   createInitialStepStates,
   getNextStep,
-} from '@blockspool/core/trajectory/shared';
+} from '@promptwheel/core/trajectory/shared';
 
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 
 function trajectoriesDir(repoRoot: string): string {
-  return path.join(repoRoot, '.blockspool', 'trajectories');
+  return path.join(repoRoot, '.promptwheel', 'trajectories');
 }
 
 function trajectoryStatePath(repoRoot: string): string {
-  return path.join(repoRoot, '.blockspool', 'trajectory-state.json');
+  return path.join(repoRoot, '.promptwheel', 'trajectory-state.json');
 }
 
 // ---------------------------------------------------------------------------
 // Loading
 // ---------------------------------------------------------------------------
 
-/** Load all trajectory definitions from `.blockspool/trajectories/`. */
+/** Load all trajectory definitions from `.promptwheel/trajectories/`. */
 export function loadTrajectories(repoRoot: string): Trajectory[] {
   const dir = trajectoriesDir(repoRoot);
   if (!fs.existsSync(dir)) return [];
@@ -48,7 +48,7 @@ export function loadTrajectories(repoRoot: string): Trajectory[] {
         trajectories.push(trajectory);
       }
     } catch (err) {
-      console.warn(`[blockspool] failed to load trajectory file ${file}: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[promptwheel] failed to load trajectory file ${file}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -73,7 +73,7 @@ export function loadTrajectoryState(repoRoot: string): TrajectoryState | null {
       return JSON.parse(fs.readFileSync(p, 'utf-8'));
     }
   } catch (err) {
-    console.warn(`[blockspool] failed to parse trajectory-state.json: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[promptwheel] failed to parse trajectory-state.json: ${err instanceof Error ? err.message : String(err)}`);
   }
   return null;
 }

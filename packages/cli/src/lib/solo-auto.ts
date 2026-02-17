@@ -3,7 +3,7 @@
  */
 
 import chalk from 'chalk';
-import { projects, tickets, runs } from '@blockspool/core/repos';
+import { projects, tickets, runs } from '@promptwheel/core/repos';
 import { createGitService } from './git.js';
 import {
   getAdapter,
@@ -43,7 +43,7 @@ export async function runAutoWorkMode(options: {
 }): Promise<void> {
   const parallelCount = Math.max(1, parseInt(options.parallel || '1', 10));
 
-  console.log(chalk.blue('🧵 BlockSpool Auto - Work Mode'));
+  console.log(chalk.blue('🧵 PromptWheel Auto - Work Mode'));
   console.log(chalk.gray(`  Parallel workers: ${parallelCount}`));
   console.log();
 
@@ -56,8 +56,8 @@ export async function runAutoWorkMode(options: {
   }
 
   if (!isInitialized(repoRoot)) {
-    console.error(chalk.red('✗ BlockSpool not initialized'));
-    console.error(chalk.gray('  Run: blockspool solo init'));
+    console.error(chalk.red('✗ PromptWheel not initialized'));
+    console.error(chalk.gray('  Run: promptwheel solo init'));
     process.exit(1);
   }
 
@@ -66,7 +66,7 @@ export async function runAutoWorkMode(options: {
 
   if (projectList.length === 0) {
     console.log(chalk.yellow('No projects found.'));
-    console.log(chalk.gray('  Run: blockspool solo scout . to create proposals'));
+    console.log(chalk.gray('  Run: promptwheel solo scout . to create proposals'));
     await adapter.close();
     process.exit(0);
   }
@@ -79,7 +79,7 @@ export async function runAutoWorkMode(options: {
 
   if (readyTickets.length === 0) {
     console.log(chalk.yellow('No ready tickets found.'));
-    console.log(chalk.gray('  Create tickets with: blockspool solo approve'));
+    console.log(chalk.gray('  Create tickets with: promptwheel solo approve'));
     await adapter.close();
     process.exit(0);
   }

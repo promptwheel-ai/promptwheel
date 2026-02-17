@@ -8,9 +8,9 @@
  * This is a pure type refactor — zero runtime changes.
  */
 
-import type { DatabaseAdapter } from '@blockspool/core/db';
-import type { ScoutBackend } from '@blockspool/core/services';
-import type { projects } from '@blockspool/core/repos';
+import type { DatabaseAdapter } from '@promptwheel/core/db';
+import type { ScoutBackend } from '@promptwheel/core/services';
+import type { projects } from '@promptwheel/core/repos';
 import type { Formula } from './formulas.js';
 import type { loadConfig, createScoutDeps } from './solo-config.js';
 import type { ExecutionBackend } from './execution-backends/index.js';
@@ -21,9 +21,9 @@ import type { CodebaseIndex } from './codebase-index.js';
 import type { loadTasteProfile } from './taste-profile.js';
 import type { GoalMeasurement } from './goals.js';
 import type { SectorState } from './sectors.js';
-import type { Trajectory, TrajectoryState, TrajectoryStep } from '@blockspool/core/trajectory/shared';
+import type { Trajectory, TrajectoryState, TrajectoryStep } from '@promptwheel/core/trajectory/shared';
 import type { TicketOutcome } from './run-history.js';
-import type { TraceAnalysis } from '@blockspool/core/trace/shared';
+import type { TraceAnalysis } from '@promptwheel/core/trace/shared';
 import type { DisplayAdapter } from './display-adapter.js';
 import type { InteractiveConsole } from './solo-stdin.js';
 

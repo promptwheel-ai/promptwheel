@@ -1,36 +1,36 @@
 /**
  * Trajectory I/O — load YAML definitions, persist state.
  *
- * Trajectories live in `.blockspool/trajectories/<name>.yaml`.
- * State is persisted to `.blockspool/trajectory-state.json`.
+ * Trajectories live in `.promptwheel/trajectories/<name>.yaml`.
+ * State is persisted to `.promptwheel/trajectory-state.json`.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { Trajectory, TrajectoryState } from '@blockspool/core/trajectory/shared';
+import type { Trajectory, TrajectoryState } from '@promptwheel/core/trajectory/shared';
 import {
   parseTrajectoryYaml,
   createInitialStepStates,
   getNextStep,
-} from '@blockspool/core/trajectory/shared';
+} from '@promptwheel/core/trajectory/shared';
 
 // ---------------------------------------------------------------------------
 // Paths
 // ---------------------------------------------------------------------------
 
 function trajectoriesDir(repoRoot: string): string {
-  return path.join(repoRoot, '.blockspool', 'trajectories');
+  return path.join(repoRoot, '.promptwheel', 'trajectories');
 }
 
 function trajectoryStatePath(repoRoot: string): string {
-  return path.join(repoRoot, '.blockspool', 'trajectory-state.json');
+  return path.join(repoRoot, '.promptwheel', 'trajectory-state.json');
 }
 
 // ---------------------------------------------------------------------------
 // Loading
 // ---------------------------------------------------------------------------
 
-/** Load all trajectory definitions from `.blockspool/trajectories/`. */
+/** Load all trajectory definitions from `.promptwheel/trajectories/`. */
 export function loadTrajectories(repoRoot: string): Trajectory[] {
   const dir = trajectoriesDir(repoRoot);
   if (!fs.existsSync(dir)) return [];

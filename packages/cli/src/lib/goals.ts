@@ -12,7 +12,7 @@ import {
   type Formula,
   parseSimpleYaml,
   parseStringList,
-} from '@blockspool/core/formulas/shared';
+} from '@promptwheel/core/formulas/shared';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,10 +45,10 @@ interface GoalMeasurementEntry {
 // ---------------------------------------------------------------------------
 
 /**
- * Load goal files from `.blockspool/goals/*.yaml`, return formulas with measure fields.
+ * Load goal files from `.promptwheel/goals/*.yaml`, return formulas with measure fields.
  */
 export function loadGoals(repoRoot: string): Formula[] {
-  const goalsDir = path.join(repoRoot, '.blockspool', 'goals');
+  const goalsDir = path.join(repoRoot, '.promptwheel', 'goals');
   if (!fs.existsSync(goalsDir)) return [];
 
   const files = fs.readdirSync(goalsDir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
@@ -220,7 +220,7 @@ export function formatGoalContext(goal: Formula, measurement: GoalMeasurement): 
 // ---------------------------------------------------------------------------
 
 function goalStatePath(repoRoot: string): string {
-  return path.join(repoRoot, '.blockspool', 'goal-state.json');
+  return path.join(repoRoot, '.promptwheel', 'goal-state.json');
 }
 
 export function readGoalState(repoRoot: string): GoalState {

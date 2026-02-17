@@ -23,7 +23,7 @@ import type {
   QueryResult,
   QueryStats,
   TransactionClient,
-} from '@blockspool/core/db';
+} from '@promptwheel/core/db';
 
 /**
  * Internal query statistics
@@ -36,7 +36,7 @@ interface InternalStats {
 }
 
 /**
- * SQLite adapter for BlockSpool
+ * SQLite adapter for PromptWheel
  *
  * Features:
  * - WAL mode for better concurrency

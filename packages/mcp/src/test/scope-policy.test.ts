@@ -6,9 +6,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import { repos } from '@blockspool/core';
-import type { DatabaseAdapter, Project } from '@blockspool/core';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import { repos } from '@promptwheel/core';
+import type { DatabaseAdapter, Project } from '@promptwheel/core';
 import { RunManager } from '../run-manager.js';
 import { processEvent } from '../event-processor.js';
 import { advance } from '../advance.js';
@@ -642,27 +642,27 @@ describe('advance — category tool policies in auto_approve_patterns', () => {
 
 describe('isFileInWorktree', () => {
   it('accepts file inside worktree', () => {
-    expect(isFileInWorktree('.blockspool/worktrees/t1/src/foo.ts', '.blockspool/worktrees/t1')).toBe(true);
+    expect(isFileInWorktree('.promptwheel/worktrees/t1/src/foo.ts', '.promptwheel/worktrees/t1')).toBe(true);
   });
 
   it('accepts exact worktree root', () => {
-    expect(isFileInWorktree('.blockspool/worktrees/t1', '.blockspool/worktrees/t1')).toBe(true);
+    expect(isFileInWorktree('.promptwheel/worktrees/t1', '.promptwheel/worktrees/t1')).toBe(true);
   });
 
   it('rejects file outside worktree', () => {
-    expect(isFileInWorktree('src/foo.ts', '.blockspool/worktrees/t1')).toBe(false);
+    expect(isFileInWorktree('src/foo.ts', '.promptwheel/worktrees/t1')).toBe(false);
   });
 
   it('rejects file in different worktree', () => {
-    expect(isFileInWorktree('.blockspool/worktrees/t2/src/foo.ts', '.blockspool/worktrees/t1')).toBe(false);
+    expect(isFileInWorktree('.promptwheel/worktrees/t2/src/foo.ts', '.promptwheel/worktrees/t1')).toBe(false);
   });
 
   it('rejects path traversal attempts', () => {
-    expect(isFileInWorktree('.blockspool/worktrees/t1/../t2/foo.ts', '.blockspool/worktrees/t1')).toBe(false);
+    expect(isFileInWorktree('.promptwheel/worktrees/t1/../t2/foo.ts', '.promptwheel/worktrees/t1')).toBe(false);
   });
 
   it('handles trailing slash on worktree root', () => {
-    expect(isFileInWorktree('.blockspool/worktrees/t1/foo.ts', '.blockspool/worktrees/t1/')).toBe(true);
+    expect(isFileInWorktree('.promptwheel/worktrees/t1/foo.ts', '.promptwheel/worktrees/t1/')).toBe(true);
   });
 });
 
@@ -672,7 +672,7 @@ describe('isFileAllowed with worktree_root', () => {
       allowedPaths: ['src/**'],
       category: 'refactor',
       maxLinesPerTicket: 500,
-      worktreeRoot: '/tmp/project/.blockspool/worktrees/t1',
+      worktreeRoot: '/tmp/project/.promptwheel/worktrees/t1',
     });
     // File is in the main tree, not in the worktree — should be blocked
     expect(isFileAllowed('src/foo.ts', policy)).toBe(false);
@@ -683,11 +683,11 @@ describe('isFileAllowed with worktree_root', () => {
       allowedPaths: [],
       category: 'refactor',
       maxLinesPerTicket: 500,
-      worktreeRoot: '/tmp/project/.blockspool/worktrees/t1',
+      worktreeRoot: '/tmp/project/.promptwheel/worktrees/t1',
     });
     // Files use absolute paths in worktree mode, so they match the worktree_root prefix
-    // and are not blocked by the .blockspool/** deny glob (which matches relative paths)
-    expect(isFileAllowed('/tmp/project/.blockspool/worktrees/t1/src/foo.ts', policy)).toBe(true);
+    // and are not blocked by the .promptwheel/** deny glob (which matches relative paths)
+    expect(isFileAllowed('/tmp/project/.promptwheel/worktrees/t1/src/foo.ts', policy)).toBe(true);
   });
 
   it('behaves normally when worktree_root is not set (backwards compat)', () => {
@@ -706,10 +706,10 @@ describe('serializeScopePolicy with worktree_root', () => {
       allowedPaths: ['src/**'],
       category: 'refactor',
       maxLinesPerTicket: 500,
-      worktreeRoot: '/tmp/project/.blockspool/worktrees/t1',
+      worktreeRoot: '/tmp/project/.promptwheel/worktrees/t1',
     });
     const serialized = serializeScopePolicy(policy);
-    expect(serialized.worktree_root).toBe('/tmp/project/.blockspool/worktrees/t1');
+    expect(serialized.worktree_root).toBe('/tmp/project/.promptwheel/worktrees/t1');
   });
 
   it('omits worktree_root when not set', () => {

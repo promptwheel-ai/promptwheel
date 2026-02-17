@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-Common issues and solutions when using BlockSpool.
+Common issues and solutions when using PromptWheel.
 
 ## Installation Issues
 
@@ -19,16 +19,16 @@ Use a Node version manager or fix npm permissions:
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
 nvm install 20
 nvm use 20
-npm install -g @blockspool/cli
+npm install -g @promptwheel/cli
 
 # Option 2: Fix npm permissions
 mkdir ~/.npm-global
 npm config set prefix '~/.npm-global'
 export PATH=~/.npm-global/bin:$PATH
-npm install -g @blockspool/cli
+npm install -g @promptwheel/cli
 ```
 
-### `blockspool: command not found`
+### `promptwheel: command not found`
 
 **Problem:** CLI not in PATH after installation.
 
@@ -84,7 +84,7 @@ Follow the prompts to authenticate with your Anthropic account.
 gh auth login
 ```
 
-This is optional - you can still use BlockSpool without PR creation.
+This is optional - you can still use PromptWheel without PR creation.
 
 ## Initialization Issues
 
@@ -92,13 +92,13 @@ This is optional - you can still use BlockSpool without PR creation.
 
 **Problem:**
 ```
-Error: .blockspool/config.json already exists
+Error: .promptwheel/config.json already exists
 ```
 
 **Solution:**
 ```bash
 # Re-initialize with force
-blockspool solo init --force
+promptwheel solo init --force
 ```
 
 ### `Could not detect project type`
@@ -126,13 +126,13 @@ blockspool solo init --force
 **Solution:**
 ```bash
 # Check what's being excluded
-cat .blockspool/config.json
+cat .promptwheel/config.json
 
 # Scout specific directory
-blockspool solo scout src/
+promptwheel solo scout src/
 
 # Scout all categories
-blockspool solo scout . --categories all
+promptwheel solo scout . --categories all
 ```
 
 ### Scout is very slow
@@ -150,7 +150,7 @@ blockspool solo scout . --categories all
    ```
 2. Target specific directories:
    ```bash
-   blockspool solo scout src/
+   promptwheel solo scout src/
    ```
 
 ## Execution Issues
@@ -171,15 +171,15 @@ Ticket tkt_abc123 blocked: QA failed
 **Solution:**
 1. Check QA output:
    ```bash
-   blockspool solo status --all
+   promptwheel solo status --all
    ```
 2. Run QA manually:
    ```bash
-   blockspool solo qa
+   promptwheel solo qa
    ```
 3. Fix issues and retry:
    ```bash
-   blockspool solo retry tkt_abc123
+   promptwheel solo retry tkt_abc123
    ```
 
 ### `Claude CLI timeout`
@@ -224,16 +224,16 @@ The ticket may be too complex. Either:
 
 **Problem:**
 ```
-Error: Branch blockspool/tkt_abc123 already exists
+Error: Branch promptwheel/tkt_abc123 already exists
 ```
 
 **Solution:**
 ```bash
 # Delete the branch
-git branch -D blockspool/tkt_abc123
+git branch -D promptwheel/tkt_abc123
 
 # Or use custom branch name
-blockspool solo run tkt_abc123 --branch fix/my-branch
+promptwheel solo run tkt_abc123 --branch fix/my-branch
 ```
 
 ## Database Issues
@@ -246,19 +246,19 @@ Error: SQLITE_BUSY: database is locked
 ```
 
 **Causes:**
-- Another BlockSpool process running
+- Another PromptWheel process running
 - Database file permissions
 
 **Solution:**
 ```bash
 # Check for running processes
-ps aux | grep blockspool
+ps aux | grep promptwheel
 
 # Kill stale processes
-pkill -f blockspool
+pkill -f promptwheel
 
 # Check permissions
-ls -la .blockspool/
+ls -la .promptwheel/
 ```
 
 ### `PostgreSQL connection failed`
@@ -308,14 +308,14 @@ Error: No upstream branch configured
 git push -u origin HEAD
 
 # Then create PR
-blockspool solo run tkt_abc123 --pr
+promptwheel solo run tkt_abc123 --pr
 ```
 
 ## Performance Issues
 
 ### High memory usage
 
-**Problem:** BlockSpool using too much RAM.
+**Problem:** PromptWheel using too much RAM.
 
 **Solution:**
 1. Use SQLite instead of Postgres for local dev
@@ -334,15 +334,15 @@ blockspool solo run tkt_abc123 --pr
 
 **Solution:**
 - Reduce polling frequency (default is 2s)
-- Use `blockspool solo status` for one-time checks
+- Use `promptwheel solo status` for one-time checks
 
 ## Getting Help
 
 If you're still stuck:
 
-1. Check existing issues: [GitHub Issues](https://github.com/blockspool/blockspool/issues)
+1. Check existing issues: [GitHub Issues](https://github.com/promptwheel-ai/promptwheel/issues)
 2. Create a new issue with:
-   - BlockSpool version (`blockspool --version`)
+   - PromptWheel version (`promptwheel --version`)
    - Node.js version (`node --version`)
    - Operating system
    - Full error message
@@ -350,5 +350,5 @@ If you're still stuck:
 
 3. Include debug output:
    ```bash
-   BLOCKSPOOL_LOG_LEVEL=debug blockspool solo <command>
+   PROMPTWHEEL_LOG_LEVEL=debug promptwheel solo <command>
    ```

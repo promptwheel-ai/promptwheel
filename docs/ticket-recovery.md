@@ -1,6 +1,6 @@
 # Ticket Recovery Guide
 
-When tickets fail or get blocked, BlockSpool provides tools to diagnose and recover them.
+When tickets fail or get blocked, PromptWheel provides tools to diagnose and recover them.
 
 ## Understanding Ticket States
 
@@ -16,7 +16,7 @@ When tickets fail or get blocked, BlockSpool provides tools to diagnose and reco
 
 ### QA Failures
 
-The most common reason. BlockSpool classifies QA failures into categories:
+The most common reason. PromptWheel classifies QA failures into categories:
 
 | Error Class | Description | Auto-retries |
 |-------------|-------------|-------------|
@@ -25,7 +25,7 @@ The most common reason. BlockSpool classifies QA failures into categories:
 | `timeout` | Command exceeded time limit | 1 |
 | `unknown` | Unclassified error | 2 |
 
-BlockSpool retries automatically based on error class. A ticket is blocked only after exhausting retries.
+PromptWheel retries automatically based on error class. A ticket is blocked only after exhausting retries.
 
 ### Plan Rejections
 
@@ -37,7 +37,7 @@ Claude CLI crashes, context overflow, or other execution-level errors.
 
 ### Loop Detection (Spindle)
 
-BlockSpool's spindle system detects and aborts stuck tickets:
+PromptWheel's spindle system detects and aborts stuck tickets:
 - **QA ping-pong** — alternating between the same pass/fail states
 - **File churn** — repeatedly modifying the same files without progress
 - **Command failure loops** — same command failing repeatedly
@@ -49,12 +49,12 @@ BlockSpool's spindle system detects and aborts stuck tickets:
 
 **CLI:**
 ```bash
-blockspool solo status
+promptwheel solo status
 ```
 
 **Plugin:**
 ```
-/blockspool:status
+/promptwheel:status
 ```
 
 This shows blocked tickets with their last error.
@@ -63,7 +63,7 @@ This shows blocked tickets with their last error.
 
 **Plugin:**
 ```
-/blockspool:heal <ticket-id>
+/promptwheel:heal <ticket-id>
 ```
 
 This runs diagnosis and reports:
@@ -87,7 +87,7 @@ Reset the ticket to `ready` so it gets picked up again:
 
 **Plugin:**
 ```
-/blockspool:heal <ticket-id>
+/promptwheel:heal <ticket-id>
 ```
 Choose "retry" when prompted.
 
@@ -99,7 +99,7 @@ Widen the ticket's `allowed_paths` to include files it needs:
 
 **Plugin:**
 ```
-/blockspool:heal <ticket-id>
+/promptwheel:heal <ticket-id>
 ```
 Choose "expand_scope" when prompted.
 
@@ -110,7 +110,7 @@ Best for: plan rejections where the ticket genuinely needs access to more files.
 If a ticket isn't worth fixing, cancel it:
 
 ```
-/blockspool:cancel
+/promptwheel:cancel
 ```
 
 Or start a new session — the learnings system will remember this failure and avoid similar proposals in future runs.
@@ -145,7 +145,7 @@ A `CLAUDE.md` with clear conventions reduces plan rejections and code quality is
 For large projects, narrow the scope to reduce noise:
 
 ```bash
-blockspool --scope "src/**"
+promptwheel --scope "src/**"
 ```
 
 ### Set Minimum Impact Score
@@ -153,31 +153,31 @@ blockspool --scope "src/**"
 Filter out low-value proposals that are more likely to fail:
 
 ```bash
-blockspool --min-impact-score 5
+promptwheel --min-impact-score 5
 ```
 
 ## Cross-Run Learnings
 
-BlockSpool remembers failures across sessions. When a ticket fails:
+PromptWheel remembers failures across sessions. When a ticket fails:
 - The error pattern is recorded as a "gotcha"
 - Future scouts see relevant learnings and avoid similar proposals
 - Success patterns are also recorded to reinforce what works
 
 View learnings:
 ```
-/blockspool:learnings
+/promptwheel:learnings
 ```
 
 Clear learnings to start fresh:
 ```
-/blockspool:learnings clear
+/promptwheel:learnings clear
 ```
 
 ## Common Patterns
 
-### "Tests pass locally but fail in BlockSpool"
+### "Tests pass locally but fail in PromptWheel"
 
-BlockSpool runs tests in isolated git worktrees. Check for:
+PromptWheel runs tests in isolated git worktrees. Check for:
 - Hardcoded paths or environment variables
 - Files not committed to git
 - Dependencies on running services (databases, APIs)
@@ -191,7 +191,7 @@ Spindle will catch this, but if it persists:
 
 ### "Plan rejected: file outside allowed_paths"
 
-The scout proposed changes to specific files, but execution needs additional files. Use `/blockspool:heal` with expand_scope, or add related files to the scope in your next run.
+The scout proposed changes to specific files, but execution needs additional files. Use `/promptwheel:heal` with expand_scope, or add related files to the scope in your next run.
 
 ## Getting Help
 
@@ -199,7 +199,7 @@ If recovery doesn't work:
 
 1. Check [Troubleshooting](./troubleshooting.md) for common issues
 2. Review the session's learnings to see accumulated failure patterns
-3. File an issue at [GitHub](https://github.com/blockspool/blockspool/issues) with:
+3. File an issue at [GitHub](https://github.com/promptwheel-ai/promptwheel/issues) with:
    - Ticket ID and error output
    - Your QA commands
    - Project type and size

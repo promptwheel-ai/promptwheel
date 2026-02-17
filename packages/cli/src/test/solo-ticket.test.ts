@@ -22,9 +22,9 @@ import type { ClaudeResult } from '../lib/execution-backends/index.js';
 // Mock all external dependencies
 vi.mock('node:child_process');
 vi.mock('node:fs');
-vi.mock('@blockspool/core/db');
-vi.mock('@blockspool/core/services');
-vi.mock('@blockspool/core/repos');
+vi.mock('@promptwheel/core/db');
+vi.mock('@promptwheel/core/services');
+vi.mock('@promptwheel/core/repos');
 vi.mock('../lib/artifacts.js');
 vi.mock('../lib/scope.js');
 vi.mock('../lib/spindle.js');

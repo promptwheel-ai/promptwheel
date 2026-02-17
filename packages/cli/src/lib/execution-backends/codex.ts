@@ -109,7 +109,7 @@ export class CodexExecutionBackend implements ExecutionBackend {
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
 
-    const tmpDir = mkdtempSync(join(tmpdir(), 'blockspool-codex-exec-'));
+    const tmpDir = mkdtempSync(join(tmpdir(), 'promptwheel-codex-exec-'));
     const outPath = join(tmpDir, 'output.md');
 
     try {

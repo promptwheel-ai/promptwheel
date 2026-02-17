@@ -193,7 +193,7 @@ export class CodexScoutBackend implements ScoutBackend {
       return { success: false, output: '', error: 'Aborted before start', durationMs: 0 };
     }
 
-    const tmpDir = mkdtempSync(join(tmpdir(), 'blockspool-codex-'));
+    const tmpDir = mkdtempSync(join(tmpdir(), 'promptwheel-codex-'));
     const outPath = join(tmpDir, 'output.md');
     const schemaPath = join(tmpDir, 'schema.json');
 
@@ -368,7 +368,7 @@ export class CodexMcpScoutBackend implements ScoutBackend {
 
     const prompts = allOptions.map(o => o.prompt);
 
-    const tmpDir = mkdtempSync(join(tmpdir(), 'blockspool-mcp-'));
+    const tmpDir = mkdtempSync(join(tmpdir(), 'promptwheel-mcp-'));
     const dataPath = join(tmpDir, 'batches.json');
     const outPath = join(tmpDir, 'output.md');
 
@@ -385,7 +385,7 @@ export class CodexMcpScoutBackend implements ScoutBackend {
       const dir = selfPath.substring(0, selfPath.lastIndexOf('/'));
       serverScript = join(dir, 'mcp-batch-server.js');
     } else {
-      serverScript = join(process.cwd(), 'node_modules', '@blockspool', 'core', 'dist', 'scout', 'mcp-batch-server.js');
+      serverScript = join(process.cwd(), 'node_modules', '@promptwheel', 'core', 'dist', 'scout', 'mcp-batch-server.js');
     }
 
     // Build MCP config for codex exec

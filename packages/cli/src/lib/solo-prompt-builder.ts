@@ -2,7 +2,7 @@
  * Build execution prompts for solo ticket runs
  */
 
-import type { tickets } from '@blockspool/core/repos';
+import type { tickets } from '@promptwheel/core/repos';
 
 /**
  * Build the prompt for Claude from a ticket

@@ -1,10 +1,10 @@
 ---
 name: analytics
-description: View BlockSpool system metrics and identify what's providing value
+description: View PromptWheel system metrics and identify what's providing value
 argument-hint: "[raw] [system=name]"
 ---
 
-Display metrics collected from BlockSpool instrumentation to identify which systems are valuable.
+Display metrics collected from PromptWheel instrumentation to identify which systems are valuable.
 
 ## Arguments
 
@@ -14,7 +14,7 @@ Parse from `$ARGUMENTS` (all optional):
 
 ## Implementation
 
-1. Read the metrics file at `.blockspool/metrics.ndjson`
+1. Read the metrics file at `.promptwheel/metrics.ndjson`
 2. If file doesn't exist, inform user: "No metrics data yet. Run `/run` to generate metrics."
 3. Parse NDJSON (one JSON object per line)
 4. Aggregate by system and event type

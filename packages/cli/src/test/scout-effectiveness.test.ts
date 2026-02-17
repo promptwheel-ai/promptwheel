@@ -325,9 +325,9 @@ describe('merge conflict retry', () => {
     // Simulate processOneProposal returning conflictBranch on merge conflict
     const result: { success: boolean; conflictBranch?: string } = {
       success: false,
-      conflictBranch: 'blockspool/ticket-123',
+      conflictBranch: 'promptwheel/ticket-123',
     };
-    expect(result.conflictBranch).toBe('blockspool/ticket-123');
+    expect(result.conflictBranch).toBe('promptwheel/ticket-123');
     expect(result.success).toBe(false);
   });
 

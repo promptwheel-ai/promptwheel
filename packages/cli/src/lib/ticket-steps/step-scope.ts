@@ -132,7 +132,7 @@ export async function run(ctx: TicketContext): Promise<StepResult> {
       violationDetails,
       blockReason,
       ``,
-      `To fix: blockspool solo retry ${ticket.id}`,
+      `To fix: promptwheel solo retry ${ticket.id}`,
       `  This regenerates allowed_paths and resets the ticket to 'ready'`,
     ].join('\n');
 

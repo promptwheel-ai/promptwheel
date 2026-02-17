@@ -17,7 +17,7 @@ import {
 let tmpDir: string;
 
 function historyFile(): string {
-  return path.join(tmpDir, '.blockspool', 'history.ndjson');
+  return path.join(tmpDir, '.promptwheel', 'history.ndjson');
 }
 
 function makeEntry(overrides: Partial<RunHistoryEntry> = {}): RunHistoryEntry {
@@ -39,7 +39,7 @@ function makeEntry(overrides: Partial<RunHistoryEntry> = {}): RunHistoryEntry {
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-history-test-'));
-  fs.mkdirSync(path.join(tmpDir, '.blockspool'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, '.promptwheel'), { recursive: true });
 });
 
 afterEach(() => {
@@ -137,8 +137,8 @@ describe('readRunHistory', () => {
   });
 
   it('returns empty array for missing file', () => {
-    // Remove the .blockspool dir so history file does not exist
-    fs.rmSync(path.join(tmpDir, '.blockspool'), { recursive: true, force: true });
+    // Remove the .promptwheel dir so history file does not exist
+    fs.rmSync(path.join(tmpDir, '.promptwheel'), { recursive: true, force: true });
 
     const entries = readRunHistory(tmpDir);
     expect(entries).toEqual([]);

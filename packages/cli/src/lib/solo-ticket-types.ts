@@ -2,9 +2,9 @@
  * Types and constants for solo ticket execution
  */
 
-import type { tickets } from '@blockspool/core/repos';
-import type { StepKind } from '@blockspool/core/repos';
-import type { TraceAnalysis } from '@blockspool/core/trace/shared';
+import type { tickets } from '@promptwheel/core/repos';
+import type { StepKind } from '@promptwheel/core/repos';
+import type { TraceAnalysis } from '@promptwheel/core/trace/shared';
 import type { SoloConfig } from './solo-config.js';
 import type { getAdapter } from './solo-config.js';
 import type { ExecutionBackend } from './execution-backends/index.js';

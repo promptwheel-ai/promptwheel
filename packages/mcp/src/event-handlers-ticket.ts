@@ -1,11 +1,11 @@
-import { repos } from '@blockspool/core';
+import { repos } from '@promptwheel/core';
 import type { EventContext, ProcessResult } from './event-helpers.js';
 import { recordSectorOutcome, recordTicketDedup } from './event-helpers.js';
 import type { CommitPlan } from './types.js';
 import { deriveScopePolicy, validatePlanScope } from './scope-policy.js';
 import { recordDiff, recordCommandFailure, recordPlanHash } from './spindle.js';
 import { addLearning, extractTags, type StructuredKnowledge } from './learnings.js';
-import { isStreamJsonOutput, analyzeTrace } from '@blockspool/core/trace/shared';
+import { isStreamJsonOutput, analyzeTrace } from '@promptwheel/core/trace/shared';
 
 export async function handlePlanSubmitted(ctx: EventContext, payload: Record<string, unknown>): Promise<ProcessResult> {
   const s = ctx.run.require();
@@ -184,7 +184,7 @@ export async function handleTicketResult(ctx: EventContext, payload: Record<stri
           tool_count: traceAnalysis.tool_profiles.length,
         });
       } catch (err) {
-        console.warn(`[blockspool] trace analysis: ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[promptwheel] trace analysis: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 

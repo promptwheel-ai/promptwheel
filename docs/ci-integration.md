@@ -1,6 +1,6 @@
 # CI Integration
 
-Run BlockSpool on a schedule to continuously improve your codebase without manual intervention.
+Run PromptWheel on a schedule to continuously improve your codebase without manual intervention.
 
 ---
 
@@ -9,8 +9,8 @@ Run BlockSpool on a schedule to continuously improve your codebase without manua
 ### Basic Nightly Run
 
 ```yaml
-# .github/workflows/blockspool.yml
-name: BlockSpool
+# .github/workflows/promptwheel.yml
+name: PromptWheel
 
 on:
   schedule:
@@ -22,7 +22,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  blockspool:
+  promptwheel:
     runs-on: ubuntu-latest
     timeout-minutes: 150
 
@@ -38,17 +38,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install BlockSpool
-        run: npm install -g @blockspool/cli
+      - name: Install PromptWheel
+        run: npm install -g @promptwheel/cli
 
-      - name: Initialize BlockSpool
-        run: blockspool init
+      - name: Initialize PromptWheel
+        run: promptwheel init
 
-      - name: Run BlockSpool
+      - name: Run PromptWheel
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: blockspool --hours 2 --pr --safe --yes --no-tui
+        run: promptwheel --hours 2 --pr --safe --yes --no-tui
 ```
 
 ### Key flags for CI
@@ -69,11 +69,11 @@ jobs:
 Individual PRs per ticket create review noise. Use milestone mode to batch tickets:
 
 ```yaml
-      - name: Run BlockSpool
+      - name: Run PromptWheel
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: blockspool --hours 2 --batch-size 10 --pr --safe --yes --no-tui
+        run: promptwheel --hours 2 --batch-size 10 --pr --safe --yes --no-tui
 ```
 
 This creates one PR with up to 10 improvements instead of 10 separate PRs.
@@ -88,11 +88,11 @@ on:
     - cron: '0 6 * * 0'  # Sundays at 6am UTC
 
 # ...same steps, but:
-      - name: Run BlockSpool (deep)
+      - name: Run PromptWheel (deep)
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: blockspool --hours 1 --deep --pr --yes --no-tui
+        run: promptwheel --hours 1 --deep --pr --yes --no-tui
 ```
 
 ### PR Permissions
@@ -105,21 +105,21 @@ The built-in `GITHUB_TOKEN` is sufficient for creating PRs in the same repositor
 
 ```yaml
 # .gitlab-ci.yml
-blockspool:
+promptwheel:
   image: node:20
   rules:
     - if: $CI_PIPELINE_SOURCE == "schedule"
   variables:
     ANTHROPIC_API_KEY: $ANTHROPIC_API_KEY
   before_script:
-    - npm install -g @blockspool/cli
+    - npm install -g @promptwheel/cli
     - npm ci
-    - blockspool init
-    - git config user.name "BlockSpool"
-    - git config user.email "blockspool@noreply"
+    - promptwheel init
+    - git config user.name "PromptWheel"
+    - git config user.email "promptwheel@noreply"
     - git remote set-url origin "https://oauth2:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
   script:
-    - blockspool --hours 2 --pr --safe --yes --no-tui
+    - promptwheel --hours 2 --pr --safe --yes --no-tui
 ```
 
 Create a [pipeline schedule](https://docs.gitlab.com/ee/ci/pipelines/schedules.html) for nightly or weekly runs. Add `ANTHROPIC_API_KEY` as a CI/CD variable (masked).
@@ -140,7 +140,7 @@ Any CI system that can run Node.js and Git works. The requirements:
 
 ### Git Setup
 
-BlockSpool creates branches and worktrees. The CI runner needs:
+PromptWheel creates branches and worktrees. The CI runner needs:
 
 - Full git history (`git clone --depth=0` or `fetch-depth: 0`)
 - Push access to the repository (for branches and PRs)
@@ -152,10 +152,10 @@ BlockSpool creates branches and worktrees. The CI runner needs:
 #!/bin/bash
 set -e
 
-npm install -g @blockspool/cli
+npm install -g @promptwheel/cli
 npm ci
-blockspool init
-blockspool --hours 2 --pr --safe --yes --no-tui
+promptwheel init
+promptwheel --hours 2 --pr --safe --yes --no-tui
 ```
 
 ---
@@ -164,7 +164,7 @@ blockspool --hours 2 --pr --safe --yes --no-tui
 
 ### Run on a Schedule, Not on Every Push
 
-BlockSpool scouts and rewrites code. Running it on every push wastes API credits and creates merge conflicts with in-flight work. Use cron schedules:
+PromptWheel scouts and rewrites code. Running it on every push wastes API credits and creates merge conflicts with in-flight work. Use cron schedules:
 
 - **Nightly** for active projects
 - **Weekly** for stable/maintenance projects
@@ -175,23 +175,23 @@ BlockSpool scouts and rewrites code. Running it on every push wastes API credits
 Before enabling automated runs, test locally:
 
 ```bash
-blockspool --dry-run --safe
+promptwheel --dry-run --safe
 ```
 
-This shows what BlockSpool would propose without making changes.
+This shows what PromptWheel would propose without making changes.
 
 ### Use `--safe` for Conservative Changes
 
 The `--safe` flag restricts to low-risk categories (refactor, docs, types, perf). It excludes security fixes, cleanup, and tests, which are more likely to need human judgment.
 
-Remove `--safe` once you trust BlockSpool's output on your codebase.
+Remove `--safe` once you trust PromptWheel's output on your codebase.
 
 ### Scope to Specific Directories
 
 Avoid scanning generated code, vendored dependencies, or large test fixtures:
 
 ```bash
-blockspool --scope src --hours 2 --pr --yes --no-tui
+promptwheel --scope src --hours 2 --pr --yes --no-tui
 ```
 
 Or use config:
@@ -206,17 +206,17 @@ Or use config:
 
 ### Set Time Budgets
 
-Always use `--hours` in CI. Without it, BlockSpool runs a single cycle and exits (which is fine), but `--wheel` without `--hours` would run forever.
+Always use `--hours` in CI. Without it, PromptWheel runs a single cycle and exits (which is fine), but `--wheel` without `--hours` would run forever.
 
 ```bash
 # Single cycle (quick, exits when done)
-blockspool --pr --safe --yes --no-tui
+promptwheel --pr --safe --yes --no-tui
 
 # Timed run (2 hours, multiple cycles)
-blockspool --hours 2 --pr --safe --yes --no-tui
+promptwheel --hours 2 --pr --safe --yes --no-tui
 
 # Wheel mode with budget (runs until time expires)
-blockspool --wheel --hours 2 --pr --safe --yes --no-tui
+promptwheel --wheel --hours 2 --pr --safe --yes --no-tui
 ```
 
 ### Set Minimum Impact Score
@@ -224,7 +224,7 @@ blockspool --wheel --hours 2 --pr --safe --yes --no-tui
 Filter out low-value proposals to reduce noise:
 
 ```bash
-blockspool --min-impact-score 5 --hours 2 --pr --yes --no-tui
+promptwheel --min-impact-score 5 --hours 2 --pr --yes --no-tui
 ```
 
 ---
@@ -234,14 +234,14 @@ blockspool --min-impact-score 5 --hours 2 --pr --yes --no-tui
 Use the `--codex` flag with an `OPENAI_API_KEY`:
 
 ```yaml
-      - name: Run BlockSpool (Codex)
+      - name: Run PromptWheel (Codex)
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: blockspool --codex --codex-model gpt-5.3-codex --hours 2 --pr --safe --yes --no-tui
+        run: promptwheel --codex --codex-model gpt-5.3-codex --hours 2 --pr --safe --yes --no-tui
 ```
 
-In CI, always pass `--codex-model` explicitly. Without it, BlockSpool opens an interactive model picker that will hang in a non-TTY environment.
+In CI, always pass `--codex-model` explicitly. Without it, PromptWheel opens an interactive model picker that will hang in a non-TTY environment.
 
 The `codex login` OAuth flow is not available in CI — use `OPENAI_API_KEY` instead.
 
@@ -253,7 +253,7 @@ Use `--local` with a self-hosted model server (Ollama, vLLM, SGLang, LM Studio).
 
 ```yaml
 # Self-hosted runner with GPU
-blockspool-local:
+promptwheel-local:
   runs-on: self-hosted
   steps:
     - uses: actions/checkout@v4
@@ -266,19 +266,19 @@ blockspool-local:
     - name: Pull model
       run: ollama pull qwen2.5-coder:32b
 
-    - name: Run BlockSpool
+    - name: Run PromptWheel
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        npm install -g @blockspool/cli
-        blockspool init
-        blockspool --local --local-model qwen2.5-coder:32b --hours 2 --pr --safe --yes --no-tui
+        npm install -g @promptwheel/cli
+        promptwheel init
+        promptwheel --local --local-model qwen2.5-coder:32b --hours 2 --pr --safe --yes --no-tui
 ```
 
 For a remote model server:
 
 ```bash
-blockspool --local --local-model deepseek-coder-v2 --local-url http://gpu-server:8080/v1 --hours 2 --pr --yes --no-tui
+promptwheel --local --local-model deepseek-coder-v2 --local-url http://gpu-server:8080/v1 --hours 2 --pr --yes --no-tui
 ```
 
 Local models have no sandbox. Worktree isolation and QA gating provide the safety layer.
@@ -296,14 +296,14 @@ Local models have no sandbox. Worktree isolation and QA gating provide the safet
 
 ### Artifacts
 
-BlockSpool stores run logs in `.blockspool/runs/`. Save them as CI artifacts for debugging:
+PromptWheel stores run logs in `.promptwheel/runs/`. Save them as CI artifacts for debugging:
 
 ```yaml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: blockspool-logs
-          path: .blockspool/runs/
+          name: promptwheel-logs
+          path: .promptwheel/runs/
           retention-days: 7
 ```
 
@@ -317,5 +317,5 @@ Combine with Slack/email notifications on workflow failure:
         run: |
           curl -X POST "$SLACK_WEBHOOK" \
             -H 'Content-Type: application/json' \
-            -d '{"text":"BlockSpool run failed. Check: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}'
+            -d '{"text":"PromptWheel run failed. Check: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}'
 ```

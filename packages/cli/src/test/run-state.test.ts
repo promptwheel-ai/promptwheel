@@ -46,7 +46,7 @@ function makeProposal(overrides: Partial<DeferredProposal> = {}): DeferredPropos
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-state-test-'));
-  fs.mkdirSync(path.join(tmpDir, '.blockspool'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, '.promptwheel'), { recursive: true });
 });
 
 afterEach(() => {

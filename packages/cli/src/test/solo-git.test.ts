@@ -90,9 +90,9 @@ describe('cleanupWorktree', () => {
   it('calls git worktree remove when path exists', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
 
-    await cleanupWorktree('/repo', '/repo/.blockspool/worktrees/test');
+    await cleanupWorktree('/repo', '/repo/.promptwheel/worktrees/test');
 
-    expect(fs.existsSync).toHaveBeenCalledWith('/repo/.blockspool/worktrees/test');
+    expect(fs.existsSync).toHaveBeenCalledWith('/repo/.promptwheel/worktrees/test');
     expect(mockExec).toHaveBeenCalledWith(
       expect.stringContaining('git worktree remove'),
       expect.objectContaining({ cwd: '/repo' }),
@@ -104,7 +104,7 @@ describe('cleanupWorktree', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
 
     await expect(
-      cleanupWorktree('/repo', '/repo/.blockspool/worktrees/test')
+      cleanupWorktree('/repo', '/repo/.promptwheel/worktrees/test')
     ).resolves.toBeUndefined();
 
     expect(mockExec).not.toHaveBeenCalled();
@@ -117,7 +117,7 @@ describe('cleanupWorktree', () => {
     });
 
     await expect(
-      cleanupWorktree('/repo', '/repo/.blockspool/worktrees/test')
+      cleanupWorktree('/repo', '/repo/.promptwheel/worktrees/test')
     ).resolves.toBeUndefined();
   });
 });
@@ -140,10 +140,10 @@ describe('createMilestoneBranch', () => {
     expect(typeof result.milestoneWorktreePath).toBe('string');
   });
 
-  it('branch name starts with blockspool/milestone-', async () => {
+  it('branch name starts with promptwheel/milestone-', async () => {
     const result = await createMilestoneBranch('/repo', 'main');
 
-    expect(result.milestoneBranch).toMatch(/^blockspool\/milestone-/);
+    expect(result.milestoneBranch).toMatch(/^promptwheel\/milestone-/);
   });
 
   it('creates worktrees directory', async () => {
@@ -172,7 +172,7 @@ describe('createMilestoneBranch', () => {
 
     // Should create branch from origin/main
     expect(mockExec).toHaveBeenCalledWith(
-      expect.stringMatching(/git branch "blockspool\/milestone-.*" "origin\/main"/),
+      expect.stringMatching(/git branch "promptwheel\/milestone-.*" "origin\/main"/),
       expect.objectContaining({ cwd: '/repo' }),
       expect.any(Function)
     );
@@ -200,7 +200,7 @@ describe('mergeTicketToMilestone', () => {
     const result = await mergeTicketToMilestone(
       '/repo',
       'feature-branch',
-      '/repo/.blockspool/worktrees/_milestone'
+      '/repo/.promptwheel/worktrees/_milestone'
     );
 
     expect(result).toEqual({ success: true, conflicted: false });
@@ -231,7 +231,7 @@ describe('mergeTicketToMilestone', () => {
         callback(null, { stdout: '', stderr: '' });
       } else if (execCallCount === 2) {
         // rev-parse returns branch name
-        callback(null, { stdout: 'blockspool/milestone-abc\n', stderr: '' });
+        callback(null, { stdout: 'promptwheel/milestone-abc\n', stderr: '' });
       } else {
         // abort commands succeed
         callback(null, { stdout: '', stderr: '' });
@@ -241,7 +241,7 @@ describe('mergeTicketToMilestone', () => {
     const result = await mergeTicketToMilestone(
       '/repo',
       'feature-branch',
-      '/repo/.blockspool/worktrees/_milestone'
+      '/repo/.promptwheel/worktrees/_milestone'
     );
 
     expect(result).toEqual({ success: false, conflicted: true });
@@ -270,7 +270,7 @@ describe('mergeTicketToMilestone', () => {
         callback(null, { stdout: '', stderr: '' });
       } else if (execCallCount === 2) {
         // rev-parse returns branch name
-        callback(null, { stdout: 'blockspool/milestone-abc\n', stderr: '' });
+        callback(null, { stdout: 'promptwheel/milestone-abc\n', stderr: '' });
       } else {
         callback(null, { stdout: '', stderr: '' });
       }
@@ -279,7 +279,7 @@ describe('mergeTicketToMilestone', () => {
     const result = await mergeTicketToMilestone(
       '/repo',
       'feature-branch',
-      '/repo/.blockspool/worktrees/_milestone'
+      '/repo/.promptwheel/worktrees/_milestone'
     );
 
     expect(result).toEqual({ success: true, conflicted: false });

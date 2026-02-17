@@ -4,7 +4,7 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { repos } from '@blockspool/core';
+import { repos } from '@promptwheel/core';
 import { execFileSync } from 'node:child_process';
 import type { SessionManager } from '../state.js';
 
@@ -24,7 +24,7 @@ function validateBranchName(branch: string): boolean {
 
 export function registerGitTools(server: McpServer, getState: () => SessionManager) {
   server.tool(
-    'blockspool_git_setup',
+    'promptwheel_git_setup',
     'Create/checkout a branch for the current ticket. Returns branch name. Use after completing a ticket to prepare for PR creation.',
     {
       ticketId: z.string().optional().describe('The ticket ID to create a branch for.'),
@@ -69,7 +69,7 @@ export function registerGitTools(server: McpServer, getState: () => SessionManag
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '')
         .slice(0, 50);
-      const branchName = `blockspool/${ticket.id}/${slug}`;
+      const branchName = `promptwheel/${ticket.id}/${slug}`;
 
       const cwd = state.project.rootPath;
 

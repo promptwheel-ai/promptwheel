@@ -2,7 +2,7 @@
  * Tool Registry — pure types, built-in specs, and filtering algorithms.
  *
  * Replaces hardcoded auto-approve arrays with a queryable set of tool specs.
- * No I/O — the ToolRegistry class in @blockspool/mcp handles custom tool loading.
+ * No I/O — the ToolRegistry class in @promptwheel/mcp handles custom tool loading.
  */
 
 // ---------------------------------------------------------------------------

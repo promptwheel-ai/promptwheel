@@ -205,7 +205,7 @@ describe('normalizeQaConfig', () => {
     });
     const result = normalizeQaConfig(config);
     expect(result.artifacts).toEqual({
-      dir: '.blockspool/artifacts',
+      dir: '.promptwheel/artifacts',
       maxLogBytes: 200_000,
       tailBytes: 16_384,
     });

@@ -153,7 +153,7 @@ describe('buildExclusionIndex', () => {
     const excludePath = path.join(tmpDir, '.git', 'info', 'exclude');
     const content = fs.readFileSync(excludePath, 'utf-8');
     expect(content).toContain('node_modules/');
-    expect(content).toContain('Auto-discovered by BlockSpool');
+    expect(content).toContain('Auto-discovered by PromptWheel');
   });
 
   it('makes git status ignore discovered patterns', () => {
@@ -218,7 +218,7 @@ describe('buildExclusionIndex', () => {
     const content = fs.readFileSync(excludePath, 'utf-8');
 
     // The marker should appear exactly once
-    const markerCount = content.split('Auto-discovered by BlockSpool').length - 1;
+    const markerCount = content.split('Auto-discovered by PromptWheel').length - 1;
     expect(markerCount).toBe(1);
   });
 

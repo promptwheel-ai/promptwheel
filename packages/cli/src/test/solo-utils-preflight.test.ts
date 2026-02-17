@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { DatabaseAdapter } from '@blockspool/core/db';
+import type { DatabaseAdapter } from '@promptwheel/core/db';
 import { runPreflightChecks, findConflictingTickets } from '../lib/solo-utils.js';
 
 // Mock child_process

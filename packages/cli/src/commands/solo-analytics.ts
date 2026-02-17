@@ -29,7 +29,7 @@ export function registerAnalyticsCommands(solo: Command): void {
 
       if (events.length === 0) {
         console.log(chalk.yellow('No metrics data yet.'));
-        console.log(chalk.gray('Run blockspool to generate metrics.'));
+        console.log(chalk.gray('Run promptwheel to generate metrics.'));
         return;
       }
 
@@ -73,7 +73,7 @@ function displayCompactAnalytics(
   const duration = summary.timeRange.end - summary.timeRange.start;
   const hours = Math.round(duration / 3600000 * 10) / 10;
 
-  console.log(chalk.cyan('\n📊 BlockSpool Value Report\n'));
+  console.log(chalk.cyan('\n📊 PromptWheel Value Report\n'));
   console.log(chalk.gray(`Data: ${new Date(summary.timeRange.start).toLocaleDateString()} to ${new Date(summary.timeRange.end).toLocaleDateString()} (${hours}h)`));
   console.log();
 
@@ -95,7 +95,7 @@ function displayCompactAnalytics(
       working.push(`Learnings: ${applied} applied${effectivenessStr}`);
       if (learningStats.successRate < 0.5 && learningStats.applied >= 5) {
         attention.push('Learnings effectiveness below 50%');
-        recommendations.push('Review learnings with `blockspool analytics --verbose`');
+        recommendations.push('Review learnings with `promptwheel analytics --verbose`');
       }
     } else if (selected > 0) {
       working.push(`Learnings: ${selected} selected for context`);

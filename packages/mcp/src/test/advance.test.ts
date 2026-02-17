@@ -8,9 +8,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import { repos } from '@blockspool/core';
-import type { DatabaseAdapter, Project } from '@blockspool/core';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import { repos } from '@promptwheel/core';
+import type { DatabaseAdapter, Project } from '@promptwheel/core';
 import { RunManager } from '../run-manager.js';
 import { advance } from '../advance.js';
 import { processEvent } from '../event-processor.js';
@@ -483,7 +483,7 @@ describe('advance — budget warnings', () => {
     await advance(ctx());
 
     // Check events for budget warning
-    const eventsPath = path.join(tmpDir, '.blockspool', 'runs', s.run_id, 'events.ndjson');
+    const eventsPath = path.join(tmpDir, '.promptwheel', 'runs', s.run_id, 'events.ndjson');
     const events = fs.readFileSync(eventsPath, 'utf8')
       .trim().split('\n').map(l => JSON.parse(l));
     const warnings = events.filter(e => e.type === 'BUDGET_WARNING');
@@ -536,11 +536,11 @@ describe('advance — parallel execution event forwarding', () => {
     // Initialize ticket worker (simulating what advanceNextTicket does)
     run.initTicketWorker(ticket.id, { title: ticket.title });
 
-    // Call processEvent with PR_CREATED (simulating user calling blockspool_ingest_event)
+    // Call processEvent with PR_CREATED (simulating user calling promptwheel_ingest_event)
     const result = await processEvent(run, db, 'PR_CREATED', {
       ticket_id: ticket.id,
       url: 'https://github.com/test/pr/1',
-      branch: 'blockspool/test',
+      branch: 'promptwheel/test',
     }, project);
 
     // Should be forwarded to ticket worker and complete the ticket

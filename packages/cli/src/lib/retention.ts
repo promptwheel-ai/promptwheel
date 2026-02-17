@@ -2,7 +2,7 @@
  * Retention & Cleanup
  *
  * Prune logic for all unbounded state accumulation points.
- * Called automatically on session start and via `blockspool prune`.
+ * Called automatically on session start and via `promptwheel prune`.
  */
 
 import * as fs from 'node:fs';
@@ -13,10 +13,10 @@ import {
   type RetentionConfig,
   type SoloConfig,
   DEFAULT_RETENTION_CONFIG,
-  getBlockspoolDir,
+  getPromptwheelDir,
 } from './solo-config.js';
 import { readRunState, writeRunState } from './run-state.js';
-import type { DatabaseAdapter } from '@blockspool/core/db';
+import type { DatabaseAdapter } from '@promptwheel/core/db';
 
 // =============================================================================
 // Report
@@ -72,14 +72,14 @@ export function getRetentionConfig(config: SoloConfig | null): RetentionConfig {
 // =============================================================================
 
 /**
- * Sort .blockspool/runs/ by mtime, delete oldest beyond cap.
+ * Sort .promptwheel/runs/ by mtime, delete oldest beyond cap.
  */
 export function pruneRunFolders(
   repoRoot: string,
   maxRuns: number,
   dryRun = false,
 ): number {
-  const runsDir = path.join(getBlockspoolDir(repoRoot), 'runs');
+  const runsDir = path.join(getPromptwheelDir(repoRoot), 'runs');
   if (!fs.existsSync(runsDir)) return 0;
 
   const entries = fs.readdirSync(runsDir, { withFileTypes: true })
@@ -110,7 +110,7 @@ export function pruneHistory(
   maxEntries: number,
   dryRun = false,
 ): number {
-  const historyPath = path.join(getBlockspoolDir(repoRoot), 'history.ndjson');
+  const historyPath = path.join(getPromptwheelDir(repoRoot), 'history.ndjson');
   if (!fs.existsSync(historyPath)) return 0;
 
   const content = fs.readFileSync(historyPath, 'utf-8');
@@ -134,7 +134,7 @@ export function pruneArtifacts(
   maxPerRun: number,
   dryRun = false,
 ): number {
-  const runsDir = path.join(getBlockspoolDir(repoRoot), 'runs');
+  const runsDir = path.join(getPromptwheelDir(repoRoot), 'runs');
   if (!fs.existsSync(runsDir)) return 0;
 
   let totalRemoved = 0;
@@ -174,7 +174,7 @@ export function pruneSpoolArchives(
   maxArchives: number,
   dryRun = false,
 ): number {
-  const spoolDir = path.join(getBlockspoolDir(repoRoot), 'spool');
+  const spoolDir = path.join(getPromptwheelDir(repoRoot), 'spool');
   if (!fs.existsSync(spoolDir)) return 0;
 
   const archives = fs.readdirSync(spoolDir)
@@ -257,11 +257,11 @@ export async function pruneCompletedTickets(
 }
 
 /**
- * Delete local blockspool/* branches that are fully merged, keeping the
+ * Delete local promptwheel/* branches that are fully merged, keeping the
  * newest N merged branches. Only touches local branches — never deletes
  * remote branches, and never touches unmerged branches.
  *
- * NOT called during auto-prune-on-start — only via `blockspool prune`.
+ * NOT called during auto-prune-on-start — only via `promptwheel prune`.
  */
 export function pruneMergedBranches(
   repoRoot: string,
@@ -269,10 +269,10 @@ export function pruneMergedBranches(
   dryRun = false,
 ): number {
   try {
-    // Get the list of blockspool/* branches that are fully merged into HEAD
+    // Get the list of promptwheel/* branches that are fully merged into HEAD
     const mergedResult = spawnSync(
       'git',
-      ['branch', '--merged', 'HEAD', '--list', 'blockspool/*', '--sort=-committerdate', '--format=%(refname:short)'],
+      ['branch', '--merged', 'HEAD', '--list', 'promptwheel/*', '--sort=-committerdate', '--format=%(refname:short)'],
       { cwd: repoRoot, encoding: 'utf-8' },
     );
     if (mergedResult.status !== 0 || !mergedResult.stdout) return 0;
@@ -316,9 +316,9 @@ export function pruneMergedBranches(
 // =============================================================================
 
 /**
- * Delete local blockspool/tkt_* and blockspool/milestone-* branches that are
+ * Delete local promptwheel/tkt_* and promptwheel/milestone-* branches that are
  * NOT merged and whose last commit is older than `maxDays` days. Never touches
- * blockspool-direct or user branches. Never deletes the current branch.
+ * promptwheel-direct or user branches. Never deletes the current branch.
  */
 export function pruneStaleBranches(
   repoRoot: string,
@@ -339,7 +339,7 @@ export function pruneStaleBranches(
     let removed = 0;
 
     // Prune both tkt_* and milestone-* branches
-    const refPatterns = ['refs/heads/blockspool/tkt_*', 'refs/heads/blockspool/milestone-*'];
+    const refPatterns = ['refs/heads/promptwheel/tkt_*', 'refs/heads/promptwheel/milestone-*'];
     for (const pattern of refPatterns) {
       const listResult = spawnSync(
         'git',
@@ -387,7 +387,7 @@ export function pruneStaleBranches(
  */
 export function pruneStaleWorktrees(repoRoot: string, dryRun = false): number {
   try {
-    const worktreesDir = path.join(repoRoot, '.blockspool', 'worktrees');
+    const worktreesDir = path.join(repoRoot, '.promptwheel', 'worktrees');
     if (!fs.existsSync(worktreesDir)) return 0;
 
     const entries = fs.readdirSync(worktreesDir).filter(e => {
@@ -433,7 +433,7 @@ export function pruneStaleWorktrees(repoRoot: string, dryRun = false): number {
 
           // Also delete the associated branch
           if (entry.startsWith('tkt_')) {
-            spawnSync('git', ['branch', '-D', `blockspool/${entry}`], {
+            spawnSync('git', ['branch', '-D', `promptwheel/${entry}`], {
               cwd: repoRoot,
               encoding: 'utf-8',
             });
@@ -602,7 +602,7 @@ function readFirstLine(filePath: string): string | null {
 export function rotateLogs(repoRoot: string, maxBytes: number, dryRun = false): number {
   if (maxBytes <= 0) return 0;
 
-  const bsDir = getBlockspoolDir(repoRoot);
+  const bsDir = getPromptwheelDir(repoRoot);
   const logPath = path.join(bsDir, 'tui.log');
   if (!fs.existsSync(logPath)) return 0;
 
@@ -632,7 +632,7 @@ export function pruneMetrics(
 ): number {
   if (maxEntries <= 0) return 0;
 
-  const metricsPath = path.join(getBlockspoolDir(repoRoot), 'metrics.ndjson');
+  const metricsPath = path.join(getPromptwheelDir(repoRoot), 'metrics.ndjson');
   if (!fs.existsSync(metricsPath)) return 0;
 
   const content = fs.readFileSync(metricsPath, 'utf-8');
@@ -653,7 +653,7 @@ export function pruneMetrics(
 // =============================================================================
 
 /**
- * Delete artifact files older than maxDays from .blockspool/artifacts/.
+ * Delete artifact files older than maxDays from .promptwheel/artifacts/.
  * Walks all subdirectories (executions/, diffs/, runs/, violations/).
  * Removes empty subdirectories afterward.
  */
@@ -664,7 +664,7 @@ export function pruneArtifactsByAge(
 ): number {
   if (maxDays <= 0) return 0;
 
-  const artifactsDir = path.join(getBlockspoolDir(repoRoot), 'artifacts');
+  const artifactsDir = path.join(getPromptwheelDir(repoRoot), 'artifacts');
   if (!fs.existsSync(artifactsDir)) return 0;
 
   const cutoff = Date.now() - (maxDays * 24 * 60 * 60 * 1000);
@@ -720,11 +720,11 @@ export function gitWorktreePrune(repoRoot: string): void {
 // =============================================================================
 
 /**
- * Write a session lock file (.blockspool/session.pid) with the current PID.
+ * Write a session lock file (.promptwheel/session.pid) with the current PID.
  * Returns true if lock acquired, false if another live session holds it.
  */
 export function acquireSessionLock(repoRoot: string): { acquired: boolean; stalePid?: number } {
-  const lockPath = path.join(getBlockspoolDir(repoRoot), 'session.pid');
+  const lockPath = path.join(getPromptwheelDir(repoRoot), 'session.pid');
 
   // Check existing lock
   if (fs.existsSync(lockPath)) {
@@ -766,7 +766,7 @@ function acquireLock(lockPath: string, stalePid?: number): { acquired: boolean; 
  * Release the session lock file on clean shutdown.
  */
 export function releaseSessionLock(repoRoot: string): void {
-  const lockPath = path.join(getBlockspoolDir(repoRoot), 'session.pid');
+  const lockPath = path.join(getPromptwheelDir(repoRoot), 'session.pid');
   try {
     // Only remove if we own it
     const content = fs.readFileSync(lockPath, 'utf-8').trim();
@@ -793,7 +793,7 @@ export function pruneAll(
   report.spoolArchivesRemoved = pruneSpoolArchives(repoRoot, config.maxSpoolArchives, dryRun);
   report.deferredProposalsRemoved = pruneDeferredProposals(repoRoot, config.maxDeferredProposals, dryRun);
   report.staleWorktreesRemoved = pruneStaleWorktrees(repoRoot, dryRun);
-  // Branch pruning is NOT run here — only via explicit `blockspool prune`
+  // Branch pruning is NOT run here — only via explicit `promptwheel prune`
 
   // Log rotation & metrics pruning
   report.logsRotated = rotateLogs(repoRoot, config.maxLogSizeBytes, dryRun);

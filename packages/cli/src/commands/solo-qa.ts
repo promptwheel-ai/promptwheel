@@ -10,8 +10,8 @@ import {
   runQa,
   getQaRunDetails,
   type QaConfig,
-} from '@blockspool/core/services';
-import { projects } from '@blockspool/core/repos';
+} from '@promptwheel/core/services';
+import { projects } from '@promptwheel/core/repos';
 import { createGitService } from '../lib/git.js';
 import { createExecRunner } from '../lib/exec.js';
 import { createLogger } from '../lib/logger.js';
@@ -47,7 +47,7 @@ export function registerQaCommands(solo: Command): void {
       const isJsonMode = options.json;
 
       if (!isJsonMode) {
-        console.log(chalk.blue('🧪 BlockSpool Solo QA'));
+        console.log(chalk.blue('🧪 PromptWheel Solo QA'));
         console.log();
       }
 
@@ -75,7 +75,7 @@ export function registerQaCommands(solo: Command): void {
         if (isJsonMode) {
           console.log(JSON.stringify({ success: false, error: 'No config found' }));
         } else {
-          console.error(chalk.red('✗ No config found. Run: blockspool solo init'));
+          console.error(chalk.red('✗ No config found. Run: promptwheel solo init'));
         }
         process.exit(1);
       }

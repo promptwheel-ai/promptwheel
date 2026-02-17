@@ -55,7 +55,7 @@ export async function resolveBackends(options: AuthOptions): Promise<{
   if (options.local) {
     if (!options.localModel) {
       console.error(chalk.red('✗ --local-model is required when using --local'));
-      console.error(chalk.gray('  Example: blockspool --local --local-model kimi-k2.5'));
+      console.error(chalk.gray('  Example: promptwheel --local --local-model kimi-k2.5'));
       process.exit(1);
     }
     options.scoutBackend = options.scoutBackend ?? 'openai-local';
@@ -88,19 +88,19 @@ export async function resolveBackends(options: AuthOptions): Promise<{
       console.error(chalk.gray('  The CLI spawns Claude as subprocesses (requires ANTHROPIC_API_KEY).'));
       console.error(chalk.gray('  Inside Claude Code, use the plugin instead:'));
       console.error();
-      console.error(chalk.white('    /blockspool:run'));
+      console.error(chalk.white('    /promptwheel:run'));
       console.error();
       console.error(chalk.gray('  Or run from a regular terminal:'));
       console.error();
-      console.error(chalk.white('    blockspool          # Claude (needs ANTHROPIC_API_KEY)'));
-      console.error(chalk.white('    blockspool --codex  # Codex (needs OPENAI_API_KEY)'));
+      console.error(chalk.white('    promptwheel          # Claude (needs ANTHROPIC_API_KEY)'));
+      console.error(chalk.white('    promptwheel --codex  # Codex (needs OPENAI_API_KEY)'));
       console.error();
       process.exit(1);
     } else {
       console.log(chalk.yellow('⚠ Running inside Claude Code session'));
       console.log(chalk.yellow('  This works, but you\'re paying for an idle Claude Code session.'));
       console.log(chalk.yellow('  Consider running from a regular terminal instead:'));
-      console.log(chalk.white('    blockspool --codex'));
+      console.log(chalk.white('    promptwheel --codex'));
       console.log();
     }
   }
@@ -109,8 +109,8 @@ export async function resolveBackends(options: AuthOptions): Promise<{
   if (needsClaude && !process.env.ANTHROPIC_API_KEY) {
     console.error(chalk.red('✗ ANTHROPIC_API_KEY not set'));
     console.error(chalk.gray('  Required for Claude backend. Set the env var, or use:'));
-    console.error(chalk.gray('    blockspool --codex  (uses OPENAI_API_KEY or codex login)'));
-    console.error(chalk.gray('    /blockspool:run    (inside Claude Code, uses subscription)'));
+    console.error(chalk.gray('    promptwheel --codex  (uses OPENAI_API_KEY or codex login)'));
+    console.error(chalk.gray('    /promptwheel:run    (inside Claude Code, uses subscription)'));
     process.exit(1);
   }
 
@@ -219,7 +219,7 @@ async function resolveCodexModel(options: AuthOptions): Promise<void> {
     } else {
       options.codexModel = savedModel;
       console.log(chalk.gray(`\nModel: ${options.codexModel} (saved)`));
-      console.log(chalk.gray('  Change with: blockspool --codex --codex-model <name>'));
+      console.log(chalk.gray('  Change with: promptwheel --codex --codex-model <name>'));
       console.log();
       return;
     }

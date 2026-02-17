@@ -14,7 +14,7 @@ export const codex: ProviderConfig = {
   defaultScoutConcurrency: 4,
   defaultBatchTokenBudget: 60_000,
   async createScoutBackend(opts) {
-    const { CodexScoutBackend } = await import('@blockspool/core/scout');
+    const { CodexScoutBackend } = await import('@promptwheel/core/scout');
     return new CodexScoutBackend({ apiKey: opts.apiKey, model: opts.model });
   },
   async createExecutionBackend(opts) {

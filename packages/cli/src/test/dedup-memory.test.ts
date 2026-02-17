@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 function readRaw(): DedupEntry[] {
-  const fp = path.join(tmpDir, '.blockspool', 'dedup-memory.json');
+  const fp = path.join(tmpDir, '.promptwheel', 'dedup-memory.json');
   if (!fs.existsSync(fp)) return [];
   return JSON.parse(fs.readFileSync(fp, 'utf8'));
 }
@@ -75,14 +75,14 @@ describe('recordDedupEntries', () => {
 
   it('skips empty array without writing', () => {
     recordDedupEntries(tmpDir, []);
-    expect(fs.existsSync(path.join(tmpDir, '.blockspool', 'dedup-memory.json'))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.promptwheel', 'dedup-memory.json'))).toBe(false);
   });
 });
 
 describe('loadDedupMemory', () => {
   it('applies decay and prunes dead entries', () => {
     // Seed an entry with weight 3 — should die after one load (decay 5)
-    const fp = path.join(tmpDir, '.blockspool', 'dedup-memory.json');
+    const fp = path.join(tmpDir, '.promptwheel', 'dedup-memory.json');
     fs.mkdirSync(path.dirname(fp), { recursive: true });
     const now = new Date().toISOString();
     const entries: DedupEntry[] = [{
@@ -100,7 +100,7 @@ describe('loadDedupMemory', () => {
   });
 
   it('halves decay for recently-seen entries', () => {
-    const fp = path.join(tmpDir, '.blockspool', 'dedup-memory.json');
+    const fp = path.join(tmpDir, '.promptwheel', 'dedup-memory.json');
     fs.mkdirSync(path.dirname(fp), { recursive: true });
     const entries: DedupEntry[] = [{
       title: 'Fresh entry',
@@ -119,7 +119,7 @@ describe('loadDedupMemory', () => {
   });
 
   it('halves decay again for completed entries', () => {
-    const fp = path.join(tmpDir, '.blockspool', 'dedup-memory.json');
+    const fp = path.join(tmpDir, '.promptwheel', 'dedup-memory.json');
     fs.mkdirSync(path.dirname(fp), { recursive: true });
     const entries: DedupEntry[] = [{
       title: 'Completed fresh',
@@ -270,7 +270,7 @@ describe('recordDedupEntry — extended fields', () => {
 
 describe('getEnabledProposals', () => {
   function seedEntries(entries: DedupEntry[]): void {
-    const fp = path.join(tmpDir, '.blockspool', 'dedup-memory.json');
+    const fp = path.join(tmpDir, '.promptwheel', 'dedup-memory.json');
     fs.mkdirSync(path.dirname(fp), { recursive: true });
     fs.writeFileSync(fp, JSON.stringify(entries), 'utf8');
   }

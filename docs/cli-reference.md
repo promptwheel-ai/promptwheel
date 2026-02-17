@@ -1,11 +1,11 @@
 # CLI Reference
 
-Complete reference for all BlockSpool CLI commands.
+Complete reference for all PromptWheel CLI commands.
 
 ## Global Options
 
 ```bash
-blockspool [options] <command>
+promptwheel [options] <command>
 ```
 
 | Option | Description |
@@ -15,12 +15,12 @@ blockspool [options] <command>
 
 ## Commands
 
-### `blockspool solo doctor`
+### `promptwheel solo doctor`
 
 Check system prerequisites and configuration.
 
 ```bash
-blockspool solo doctor
+promptwheel solo doctor
 ```
 
 **Checks:**
@@ -32,7 +32,7 @@ blockspool solo doctor
 
 **Output:**
 ```
-BlockSpool Doctor
+PromptWheel Doctor
 ─────────────────
 ✓ Node.js 20.10.0
 ✓ Git 2.43.0
@@ -45,12 +45,12 @@ All checks passed!
 
 ---
 
-### `blockspool solo init`
+### `promptwheel solo init`
 
-Initialize BlockSpool in the current directory.
+Initialize PromptWheel in the current directory.
 
 ```bash
-blockspool solo init [options]
+promptwheel solo init [options]
 ```
 
 **Options:**
@@ -60,7 +60,7 @@ blockspool solo init [options]
 | `--force` | Overwrite existing config | `false` |
 
 **What it does:**
-1. Creates `.blockspool/` directory
+1. Creates `.promptwheel/` directory
 2. Creates `config.json` with auto-detected settings
 3. Initializes SQLite database (or connects to Postgres if `DATABASE_URL` is set)
 
@@ -71,12 +71,12 @@ blockspool solo init [options]
 
 ---
 
-### `blockspool solo scout`
+### `promptwheel solo scout`
 
 Scan codebase for improvement opportunities.
 
 ```bash
-blockspool solo scout [path] [options]
+promptwheel solo scout [path] [options]
 ```
 
 **Arguments:**
@@ -102,26 +102,26 @@ blockspool solo scout [path] [options]
 **Example:**
 ```bash
 # Scan entire project
-blockspool solo scout .
+promptwheel solo scout .
 
 # Scan specific directory
-blockspool solo scout src/api
+promptwheel solo scout src/api
 
 # Only security issues
-blockspool solo scout . --categories security
+promptwheel solo scout . --categories security
 
 # Limit results
-blockspool solo scout . --max 10
+promptwheel solo scout . --max 10
 ```
 
 ---
 
-### `blockspool solo status`
+### `promptwheel solo status`
 
 Show current state of tickets and proposals.
 
 ```bash
-blockspool solo status [options]
+promptwheel solo status [options]
 ```
 
 **Options:**
@@ -133,7 +133,7 @@ blockspool solo status [options]
 
 **Output:**
 ```
-BlockSpool Status
+PromptWheel Status
 ─────────────────
 
 Proposals (3 pending):
@@ -151,12 +151,12 @@ Recent:
 
 ---
 
-### `blockspool solo approve`
+### `promptwheel solo approve`
 
 Convert proposals to actionable tickets.
 
 ```bash
-blockspool solo approve <selection>
+promptwheel solo approve <selection>
 ```
 
 **Arguments:**
@@ -168,26 +168,26 @@ blockspool solo approve <selection>
 **Examples:**
 ```bash
 # Approve single proposal
-blockspool solo approve 1
+promptwheel solo approve 1
 
 # Approve multiple
-blockspool solo approve 1,3,5
+promptwheel solo approve 1,3,5
 
 # Approve range
-blockspool solo approve 1-5
+promptwheel solo approve 1-5
 
 # Approve all
-blockspool solo approve all
+promptwheel solo approve all
 ```
 
 ---
 
-### `blockspool solo run`
+### `promptwheel solo run`
 
 Execute a ticket.
 
 ```bash
-blockspool solo run <ticketId> [options]
+promptwheel solo run <ticketId> [options]
 ```
 
 **Arguments:**
@@ -205,7 +205,7 @@ blockspool solo run <ticketId> [options]
 | `--dry-run` | Show what would happen | `false` |
 
 **Process:**
-1. Creates branch `blockspool/<ticket-id>`
+1. Creates branch `promptwheel/<ticket-id>`
 2. Runs Claude CLI with ticket context
 3. Runs QA commands
 4. If QA passes and `--pr`: creates PR
@@ -214,35 +214,35 @@ blockspool solo run <ticketId> [options]
 **Examples:**
 ```bash
 # Execute ticket
-blockspool solo run tkt_abc123
+promptwheel solo run tkt_abc123
 
 # Execute and create PR
-blockspool solo run tkt_abc123 --pr
+promptwheel solo run tkt_abc123 --pr
 
 # Custom branch
-blockspool solo run tkt_abc123 --branch fix/sql-injection
+promptwheel solo run tkt_abc123 --branch fix/sql-injection
 ```
 
 ---
 
-### `blockspool solo retry`
+### `promptwheel solo retry`
 
 Retry a blocked ticket.
 
 ```bash
-blockspool solo retry <ticketId>
+promptwheel solo retry <ticketId>
 ```
 
 Resets ticket status from `blocked` to `pending` so it can be run again.
 
 ---
 
-### `blockspool solo qa`
+### `promptwheel solo qa`
 
 Manually run QA commands.
 
 ```bash
-blockspool solo qa [options]
+promptwheel solo qa [options]
 ```
 
 **Options:**
@@ -255,12 +255,12 @@ Runs all configured QA commands (typecheck, lint, test) and reports results.
 
 ---
 
-### `blockspool solo auto`
+### `promptwheel solo auto`
 
 Run in auto mode (planning by default, `--wheel` for continuous).
 
 ```bash
-blockspool solo auto [mode]
+promptwheel solo auto [mode]
 ```
 
 **Modes:**
@@ -281,12 +281,12 @@ blockspool solo auto [mode]
 
 ---
 
-### `blockspool solo tui`
+### `promptwheel solo tui`
 
 Launch interactive terminal UI.
 
 ```bash
-blockspool solo tui
+promptwheel solo tui
 ```
 
 **Features:**
@@ -310,8 +310,8 @@ blockspool solo tui
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DATABASE_URL` | Postgres connection string | SQLite |
-| `BLOCKSPOOL_LOG_LEVEL` | Log verbosity | `info` |
-| `BLOCKSPOOL_CONFIG` | Config file path | `.blockspool/config.json` |
+| `PROMPTWHEEL_LOG_LEVEL` | Log verbosity | `info` |
+| `PROMPTWHEEL_CONFIG` | Config file path | `.promptwheel/config.json` |
 
 ## Exit Codes
 

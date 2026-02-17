@@ -1,5 +1,5 @@
 /**
- * Doctor checks for BlockSpool prerequisites
+ * Doctor checks for PromptWheel prerequisites
  *
  * Detects missing tools, auth issues, and configuration problems
  * before users hit cryptic errors mid-workflow.
@@ -80,8 +80,8 @@ export async function runDoctorChecks(options: {
   // 7. gh CLI authenticated (for --pr)
   checks.push(await checkGhAuthenticated());
 
-  // 8. .blockspool/ writable
-  checks.push(checkBlockspoolWritable(options.repoRoot));
+  // 8. .promptwheel/ writable
+  checks.push(checkPromptwheelWritable(options.repoRoot));
 
   // 9. Optional: ripgrep for faster scanning
   checks.push(checkRipgrepInstalled());
@@ -96,7 +96,7 @@ export async function runDoctorChecks(options: {
   const claudeAuth = checks.find(c => c.name === 'claude-auth')?.status === 'pass';
   const hasGh = checks.find(c => c.name === 'gh')?.status === 'pass';
   const ghAuth = checks.find(c => c.name === 'gh-auth')?.status === 'pass';
-  const writable = checks.find(c => c.name === 'blockspool-dir')?.status !== 'fail';
+  const writable = checks.find(c => c.name === 'promptwheel-dir')?.status !== 'fail';
   const hasSqlite = checks.find(c => c.name === 'sqlite')?.status === 'pass';
 
   return {
@@ -285,25 +285,25 @@ async function checkGhAuthenticated(): Promise<CheckResult> {
 }
 
 /**
- * Check: .blockspool/ directory is writable
+ * Check: .promptwheel/ directory is writable
  */
-function checkBlockspoolWritable(repoRoot?: string): CheckResult {
+function checkPromptwheelWritable(repoRoot?: string): CheckResult {
   const cwd = repoRoot ?? process.cwd();
-  const blockspoolDir = path.join(cwd, '.blockspool');
+  const promptwheelDir = path.join(cwd, '.promptwheel');
 
   try {
     // Check if directory exists
-    if (fs.existsSync(blockspoolDir)) {
+    if (fs.existsSync(promptwheelDir)) {
       // Check if writable
-      fs.accessSync(blockspoolDir, fs.constants.W_OK);
-      return createCheckResult('blockspool-dir', 'pass', '.blockspool/ exists and is writable');
+      fs.accessSync(promptwheelDir, fs.constants.W_OK);
+      return createCheckResult('promptwheel-dir', 'pass', '.promptwheel/ exists and is writable');
     }
 
     // Directory doesn't exist - check if we can create it
     fs.accessSync(cwd, fs.constants.W_OK);
-    return createCheckResult('blockspool-dir', 'pass', '.blockspool/ can be created');
+    return createCheckResult('promptwheel-dir', 'pass', '.promptwheel/ can be created');
   } catch {
-    return createCheckResult('blockspool-dir', 'fail', 'Cannot write to .blockspool/', {
+    return createCheckResult('promptwheel-dir', 'fail', 'Cannot write to .promptwheel/', {
       fix: 'Check directory permissions or run with appropriate access',
     });
   }
@@ -397,7 +397,7 @@ export function formatDoctorReport(report: DoctorReport): string {
     fail: '❌',
   };
 
-  lines.push('BlockSpool Doctor\n');
+  lines.push('PromptWheel Doctor\n');
 
   // Group checks by status
   const failed = report.checks.filter(c => c.status === 'fail');

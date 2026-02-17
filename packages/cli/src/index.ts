@@ -1,16 +1,16 @@
 /**
- * @blockspool/cli
+ * @promptwheel/cli
  *
- * BlockSpool command-line interface.
+ * PromptWheel command-line interface.
  *
  * This package is a CLI tool only - it has no public API exports.
  * Use it via the command line:
  *
- *   npx @blockspool/cli solo scout .
+ *   npx @promptwheel/cli solo scout .
  *
  * Or installed globally:
- *   npm install -g @blockspool/cli
- *   blockspool solo scout .
+ *   npm install -g @promptwheel/cli
+ *   promptwheel solo scout .
  *
- * The CLI entry point is src/bin/blockspool.ts
+ * The CLI entry point is src/bin/promptwheel.ts
  */

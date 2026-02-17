@@ -17,7 +17,7 @@ let tmpDir: string;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bs-plugin-test-'));
-  fs.mkdirSync(path.join(tmpDir, '.blockspool'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, '.promptwheel'), { recursive: true });
 });
 
 afterEach(() => {
@@ -52,7 +52,7 @@ describe('Stop hook', () => {
 
   it('blocks exit when session is active (SCOUT phase)', () => {
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'loop-state.json'),
+      path.join(tmpDir, '.promptwheel', 'loop-state.json'),
       JSON.stringify({ run_id: 'run_123', session_id: 'ses_456', phase: 'SCOUT' }),
     );
 
@@ -60,14 +60,14 @@ describe('Stop hook', () => {
     expect(exitCode).toBe(0);
     const result = JSON.parse(stdout);
     expect(result.decision).toBe('block');
-    expect(result.reason).toContain('BlockSpool session is still active');
+    expect(result.reason).toContain('PromptWheel session is still active');
     expect(result.reason).toContain('SCOUT');
-    expect(result.reason).toContain('blockspool_advance');
+    expect(result.reason).toContain('promptwheel_advance');
   });
 
   it('blocks exit during EXECUTE phase', () => {
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'loop-state.json'),
+      path.join(tmpDir, '.promptwheel', 'loop-state.json'),
       JSON.stringify({ run_id: 'run_123', session_id: 'ses_456', phase: 'EXECUTE' }),
     );
 
@@ -78,7 +78,7 @@ describe('Stop hook', () => {
   });
 
   it('allows exit on terminal phase DONE and cleans up', () => {
-    const loopStatePath = path.join(tmpDir, '.blockspool', 'loop-state.json');
+    const loopStatePath = path.join(tmpDir, '.promptwheel', 'loop-state.json');
     fs.writeFileSync(
       loopStatePath,
       JSON.stringify({ run_id: 'run_123', session_id: 'ses_456', phase: 'DONE' }),
@@ -91,7 +91,7 @@ describe('Stop hook', () => {
   });
 
   it('allows exit on terminal phase FAILED_SPINDLE', () => {
-    const loopStatePath = path.join(tmpDir, '.blockspool', 'loop-state.json');
+    const loopStatePath = path.join(tmpDir, '.promptwheel', 'loop-state.json');
     fs.writeFileSync(
       loopStatePath,
       JSON.stringify({ run_id: 'run_123', phase: 'FAILED_SPINDLE' }),
@@ -104,7 +104,7 @@ describe('Stop hook', () => {
 
   it('allows exit on terminal phase BLOCKED_NEEDS_HUMAN', () => {
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'loop-state.json'),
+      path.join(tmpDir, '.promptwheel', 'loop-state.json'),
       JSON.stringify({ run_id: 'run_123', phase: 'BLOCKED_NEEDS_HUMAN' }),
     );
 
@@ -115,7 +115,7 @@ describe('Stop hook', () => {
 
   it('allows exit on corrupt loop-state.json', () => {
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'loop-state.json'),
+      path.join(tmpDir, '.promptwheel', 'loop-state.json'),
       'not json',
     );
 
@@ -150,7 +150,7 @@ describe('PreToolUse hook', () => {
 
   it('denies writes to denied paths', () => {
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'scope-policy.json'),
+      path.join(tmpDir, '.promptwheel', 'scope-policy.json'),
       JSON.stringify({
         allowed_paths: ['src/**'],
         denied_paths: ['node_modules/**', '.env'],
@@ -169,7 +169,7 @@ describe('PreToolUse hook', () => {
 
   it('denies writes outside allowed paths', () => {
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'scope-policy.json'),
+      path.join(tmpDir, '.promptwheel', 'scope-policy.json'),
       JSON.stringify({
         allowed_paths: ['src/**'],
         denied_paths: [],
@@ -188,7 +188,7 @@ describe('PreToolUse hook', () => {
 
   it('allows writes within allowed paths', () => {
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'scope-policy.json'),
+      path.join(tmpDir, '.promptwheel', 'scope-policy.json'),
       JSON.stringify({
         allowed_paths: ['src/**'],
         denied_paths: [],
@@ -206,7 +206,7 @@ describe('PreToolUse hook', () => {
 
   it('denies writes matching denied patterns', () => {
     fs.writeFileSync(
-      path.join(tmpDir, '.blockspool', 'scope-policy.json'),
+      path.join(tmpDir, '.promptwheel', 'scope-policy.json'),
       JSON.stringify({
         allowed_paths: [],
         denied_paths: [],
@@ -241,7 +241,7 @@ describe('Plugin structure', () => {
     const manifest = JSON.parse(
       fs.readFileSync(path.join(pluginDir, '.claude-plugin', 'plugin.json'), 'utf8'),
     );
-    expect(manifest.name).toBe('blockspool');
+    expect(manifest.name).toBe('promptwheel');
     expect(manifest.skills).toHaveLength(12);
   });
 
@@ -261,12 +261,12 @@ describe('Plugin structure', () => {
     expect(eventNames).toHaveLength(2);
   });
 
-  it('has .mcp.json with blockspool server', () => {
+  it('has .mcp.json with promptwheel server', () => {
     const mcp = JSON.parse(
       fs.readFileSync(path.join(pluginDir, '.mcp.json'), 'utf8'),
     );
-    expect(mcp.mcpServers.blockspool).toBeDefined();
-    expect(mcp.mcpServers.blockspool.command).toBe('npx');
+    expect(mcp.mcpServers.promptwheel).toBeDefined();
+    expect(mcp.mcpServers.promptwheel.command).toBe('npx');
   });
 
   it('has hook-driver.js script', () => {

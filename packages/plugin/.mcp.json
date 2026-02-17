@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "blockspool": {
+    "promptwheel": {
       "command": "npx",
-      "args": ["-y", "@blockspool/mcp"],
+      "args": ["-y", "@promptwheel/mcp"],
       "env": {}
     }
   }

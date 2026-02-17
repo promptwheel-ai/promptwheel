@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 
 /**
- * BlockSpool hook driver — handles Stop and PreToolUse hooks.
+ * PromptWheel hook driver — handles Stop and PreToolUse hooks.
  *
  * Stop hook:
- *   Reads `.blockspool/loop-state.json` to check if a session is active.
+ *   Reads `.promptwheel/loop-state.json` to check if a session is active.
  *   If active, blocks exit so Claude Code continues the advance loop.
  *   The actual advance() call happens via MCP tool call in the main
  *   conversation — the stop hook just prevents premature exit.
  *
  * PreToolUse hook:
  *   Checks scope policy before file writes. Reads cached policy from
- *   `.blockspool/scope-policy.json` and validates the target file path.
+ *   `.promptwheel/scope-policy.json` and validates the target file path.
  *
  * Usage:
  *   node scripts/hook-driver.js stop
@@ -92,7 +92,7 @@ const hookType = process.argv[2]; // "stop" or "PreToolUse"
 
 if (hookType === 'stop') {
   try {
-    const loopStatePath = join(process.cwd(), '.blockspool', 'loop-state.json');
+    const loopStatePath = join(process.cwd(), '.promptwheel', 'loop-state.json');
 
     if (!existsSync(loopStatePath)) {
       // No active session — allow Claude to stop normally
@@ -117,11 +117,11 @@ if (hookType === 'stop') {
     process.stdout.write(JSON.stringify({
       decision: 'block',
       reason: [
-        'BlockSpool session is still active.',
+        'PromptWheel session is still active.',
         `Current phase: ${loopState.phase}`,
         `Run ID: ${loopState.run_id}`,
         '',
-        'Call `blockspool_advance` to get your next action.',
+        'Call `promptwheel_advance` to get your next action.',
         'Do NOT stop until advance returns `next_action: "STOP"`.',
       ].join('\n'),
     }));
@@ -167,18 +167,18 @@ if (hookType === 'PreToolUse') {
     const cwd = process.cwd();
     let policyPath;
 
-    // Check if we're in a worktree: .blockspool/worktrees/{ticket_id}
-    const worktreeMatch = cwd.match(/\.blockspool\/worktrees\/([^/]+)/);
+    // Check if we're in a worktree: .promptwheel/worktrees/{ticket_id}
+    const worktreeMatch = cwd.match(/\.promptwheel\/worktrees\/([^/]+)/);
     if (worktreeMatch) {
       const ticketId = worktreeMatch[1];
-      const perTicketPath = join(cwd.split('.blockspool/worktrees')[0], '.blockspool', 'scope-policies', `${ticketId}.json`);
+      const perTicketPath = join(cwd.split('.promptwheel/worktrees')[0], '.promptwheel', 'scope-policies', `${ticketId}.json`);
       if (existsSync(perTicketPath)) {
         policyPath = perTicketPath;
       }
     }
 
     if (!policyPath) {
-      policyPath = join(cwd, '.blockspool', 'scope-policy.json');
+      policyPath = join(cwd, '.promptwheel', 'scope-policy.json');
     }
 
     if (!existsSync(policyPath)) {

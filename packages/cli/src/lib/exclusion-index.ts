@@ -94,8 +94,8 @@ const INDICATOR_MAP: Record<string, string[]> = {
   '.nycrc':              ['coverage/', '.nyc_output/'],
   '.nycrc.json':         ['coverage/', '.nyc_output/'],
 
-  // ── BlockSpool internals ──
-  '.blockspool':         ['.blockspool/'],
+  // ── PromptWheel internals ──
+  '.promptwheel':         ['.promptwheel/'],
 };
 
 /**
@@ -131,7 +131,7 @@ const SCAN_SKIP: Set<string> = /* @__PURE__ */ (() => {
 })();
 
 /** Marker written to the exclude file so we can detect prior runs. */
-const EXCLUDE_MARKER = '# Auto-discovered by BlockSpool exclusion index';
+const EXCLUDE_MARKER = '# Auto-discovered by PromptWheel exclusion index';
 
 // ─── Internal helpers ─────────────────────────────────────────────
 

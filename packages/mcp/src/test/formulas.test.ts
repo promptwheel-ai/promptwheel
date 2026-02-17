@@ -6,9 +6,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import { repos } from '@blockspool/core';
-import type { DatabaseAdapter, Project } from '@blockspool/core';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import { repos } from '@promptwheel/core';
+import type { DatabaseAdapter, Project } from '@promptwheel/core';
 import { RunManager } from '../run-manager.js';
 import { advance } from '../advance.js';
 import { processEvent } from '../event-processor.js';
@@ -62,9 +62,9 @@ describe('loadFormula', () => {
     expect(loadFormula('nonexistent')).toBeNull();
   });
 
-  it('loads user formula from .blockspool/formulas/', () => {
+  it('loads user formula from .promptwheel/formulas/', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bs-formula-'));
-    const formulasDir = path.join(tmpDir, '.blockspool', 'formulas');
+    const formulasDir = path.join(tmpDir, '.promptwheel', 'formulas');
     fs.mkdirSync(formulasDir, { recursive: true });
     fs.writeFileSync(path.join(formulasDir, 'my-recipe.yaml'), [
       'description: My custom recipe',
@@ -92,7 +92,7 @@ describe('loadFormula', () => {
 
   it('user formula overrides built-in', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bs-formula-'));
-    const formulasDir = path.join(tmpDir, '.blockspool', 'formulas');
+    const formulasDir = path.join(tmpDir, '.promptwheel', 'formulas');
     fs.mkdirSync(formulasDir, { recursive: true });
     fs.writeFileSync(path.join(formulasDir, 'cleanup.yaml'),
       'description: My custom cleanup\nmin_confidence: 99\n');
@@ -113,7 +113,7 @@ describe('listFormulas', () => {
 
   it('merges user and built-in, user overrides', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bs-formula-'));
-    const formulasDir = path.join(tmpDir, '.blockspool', 'formulas');
+    const formulasDir = path.join(tmpDir, '.promptwheel', 'formulas');
     fs.mkdirSync(formulasDir, { recursive: true });
     fs.writeFileSync(path.join(formulasDir, 'cleanup.yaml'),
       'description: Custom cleanup\n');
@@ -247,7 +247,7 @@ describe('advance — hints in scout prompt', () => {
 
     const s = run.require();
     const eventsPath = path.join(
-      tmpDir, '.blockspool', 'runs', s.run_id, 'events.ndjson',
+      tmpDir, '.promptwheel', 'runs', s.run_id, 'events.ndjson',
     );
     const events = fs.readFileSync(eventsPath, 'utf8')
       .trim().split('\n').map(l => JSON.parse(l));

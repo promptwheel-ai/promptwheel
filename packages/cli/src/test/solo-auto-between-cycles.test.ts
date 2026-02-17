@@ -83,13 +83,13 @@ import { addLearning, loadLearnings, consolidateLearnings } from '../lib/learnin
 
 let tmpDir: string;
 
-function ensureBlockspoolDir(): void {
-  const dir = path.join(tmpDir, '.blockspool');
+function ensurePromptwheelDir(): void {
+  const dir = path.join(tmpDir, '.promptwheel');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
 function writeRunStateRaw(overrides: Record<string, any> = {}): void {
-  ensureBlockspoolDir();
+  ensurePromptwheelDir();
   const state = {
     totalCycles: 0,
     lastDocsAuditCycle: 0,
@@ -101,13 +101,13 @@ function writeRunStateRaw(overrides: Record<string, any> = {}): void {
     ...overrides,
   };
   fs.writeFileSync(
-    path.join(tmpDir, '.blockspool', 'run-state.json'),
+    path.join(tmpDir, '.promptwheel', 'run-state.json'),
     JSON.stringify(state, null, 2),
   );
 }
 
 function readRunStateRaw(): Record<string, any> {
-  const fp = path.join(tmpDir, '.blockspool', 'run-state.json');
+  const fp = path.join(tmpDir, '.promptwheel', 'run-state.json');
   if (!fs.existsSync(fp)) return {};
   return JSON.parse(fs.readFileSync(fp, 'utf8'));
 }
@@ -181,7 +181,7 @@ function makeState(overrides: Partial<any> = {}): any {
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'between-cycles-test-'));
-  ensureBlockspoolDir();
+  ensurePromptwheelDir();
 });
 
 afterEach(() => {
@@ -410,7 +410,7 @@ describe('runPostCycleMaintenance', () => {
     await runPostCycleMaintenance(state, '**', false);
 
     // After extractMetaLearnings with high failure rate (70%), learnings should be added
-    const learningsFile = path.join(tmpDir, '.blockspool', 'learnings.json');
+    const learningsFile = path.join(tmpDir, '.promptwheel', 'learnings.json');
     if (fs.existsSync(learningsFile)) {
       const learnings = JSON.parse(fs.readFileSync(learningsFile, 'utf8'));
       // High failure rate insight should be written
@@ -435,7 +435,7 @@ describe('runPostCycleMaintenance', () => {
     await runPostCycleMaintenance(state, '**', false);
 
     // No learnings file should be created by meta-learnings (only by cycle summary logic)
-    const learningsFile = path.join(tmpDir, '.blockspool', 'learnings.json');
+    const learningsFile = path.join(tmpDir, '.promptwheel', 'learnings.json');
     if (fs.existsSync(learningsFile)) {
       const learnings = JSON.parse(fs.readFileSync(learningsFile, 'utf8'));
       const hasProcessInsight = learnings.some(
@@ -464,7 +464,7 @@ describe('runPostCycleMaintenance', () => {
     await runPostCycleMaintenance(state, '**', false);
 
     // No process_insight learnings should be created
-    const learningsFile = path.join(tmpDir, '.blockspool', 'learnings.json');
+    const learningsFile = path.join(tmpDir, '.promptwheel', 'learnings.json');
     if (fs.existsSync(learningsFile)) {
       const learnings = JSON.parse(fs.readFileSync(learningsFile, 'utf8'));
       const hasProcessInsight = learnings.some(
@@ -481,7 +481,7 @@ describe('runPostCycleMaintenance', () => {
     writeRunStateRaw({ totalCycles: 4 });
 
     // Seed many learnings so consolidation has something to work with
-    const learningsFile = path.join(tmpDir, '.blockspool', 'learnings.json');
+    const learningsFile = path.join(tmpDir, '.promptwheel', 'learnings.json');
     const seedLearnings = Array.from({ length: 10 }, (_, i) => ({
       id: `l-${i}`,
       text: `Learning number ${i}`,
@@ -517,7 +517,7 @@ describe('runPostCycleMaintenance', () => {
   it('does not consolidate learnings when not on 5-cycle boundary', async () => {
     writeRunStateRaw({ totalCycles: 2 });
 
-    const learningsFile = path.join(tmpDir, '.blockspool', 'learnings.json');
+    const learningsFile = path.join(tmpDir, '.promptwheel', 'learnings.json');
     const seedLearnings = Array.from({ length: 5 }, (_, i) => ({
       id: `l-${i}`,
       text: `Learning ${i}`,

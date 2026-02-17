@@ -8,7 +8,7 @@
  * 4. Semantic step decomposition
  * 5. Configurable trigger/alert evaluation
  *
- * Shared by @blockspool/cli and @blockspool/mcp.
+ * Shared by @promptwheel/cli and @promptwheel/mcp.
  */
 
 // ---------------------------------------------------------------------------

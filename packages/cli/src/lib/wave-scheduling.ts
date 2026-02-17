@@ -2,7 +2,7 @@
  * Wave scheduling utilities for conflict-free parallel execution.
  *
  * Pure algorithms (conflict detection, partitioning, escalation) live in
- * @blockspool/core/waves/shared. This file provides metric instrumentation
+ * @promptwheel/core/waves/shared. This file provides metric instrumentation
  * and re-exports.
  */
 
@@ -29,13 +29,13 @@ export {
   touchesSamePackage,
   proposalsConflict,
   buildScoutEscalation,
-} from '@blockspool/core/waves/shared';
+} from '@promptwheel/core/waves/shared';
 
 // Import for local use
-import type { ConflictDetectionOptions } from '@blockspool/core/waves/shared';
+import type { ConflictDetectionOptions } from '@promptwheel/core/waves/shared';
 import {
   partitionIntoWaves as partitionIntoWavesCore,
-} from '@blockspool/core/waves/shared';
+} from '@promptwheel/core/waves/shared';
 
 /**
  * Partition proposals into conflict-free waves, with CLI metric instrumentation.

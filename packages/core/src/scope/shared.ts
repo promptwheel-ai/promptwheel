@@ -1,7 +1,7 @@
 /**
  * Pure scope algorithms — no filesystem, no external dependencies.
  *
- * Shared by both @blockspool/cli and @blockspool/mcp.
+ * Shared by both @promptwheel/cli and @promptwheel/mcp.
  * CLI keeps its proposal-level scope checking wrapper.
  * MCP keeps its minimatch-based policy enforcement + file I/O.
  */
@@ -12,7 +12,7 @@
 
 export const ALWAYS_DENIED: string[] = [
   '.env', '.env.*',
-  'node_modules/**', '.git/**', '.blockspool/**',
+  'node_modules/**', '.git/**', '.promptwheel/**',
   'dist/**', 'build/**', 'coverage/**',
   // Lock files are auto-generated; governed by per-ticket allowed_paths instead
   'package-lock.json',

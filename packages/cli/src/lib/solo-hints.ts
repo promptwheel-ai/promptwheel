@@ -2,7 +2,7 @@
  * Hints system for live steering of auto mode.
  *
  * Multiple frontends (stdin listener, `solo nudge` CLI) write to
- * `.blockspool/hints.json`. The scout loop consumes pending hints
+ * `.promptwheel/hints.json`. The scout loop consumes pending hints
  * and injects them into the scout prompt via `customPrompt`.
  */
 
@@ -23,11 +23,11 @@ const MAX_HINT_LENGTH = 500;
 const PRUNE_AGE_MS = 60 * 60 * 1000; // 1 hour
 
 function hintsPath(repoRoot: string): string {
-  return path.join(repoRoot, '.blockspool', HINTS_FILE);
+  return path.join(repoRoot, '.promptwheel', HINTS_FILE);
 }
 
 function hintsTmpPath(repoRoot: string): string {
-  return path.join(repoRoot, '.blockspool', HINTS_TMP);
+  return path.join(repoRoot, '.promptwheel', HINTS_TMP);
 }
 
 function generateId(): string {
@@ -65,7 +65,7 @@ export function readHints(repoRoot: string): Hint[] {
  * Atomically write hints array to disk.
  */
 function atomicWrite(repoRoot: string, hints: Hint[]): void {
-  const dir = path.join(repoRoot, '.blockspool');
+  const dir = path.join(repoRoot, '.promptwheel');
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }

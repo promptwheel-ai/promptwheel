@@ -18,7 +18,7 @@ import type { TicketOutcome } from '../lib/run-history.js';
 let tmpDir: string;
 
 function learningsFile(): string {
-  return path.join(tmpDir, '.blockspool', 'learnings.json');
+  return path.join(tmpDir, '.promptwheel', 'learnings.json');
 }
 
 function readLearningsRaw(): Learning[] {
@@ -82,7 +82,7 @@ function makeContext(overrides: Partial<MetaLearningContext> = {}): MetaLearning
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'meta-learnings-test-'));
-  const dir = path.join(tmpDir, '.blockspool');
+  const dir = path.join(tmpDir, '.promptwheel');
   fs.mkdirSync(dir, { recursive: true });
 });
 
@@ -336,7 +336,7 @@ describe('combined meta-learning extraction', () => {
 // ---------------------------------------------------------------------------
 
 function writeRunState(formulaStats: Record<string, unknown>): void {
-  const runStatePath = path.join(tmpDir, '.blockspool', 'run-state.json');
+  const runStatePath = path.join(tmpDir, '.promptwheel', 'run-state.json');
   const state = {
     totalCycles: 10,
     lastDocsAuditCycle: 0,

@@ -1,11 +1,11 @@
 /**
  * Planning round for auto mode: scout all sectors → present roadmap → user approves → execute.
  *
- * Default mode when running `blockspool` with no flags.
+ * Default mode when running `promptwheel` with no flags.
  */
 
 import chalk from 'chalk';
-import type { TicketProposal } from '@blockspool/core/scout';
+import type { TicketProposal } from '@promptwheel/core/scout';
 import type { AutoSessionState } from './solo-auto-state.js';
 import { getNextScope } from './solo-auto-state.js';
 import { runScoutPhase } from './solo-auto-scout.js';

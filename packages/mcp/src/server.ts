@@ -3,8 +3,8 @@
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { DatabaseAdapter } from '@blockspool/core';
-import { repos } from '@blockspool/core';
+import type { DatabaseAdapter } from '@promptwheel/core';
+import { repos } from '@promptwheel/core';
 import { SessionManager } from './state.js';
 import { registerSessionTools } from './tools/session.js';
 import { registerExecuteTools } from './tools/execute.js';
@@ -36,7 +36,7 @@ export async function createServer(options: ServerOptions): Promise<{
   const getState = () => state;
 
   const server = new McpServer({
-    name: 'blockspool',
+    name: 'promptwheel',
     version: '0.6.0',
   });
 

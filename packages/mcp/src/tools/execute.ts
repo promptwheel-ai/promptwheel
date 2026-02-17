@@ -4,8 +4,8 @@
 
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { repos } from '@blockspool/core';
-import type { Ticket } from '@blockspool/core';
+import { repos } from '@promptwheel/core';
+import type { Ticket } from '@promptwheel/core';
 import { execSync } from 'node:child_process';
 import type { SessionManager } from '../state.js';
 import { deriveScopePolicy, isFileAllowed, isCategoryFileAllowed } from '../scope-policy.js';
@@ -130,7 +130,7 @@ export function validateVerificationCommand(command: string): { valid: true } | 
 
 export function registerExecuteTools(server: McpServer, getState: () => SessionManager) {
   server.tool(
-    'blockspool_next_ticket',
+    'promptwheel_next_ticket',
     'Returns the next ticket to work on: title, description, allowed_paths, and execution instructions.',
     {},
     async () => {
@@ -147,7 +147,7 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
           content: [{
             type: 'text' as const,
             text: JSON.stringify({
-              message: 'No tickets ready for execution. Call blockspool_advance to scout for more work.',
+              message: 'No tickets ready for execution. Call promptwheel_advance to scout for more work.',
               tickets_completed: run.tickets_completed,
               tickets_failed: run.tickets_failed,
             }),
@@ -187,8 +187,8 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_validate_scope',
-    'Before committing, send the list of changed files. BlockSpool checks scope enforcement.',
+    'promptwheel_validate_scope',
+    'Before committing, send the list of changed files. PromptWheel checks scope enforcement.',
     {
       ticketId: z.string().optional().describe('The ticket ID being worked on.'),
       ticket_id: z.string().optional().describe('Alias for ticketId.'),
@@ -229,7 +229,7 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
 
       // Use proper scope policy with minimatch-based validation
       const s = state.run.require();
-      const worktreeRoot = s.direct ? undefined : `.blockspool/worktrees/${params.ticketId}`;
+      const worktreeRoot = s.direct ? undefined : `.promptwheel/worktrees/${params.ticketId}`;
       const policy = deriveScopePolicy({
         allowedPaths: ticket.allowedPaths,
         category: ticket.category ?? 'fix',
@@ -283,8 +283,8 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_complete_ticket',
-    'Mark a ticket as done. BlockSpool runs QA commands to verify, then records success.',
+    'promptwheel_complete_ticket',
+    'Mark a ticket as done. PromptWheel runs QA commands to verify, then records success.',
     {
       ticketId: z.string().optional().describe('The ticket ID to complete.'),
       ticket_id: z.string().optional().describe('Alias for ticketId.'),
@@ -389,7 +389,7 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
               success: true,
               ticketId: params.ticketId,
               qaResults: qaResults.map(r => ({ command: r.command, success: r.success })),
-              message: 'QA passed. Call blockspool_advance to create a PR for this ticket.',
+              message: 'QA passed. Call promptwheel_advance to create a PR for this ticket.',
             }, null, 2),
           }],
         };
@@ -402,7 +402,7 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
               success: false,
               ticketId: params.ticketId,
               qaResults,
-              message: 'QA failed. Fix the issues and try again, or call blockspool_fail_ticket.',
+              message: 'QA failed. Fix the issues and try again, or call promptwheel_fail_ticket.',
             }, null, 2),
           }],
         };
@@ -411,7 +411,7 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_fail_ticket',
+    'promptwheel_fail_ticket',
     'Mark a ticket as failed with a reason.',
     {
       ticketId: z.string().optional().describe('The ticket ID that failed.'),
@@ -444,7 +444,7 @@ export function registerExecuteTools(server: McpServer, getState: () => SessionM
             ticketId: params.ticketId,
             status: 'blocked',
             reason: params.reason,
-            message: 'Ticket marked as failed. Use blockspool_next_ticket for the next one.',
+            message: 'Ticket marked as failed. Use promptwheel_next_ticket for the next one.',
           }, null, 2),
         }],
       };
@@ -473,9 +473,9 @@ function buildExecutionPrompt(ticket: Ticket): string {
     '',
     '1. Read the relevant files',
     '2. Make the changes described above',
-    '3. Call blockspool_validate_scope with the list of changed files',
-    '4. If valid, call blockspool_complete_ticket',
-    '5. If QA fails, fix and retry or call blockspool_fail_ticket',
+    '3. Call promptwheel_validate_scope with the list of changed files',
+    '4. If valid, call promptwheel_complete_ticket',
+    '5. If QA fails, fix and retry or call promptwheel_fail_ticket',
   ];
 
   return parts.join('\n');

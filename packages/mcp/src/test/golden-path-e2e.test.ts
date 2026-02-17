@@ -9,9 +9,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import { repos } from '@blockspool/core';
-import type { DatabaseAdapter, Project } from '@blockspool/core';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import { repos } from '@promptwheel/core';
+import type { DatabaseAdapter, Project } from '@promptwheel/core';
 import { RunManager } from '../run-manager.js';
 import { advance } from '../advance.js';
 import type { AdvanceContext } from '../advance.js';
@@ -44,7 +44,7 @@ function ctx(): AdvanceContext {
   return { run, db, project };
 }
 
-/** Simulates blockspool_ingest_event: log raw event then process */
+/** Simulates promptwheel_ingest_event: log raw event then process */
 async function ingestEvent(type: string, payload: Record<string, unknown>) {
   run.appendEvent(type as any, payload);
   return processEvent(run, db, type as any, payload);
@@ -178,7 +178,7 @@ describe('Golden Path E2E', () => {
     // 12. Inject PR created
     const prResult = await ingestEvent('PR_CREATED', {
       url: 'https://github.com/test/repo/pull/42',
-      branch: 'blockspool/remove-unused-import',
+      branch: 'promptwheel/remove-unused-import',
     });
     expect(prResult.phase_changed).toBe(true);
     expect(prResult.new_phase).toBe('NEXT_TICKET');
@@ -202,7 +202,7 @@ describe('Golden Path E2E', () => {
 
     // Verify events.ndjson has full trace
     const eventsPath = path.join(
-      tmpDir, '.blockspool', 'runs', finalState.run_id, 'events.ndjson',
+      tmpDir, '.promptwheel', 'runs', finalState.run_id, 'events.ndjson',
     );
     expect(fs.existsSync(eventsPath)).toBe(true);
     const events = fs.readFileSync(eventsPath, 'utf8')
@@ -226,7 +226,7 @@ describe('Golden Path E2E', () => {
 
     // Verify artifacts exist
     const artifactsDir = path.join(
-      tmpDir, '.blockspool', 'runs', finalState.run_id, 'artifacts',
+      tmpDir, '.promptwheel', 'runs', finalState.run_id, 'artifacts',
     );
     const artifacts = fs.readdirSync(artifactsDir);
     expect(artifacts.some(a => a.includes('scout-proposals'))).toBe(true);

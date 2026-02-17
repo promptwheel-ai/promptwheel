@@ -4,7 +4,7 @@
  * Replaces hardcoded auto-approve arrays and CATEGORY_TOOL_POLICIES
  * with a single registry that loads built-in specs + custom user tools.
  *
- * Custom tools are loaded from `.blockspool/tools/*.json`.
+ * Custom tools are loaded from `.promptwheel/tools/*.json`.
  */
 
 import * as fs from 'node:fs';
@@ -17,10 +17,10 @@ import {
   type ToolSpec,
   type ToolPhase,
   type TrustLevel,
-} from '@blockspool/core/tools/shared';
+} from '@promptwheel/core/tools/shared';
 
 // Re-export core types for convenience
-export type { ToolSpec, ToolPhase, TrustLevel } from '@blockspool/core/tools/shared';
+export type { ToolSpec, ToolPhase, TrustLevel } from '@promptwheel/core/tools/shared';
 
 export interface ToolContext {
   phase: ToolPhase;
@@ -58,9 +58,9 @@ export class ToolRegistry {
   constructor(projectPath?: string) {
     this.specs = [...BUILTIN_TOOL_SPECS];
 
-    // Load custom tools from .blockspool/tools/*.json
+    // Load custom tools from .promptwheel/tools/*.json
     if (projectPath) {
-      const toolsDir = path.join(projectPath, '.blockspool', 'tools');
+      const toolsDir = path.join(projectPath, '.promptwheel', 'tools');
       if (fs.existsSync(toolsDir)) {
         try {
           const files = fs.readdirSync(toolsDir).filter(f => f.endsWith('.json'));
@@ -72,12 +72,12 @@ export class ToolRegistry {
                 this.specs.push(spec);
               }
             } catch (err) {
-              console.warn(`[blockspool] failed to load custom tool file ${file}: ${err instanceof Error ? err.message : String(err)}`);
+              console.warn(`[promptwheel] failed to load custom tool file ${file}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
         } catch (err) {
           if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
-            console.warn(`[blockspool] failed to read tools directory: ${err.message}`);
+            console.warn(`[promptwheel] failed to read tools directory: ${err.message}`);
           }
         }
       }

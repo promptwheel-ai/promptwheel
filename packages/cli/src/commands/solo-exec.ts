@@ -5,7 +5,7 @@
 import { Command } from 'commander';
 import * as path from 'node:path';
 import chalk from 'chalk';
-import { tickets, runs } from '@blockspool/core/repos';
+import { tickets, runs } from '@promptwheel/core/repos';
 import { createGitService } from '../lib/git.js';
 import {
   isInitialized,
@@ -43,9 +43,9 @@ Rerun behavior:
 - done/in_review tickets: skips (use --force to override)
 
 Examples:
-  blockspool solo run tkt_abc123         # Run ticket
-  blockspool solo run tkt_abc123 --pr    # Create PR after success
-  blockspool solo run tkt_abc123 --force # Force rerun of completed ticket
+  promptwheel solo run tkt_abc123         # Run ticket
+  promptwheel solo run tkt_abc123 --pr    # Create PR after success
+  promptwheel solo run tkt_abc123 --force # Force rerun of completed ticket
 `)
     .option('-v, --verbose', 'Show detailed output')
     .option('--json', 'Output as JSON')
@@ -68,7 +68,7 @@ Examples:
       const forceRerun = options.force ?? false;
 
       if (!isJsonMode) {
-        console.log(chalk.blue('🚀 BlockSpool Solo Run'));
+        console.log(chalk.blue('🚀 PromptWheel Solo Run'));
         console.log();
       }
 
@@ -124,7 +124,7 @@ Examples:
           console.log(chalk.yellow('\n\nInterrupted. Cleaning up...'));
         }
 
-        const worktreePath = path.join(repoRoot, '.blockspool', 'worktrees', ticketId);
+        const worktreePath = path.join(repoRoot, '.promptwheel', 'worktrees', ticketId);
         await cleanupWorktree(repoRoot, worktreePath);
 
         try {
@@ -137,7 +137,7 @@ Examples:
         }
 
         if (!isJsonMode) {
-          console.log(chalk.gray('Ticket reset to ready. You can retry with: blockspool solo run ' + ticketId));
+          console.log(chalk.gray('Ticket reset to ready. You can retry with: promptwheel solo run ' + ticketId));
         }
 
         await adapter.close();
@@ -188,7 +188,7 @@ Examples:
             console.log(chalk.gray('  Cleaning up and retrying...'));
             console.log();
           }
-          const worktreePath = path.join(repoRoot, '.blockspool', 'worktrees', ticketId);
+          const worktreePath = path.join(repoRoot, '.promptwheel', 'worktrees', ticketId);
           await cleanupWorktree(repoRoot, worktreePath);
         }
 
@@ -354,7 +354,7 @@ Examples:
               console.log(chalk.gray(`  Branch preserved: ${result.branchName}`));
               console.log(chalk.gray('  Inspect with: git checkout ' + result.branchName));
             }
-            console.log(chalk.gray('  Retry with: blockspool solo run ' + ticketId));
+            console.log(chalk.gray('  Retry with: promptwheel solo run ' + ticketId));
           }
           console.log(chalk.gray(`  Duration: ${formatDuration(result.durationMs)}`));
         }
@@ -393,9 +393,9 @@ Use this when:
 - You want to update the ticket description before retrying
 
 Examples:
-  blockspool solo retry tkt_abc123                    # Reset blocked ticket
-  blockspool solo retry tkt_abc123 -d "New desc"     # Reset with new description
-  blockspool solo retry tkt_abc123 --force           # Reset even if not blocked
+  promptwheel solo retry tkt_abc123                    # Reset blocked ticket
+  promptwheel solo retry tkt_abc123 -d "New desc"     # Reset with new description
+  promptwheel solo retry tkt_abc123 --force           # Reset even if not blocked
 `)
     .option('-v, --verbose', 'Show detailed output')
     .option('--json', 'Output as JSON')
@@ -412,7 +412,7 @@ Examples:
       const newDescription = options.description;
 
       if (!isJsonMode) {
-        console.log(chalk.blue('🔄 BlockSpool Solo Retry'));
+        console.log(chalk.blue('🔄 PromptWheel Solo Retry'));
         console.log();
       }
 
@@ -430,10 +430,10 @@ Examples:
 
       if (!isInitialized(repoRoot)) {
         if (isJsonMode) {
-          console.log(JSON.stringify({ success: false, error: 'Not initialized. Run: blockspool solo init' }));
+          console.log(JSON.stringify({ success: false, error: 'Not initialized. Run: promptwheel solo init' }));
         } else {
           console.error(chalk.red('✗ Not initialized'));
-          console.log(chalk.gray('  Run: blockspool solo init'));
+          console.log(chalk.gray('  Run: promptwheel solo init'));
         }
         process.exit(1);
       }
@@ -536,7 +536,7 @@ Examples:
           }
           console.log();
           console.log(chalk.blue('Next step:'));
-          console.log(`  blockspool solo run ${ticketId}`);
+          console.log(`  promptwheel solo run ${ticketId}`);
         }
 
       } finally {
@@ -558,7 +558,7 @@ Use this when:
 - The branch was pushed but PR creation was skipped
 
 Examples:
-  blockspool solo pr tkt_abc123         # Create PR for ticket's branch
+  promptwheel solo pr tkt_abc123         # Create PR for ticket's branch
 `)
     .option('-v, --verbose', 'Show detailed output')
     .option('--json', 'Output as JSON')
@@ -569,7 +569,7 @@ Examples:
       const isJsonMode = options.json;
 
       if (!isJsonMode) {
-        console.log(chalk.blue('🔗 BlockSpool Solo PR'));
+        console.log(chalk.blue('🔗 PromptWheel Solo PR'));
         console.log();
       }
 
@@ -597,9 +597,9 @@ Examples:
 
       if (!isInitialized(repoRoot)) {
         if (isJsonMode) {
-          console.log(JSON.stringify({ success: false, error: 'Solo mode not initialized. Run: blockspool solo init' }));
+          console.log(JSON.stringify({ success: false, error: 'Solo mode not initialized. Run: promptwheel solo init' }));
         } else {
-          console.error(chalk.red('✗ Solo mode not initialized. Run: blockspool solo init'));
+          console.error(chalk.red('✗ Solo mode not initialized. Run: promptwheel solo init'));
         }
         process.exit(1);
       }
@@ -687,7 +687,7 @@ Examples:
         }
 
         try {
-          const prBody = `## Summary\n\n${ticket.description ?? ticket.title}\n\n---\n_Created by BlockSpool_`;
+          const prBody = `## Summary\n\n${ticket.description ?? ticket.title}\n\n---\n_Created by PromptWheel_`;
 
           const prOutput = execFileSync(
             'gh', ['pr', 'create', '--title', ticket.title, '--body', prBody, '--head', branchName],

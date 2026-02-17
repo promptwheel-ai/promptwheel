@@ -1,7 +1,7 @@
 /**
  * Project guidelines loader for MCP advance prompts.
  *
- * Pure resolution logic and formatting live in @blockspool/core/guidelines/shared.
+ * Pure resolution logic and formatting live in @promptwheel/core/guidelines/shared.
  * This file wraps them with filesystem I/O.
  */
 
@@ -11,12 +11,12 @@ import {
   type ProjectGuidelines,
   type GuidelinesBackend,
   resolveGuidelinesPaths,
-} from '@blockspool/core/guidelines/shared';
+} from '@promptwheel/core/guidelines/shared';
 
 // Re-export types and pure functions
-export type { ProjectGuidelines } from '@blockspool/core/guidelines/shared';
-export type { GuidelinesBackend } from '@blockspool/core/guidelines/shared';
-export { formatGuidelinesForPrompt } from '@blockspool/core/guidelines/shared';
+export type { ProjectGuidelines } from '@promptwheel/core/guidelines/shared';
+export type { GuidelinesBackend } from '@promptwheel/core/guidelines/shared';
+export { formatGuidelinesForPrompt } from '@promptwheel/core/guidelines/shared';
 
 export interface GuidelinesOptions {
   backend?: GuidelinesBackend;
@@ -47,7 +47,7 @@ function readGuidelinesFile(repoRoot: string, rel: string): ProjectGuidelines | 
     return { content, source: rel, loadedAt: Date.now() };
   } catch (err) {
     if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
-      console.warn(`[blockspool] failed to read guidelines file ${rel}: ${err.message}`);
+      console.warn(`[promptwheel] failed to read guidelines file ${rel}: ${err.message}`);
     }
     return null;
   }

@@ -20,7 +20,7 @@ export async function run(ctx: TicketContext): Promise<StepResult> {
     try {
       const { assertPushSafe: assertPrSafe } = await import('../solo-remote.js');
       await assertPrSafe(worktreePath, config?.allowedRemote);
-      const prBody = `## Summary\n\n${ticket.description ?? ticket.title}\n\n---\n_Created by BlockSpool_`;
+      const prBody = `## Summary\n\n${ticket.description ?? ticket.title}\n\n---\n_Created by PromptWheel_`;
       const ghArgs = ['pr', 'create', '--title', ticket.title, '--body', prBody, '--head', branchName];
       if (draftPr) ghArgs.push('--draft');
 

@@ -1,10 +1,10 @@
 ---
 name: run
-description: Run BlockSpool — interactive codebase improvement. Scouts, presents a roadmap, executes approved changes. Use `wheel` for unattended wheel execution.
+description: Run PromptWheel — interactive codebase improvement. Scouts, presents a roadmap, executes approved changes. Use `wheel` for unattended wheel execution.
 argument-hint: "[wheel] [hours=N] [formula=name] [cycles=N] [deep] [parallel=N]"
 ---
 
-Start a BlockSpool session. Default mode is **orchestration**: scout → present roadmap → user approves → execute sequentially → done.
+Start a PromptWheel session. Default mode is **orchestration**: scout → present roadmap → user approves → execute sequentially → done.
 Pass `wheel` for unattended wheel mode with parallel subagents and stop-hook loop.
 
 ## Arguments
@@ -39,14 +39,14 @@ Human-in-the-loop interactive mode. No subagents, no stop hook, no loop-state fi
 
 ### Phase 1 — Setup
 
-1. Call `blockspool_start_session` with the provided arguments, plus: `direct: true, parallel: 1, max_cycles: 1`
-2. **Do NOT** write `.blockspool/loop-state.json` — the user can exit anytime.
+1. Call `promptwheel_start_session` with the provided arguments, plus: `direct: true, parallel: 1, max_cycles: 1`
+2. **Do NOT** write `.promptwheel/loop-state.json` — the user can exit anytime.
 
 ### Phase 2 — Scout
 
-3. Call `blockspool_advance` → returns a SCOUT prompt.
+3. Call `promptwheel_advance` → returns a SCOUT prompt.
 4. Execute the scout: read files, analyze code, generate proposals in a `<proposals>` block.
-5. **Do NOT** call `blockspool_ingest_event` yet — collect the proposals first.
+5. **Do NOT** call `promptwheel_ingest_event` yet — collect the proposals first.
 
 ### Phase 3 — Roadmap (Human Approval)
 
@@ -67,27 +67,27 @@ Which proposals should I implement? (all / 1,3,5 / none)
 
 8. Based on the response:
    - **"all"** → keep all proposals
-   - **"none"** → call `blockspool_end_session`, done
+   - **"none"** → call `promptwheel_end_session`, done
    - **"1,3,5"** (comma-separated numbers) → keep only those proposals
-   - **0 proposals found** → tell the user "No improvements found", call `blockspool_end_session`, done
+   - **0 proposals found** → tell the user "No improvements found", call `promptwheel_end_session`, done
 
-9. Call `blockspool_ingest_event` with `SCOUT_OUTPUT` containing **only the approved proposals**. Rejected proposals are discarded — they never become tickets.
+9. Call `promptwheel_ingest_event` with `SCOUT_OUTPUT` containing **only the approved proposals**. Rejected proposals are discarded — they never become tickets.
 
 ### Phase 4 — Execute (Sequential)
 
-10. Call `blockspool_advance` → returns the next ticket prompt.
+10. Call `promptwheel_advance` → returns the next ticket prompt.
 11. For each ticket:
     - Show the user what will be changed: **"Implementing: [ticket title]"**
     - Execute directly in the active session: read files, edit code, run tests, commit
-    - Report the result via `blockspool_ingest_event`
-    - Call `blockspool_advance` for the next ticket
+    - Report the result via `promptwheel_ingest_event`
+    - Call `promptwheel_advance` for the next ticket
 12. Repeat until advance returns `next_action: "STOP"`.
 
 **No Task subagents** — Claude Code's active session does all the work. The user sees every change as it happens.
 
 ### Phase 5 — Finalize
 
-13. Call `blockspool_end_session`.
+13. Call `promptwheel_end_session`.
 14. Show a summary: tickets completed, files changed, commits made.
 
 ---
@@ -98,8 +98,8 @@ Activated by passing `wheel` in `$ARGUMENTS`. Unattended parallel execution with
 
 ### Setup
 
-1. Call `blockspool_start_session` with the provided arguments.
-2. After receiving the response, write `.blockspool/loop-state.json` with:
+1. Call `promptwheel_start_session` with the provided arguments.
+2. After receiving the response, write `.promptwheel/loop-state.json` with:
    ```json
    { "run_id": "<run_id>", "session_id": "<session_id>", "phase": "SCOUT" }
    ```
@@ -107,12 +107,12 @@ Activated by passing `wheel` in `$ARGUMENTS`. Unattended parallel execution with
 
 ### Main Loop
 
-3. Call `blockspool_advance` to get the next action.
+3. Call `promptwheel_advance` to get the next action.
 4. Check `next_action` in the response:
-   - `"PROMPT"` → Execute the prompt (scout, plan, code, test, git), then report via `blockspool_ingest_event`
+   - `"PROMPT"` → Execute the prompt (scout, plan, code, test, git), then report via `promptwheel_ingest_event`
    - `"PARALLEL_EXECUTE"` → Spawn subagents (see Parallel Execution below)
    - `"STOP"` → Session is done, clean up
-5. Update `.blockspool/loop-state.json` with the current phase after each advance.
+5. Update `.promptwheel/loop-state.json` with the current phase after each advance.
 6. Repeat until advance returns `next_action: "STOP"`.
 
 ### Task Tracking
@@ -121,7 +121,7 @@ Use Claude Code's built-in task tracking to mirror the ticket lifecycle. This gi
 
 **On session start:**
 ```
-TaskCreate({ subject: "BlockSpool: Scout codebase", activeForm: "Scouting codebase" })
+TaskCreate({ subject: "PromptWheel: Scout codebase", activeForm: "Scouting codebase" })
 ```
 
 **When entering EXECUTE (sequential) or PARALLEL_EXECUTE:**
@@ -144,7 +144,7 @@ TaskUpdate({ taskId: "<id>", status: "completed" })
 ```
 TaskUpdate({ taskId: "<id>", status: "completed" })
 ```
-(Mark completed, not stuck — the failure is recorded in BlockSpool's state.)
+(Mark completed, not stuck — the failure is recorded in PromptWheel's state.)
 
 ### Parallel Execution
 
@@ -189,11 +189,11 @@ This returns an `output_file` path immediately. Use `Read` to check progress. Fo
 
 1. Wait for ALL Task tool results to return (or read background output files)
 2. Parse each subagent's output for the result block (TICKET_ID, STATUS, PR_URL, BRANCH, SUMMARY)
-3. For each ticket, call `blockspool_ticket_event` to record the outcome:
+3. For each ticket, call `promptwheel_ticket_event` to record the outcome:
    - Success: `type: "PR_CREATED"`, `payload: { ticket_id, url: "<pr-url>", branch: "<branch>" }`
    - Failure: `type: "TICKET_RESULT"`, `payload: { ticket_id, status: "failed", reason: "..." }`
 4. Update task tracking: mark each ticket task as completed
-5. Call `blockspool_advance` to continue (next batch or next scout cycle)
+5. Call `promptwheel_advance` to continue (next batch or next scout cycle)
 
 #### Sequential Fallback
 
@@ -206,6 +206,6 @@ When `parallel` is 1 (or only 1 ticket is ready), advance returns `"PROMPT"` ins
 - Always follow the constraints returned by advance (allowed_paths, denied_paths, max_lines).
 - Always output structured XML blocks when requested (`<proposals>`, `<commit-plan>`, `<ticket-result>`).
 - In wheel mode, the Stop hook will block premature exit while the session is active.
-- In orchestration mode, no `.blockspool/loop-state.json` exists — the Stop hook is a no-op and the user can exit freely.
-- When the session ends in wheel mode, delete `.blockspool/loop-state.json`.
-- **Trajectory awareness:** If a trajectory is active, the session follows its steps. The advance loop automatically injects trajectory context into scout prompts. You can check trajectory status with `/blockspool:trajectory list` or `/blockspool:status`.
+- In orchestration mode, no `.promptwheel/loop-state.json` exists — the Stop hook is a no-op and the user can exit freely.
+- When the session ends in wheel mode, delete `.promptwheel/loop-state.json`.
+- **Trajectory awareness:** If a trajectory is active, the session follows its steps. The advance loop automatically injects trajectory context into scout prompts. You can check trajectory status with `/promptwheel:trajectory list` or `/promptwheel:status`.

@@ -7,27 +7,27 @@ import {
   formatLearningsForPrompt,
   recordAccess,
 } from './learnings.js';
-import type { AdaptiveRiskAssessment } from '@blockspool/core/learnings/shared';
+import type { AdaptiveRiskAssessment } from '@promptwheel/core/learnings/shared';
 import {
   type Trajectory,
   type TrajectoryState,
   parseTrajectoryYaml,
   getNextStep as getTrajectoryNextStep,
   formatTrajectoryForPrompt,
-} from '@blockspool/core/trajectory/shared';
-import type { SectorState } from '@blockspool/core/sectors/shared';
+} from '@promptwheel/core/trajectory/shared';
+import type { SectorState } from '@promptwheel/core/sectors/shared';
 
 export const DEFAULT_LEARNINGS_BUDGET = 2000;
 
 /** Load trajectory state from project root — returns null if missing/invalid. */
 export function loadTrajectoryData(rootPath: string): { trajectory: Trajectory; state: TrajectoryState } | null {
   try {
-    const statePath = path.join(rootPath, '.blockspool', 'trajectory-state.json');
+    const statePath = path.join(rootPath, '.promptwheel', 'trajectory-state.json');
     if (!fs.existsSync(statePath)) return null;
     const trajState: TrajectoryState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
     if (trajState.paused) return null;
 
-    const trajDir = path.join(rootPath, '.blockspool', 'trajectories');
+    const trajDir = path.join(rootPath, '.promptwheel', 'trajectories');
     if (!fs.existsSync(trajDir)) return null;
 
     const files = fs.readdirSync(trajDir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
@@ -40,7 +40,7 @@ export function loadTrajectoryData(rootPath: string): { trajectory: Trajectory; 
     }
   } catch (err) {
     if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
-      console.warn(`[blockspool] Failed to load trajectory data: ${err.message}`);
+      console.warn(`[promptwheel] Failed to load trajectory data: ${err.message}`);
     }
   }
   return null;
@@ -49,14 +49,14 @@ export function loadTrajectoryData(rootPath: string): { trajectory: Trajectory; 
 /** Load sectors.json from project root — returns null if missing/invalid. */
 export function loadSectorsState(rootPath: string): SectorState | null {
   try {
-    const filePath = path.join(rootPath, '.blockspool', 'sectors.json');
+    const filePath = path.join(rootPath, '.promptwheel', 'sectors.json');
     if (!fs.existsSync(filePath)) return null;
     const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
     if (data?.version !== 2 || !Array.isArray(data.sectors)) return null;
     return data as SectorState;
   } catch (err) {
     if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
-      console.warn(`[blockspool] Failed to load sectors.json: ${err.message}`);
+      console.warn(`[promptwheel] Failed to load sectors.json: ${err.message}`);
     }
     return null;
   }

@@ -30,11 +30,11 @@ import { buildTicketPrompt } from '../lib/solo-prompt-builder.js';
 let tmpDir: string;
 
 function learningsFile(): string {
-  return path.join(tmpDir, '.blockspool', 'learnings.json');
+  return path.join(tmpDir, '.promptwheel', 'learnings.json');
 }
 
 function writeLearningsRaw(learnings: Learning[]): void {
-  const dir = path.join(tmpDir, '.blockspool');
+  const dir = path.join(tmpDir, '.promptwheel');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(learningsFile(), JSON.stringify(learnings, null, 2));
 }

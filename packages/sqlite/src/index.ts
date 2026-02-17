@@ -1,14 +1,14 @@
 /**
- * @blockspool/sqlite
+ * @promptwheel/sqlite
  *
- * SQLite adapter for BlockSpool.
+ * SQLite adapter for PromptWheel.
  * Use this for zero-config local development.
  *
  * Features:
  * - No setup required - auto-creates database
  * - WAL mode for concurrency
  * - Works offline
- * - Stores data in ~/.blockspool/data.db by default
+ * - Stores data in ~/.promptwheel/data.db by default
  */
 
 export { SQLiteAdapter, createSQLiteAdapter } from './adapter.js';

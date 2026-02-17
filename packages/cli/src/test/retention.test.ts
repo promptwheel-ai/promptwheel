@@ -27,7 +27,7 @@ import { writeRunState, readRunState } from '../lib/run-state.js';
 let tmpDir: string;
 
 function bsDir(): string {
-  return path.join(tmpDir, '.blockspool');
+  return path.join(tmpDir, '.promptwheel');
 }
 
 function mkBsSubdir(...segments: string[]): string {

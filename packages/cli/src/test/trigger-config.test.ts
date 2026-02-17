@@ -11,7 +11,7 @@ import { loadTriggerRules } from '../lib/trigger-config.js';
 let tmpDir: string;
 
 function triggersFile(): string {
-  return path.join(tmpDir, '.blockspool', 'triggers.json');
+  return path.join(tmpDir, '.promptwheel', 'triggers.json');
 }
 
 function writeTriggersJson(data: unknown): void {

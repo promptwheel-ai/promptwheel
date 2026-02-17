@@ -7,7 +7,7 @@
 
 import chalk from 'chalk';
 
-// Sun symbol - the BlockSpool signature
+// Sun symbol - the PromptWheel signature
 const SUN = '☀';
 
 // Color cycle: blue → green → blue → green

@@ -241,7 +241,7 @@ describe('buildProposalReviewPrompt', () => {
 
   it('includes MCP ingest_event instructions', () => {
     const prompt = buildProposalReviewPrompt([makeValidated()]);
-    expect(prompt).toContain('blockspool_ingest_event');
+    expect(prompt).toContain('promptwheel_ingest_event');
     expect(prompt).toContain('PROPOSALS_REVIEWED');
     expect(prompt).toContain('reviewed_proposals');
   });

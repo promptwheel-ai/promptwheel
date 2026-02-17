@@ -1,7 +1,7 @@
 /**
  * Pure dedup algorithms — no filesystem, no database.
  *
- * Shared by both @blockspool/cli and @blockspool/mcp.
+ * Shared by both @promptwheel/cli and @promptwheel/mcp.
  * CLI keeps its proposal-level wrapper (isDuplicateProposal).
  * MCP keeps its file I/O (dedup-memory.json persistence).
  */

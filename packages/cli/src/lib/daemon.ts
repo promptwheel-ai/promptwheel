@@ -3,13 +3,13 @@
  *
  * The daemon wraps the existing auto mode — each wake cycle calls
  * runAutoMode() with bounded cycles. Between cycles, the session lock
- * is released so manual `blockspool` runs can proceed.
+ * is released so manual `promptwheel` runs can proceed.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execSync } from 'node:child_process';
-import { getBlockspoolDir } from './solo-config.js';
+import { getPromptwheelDir } from './solo-config.js';
 import { acquireSessionLock, releaseSessionLock } from './retention.js';
 import { rotateDaemonLog, removeDaemonPid } from './daemon-fork.js';
 import { notifyAll, type SessionNotification } from './daemon-notifier.js';
@@ -71,13 +71,13 @@ export interface DaemonWakeMetrics {
 const WAKE_METRICS_FILE = 'daemon-wake-metrics.json';
 
 export function writeDaemonWakeMetrics(repoRoot: string, metrics: DaemonWakeMetrics): void {
-  const dir = getBlockspoolDir(repoRoot);
+  const dir = getPromptwheelDir(repoRoot);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, WAKE_METRICS_FILE), JSON.stringify(metrics, null, 2));
 }
 
 export function readDaemonWakeMetrics(repoRoot: string): DaemonWakeMetrics | null {
-  const filePath = path.join(getBlockspoolDir(repoRoot), WAKE_METRICS_FILE);
+  const filePath = path.join(getPromptwheelDir(repoRoot), WAKE_METRICS_FILE);
   try {
     if (!fs.existsSync(filePath)) return null;
     const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -154,7 +154,7 @@ export function isInQuietHours(config: DaemonConfig, now?: Date): boolean {
 const DAEMON_STATE_FILE = 'daemon-state.json';
 
 export function readDaemonState(repoRoot: string): DaemonState | null {
-  const filePath = path.join(getBlockspoolDir(repoRoot), DAEMON_STATE_FILE);
+  const filePath = path.join(getPromptwheelDir(repoRoot), DAEMON_STATE_FILE);
   try {
     if (!fs.existsSync(filePath)) return null;
     return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -164,7 +164,7 @@ export function readDaemonState(repoRoot: string): DaemonState | null {
 }
 
 export function writeDaemonState(repoRoot: string, state: DaemonState): void {
-  const dir = getBlockspoolDir(repoRoot);
+  const dir = getPromptwheelDir(repoRoot);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, DAEMON_STATE_FILE),

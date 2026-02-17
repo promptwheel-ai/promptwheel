@@ -8,7 +8,7 @@ import {
   parseReviewedProposals,
   applyReviewToProposals,
 } from '../lib/proposal-review.js';
-import type { TicketProposal } from '@blockspool/core/scout';
+import type { TicketProposal } from '@promptwheel/core/scout';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,7 +49,7 @@ describe('buildProposalReviewPrompt', () => {
     expect(prompt).toContain('Fix A');
     expect(prompt).toContain('Fix B');
     expect(prompt).toContain('skeptical senior engineer');
-    expect(prompt).toContain('blockspool_ingest_event');
+    expect(prompt).toContain('promptwheel_ingest_event');
     expect(prompt).toContain('PROPOSALS_REVIEWED');
   });
 

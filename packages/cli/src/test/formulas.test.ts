@@ -17,7 +17,7 @@ import {
 let tmpDir: string;
 
 function formulasDir(): string {
-  return path.join(tmpDir, '.blockspool', 'formulas');
+  return path.join(tmpDir, '.promptwheel', 'formulas');
 }
 
 function writeUserFormula(name: string, yaml: string): void {
@@ -117,7 +117,7 @@ describe('loadFormula', () => {
   });
 
   it('returns null when formulas directory does not exist', () => {
-    // tmpDir has no .blockspool/formulas/
+    // tmpDir has no .promptwheel/formulas/
     expect(loadFormula('anything', tmpDir)).toBeNull();
     // Falls back to builtins — 'anything' is not a builtin either
   });
@@ -202,7 +202,7 @@ describe('listFormulas', () => {
     expect(deepFormula!.description).toBe('Custom deep');
   });
 
-  it('returns empty user list when .blockspool/formulas does not exist', () => {
+  it('returns empty user list when .promptwheel/formulas does not exist', () => {
     // No formulas dir, but builtins should still work
     const formulas = listFormulas(tmpDir);
     expect(formulas.length).toBe(BUILTIN_FORMULAS.length);

@@ -1,7 +1,7 @@
 /**
  * Persistent run state for cross-session cycle tracking.
  *
- * Stored in `.blockspool/run-state.json`. Tracks how many scout cycles
+ * Stored in `.promptwheel/run-state.json`. Tracks how many scout cycles
  * have run so periodic tasks (like docs-audit) can trigger automatically.
  */
 
@@ -63,7 +63,7 @@ export interface RunState {
 const RUN_STATE_FILE = 'run-state.json';
 
 function statePath(repoRoot: string): string {
-  return path.join(repoRoot, '.blockspool', RUN_STATE_FILE);
+  return path.join(repoRoot, '.promptwheel', RUN_STATE_FILE);
 }
 
 // ── Async mutex to prevent concurrent read-modify-write races ───────────

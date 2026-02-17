@@ -3,10 +3,10 @@
  */
 
 import chalk from 'chalk';
-import type { ScoutProgress } from '@blockspool/core/services';
-import { SCOUT_DEFAULTS } from '@blockspool/core';
-import type { TicketProposal, ProposalCategory } from '@blockspool/core/scout';
-import { scoutRepo } from '@blockspool/core/services';
+import type { ScoutProgress } from '@promptwheel/core/services';
+import { SCOUT_DEFAULTS } from '@promptwheel/core';
+import type { TicketProposal, ProposalCategory } from '@promptwheel/core/scout';
+import { scoutRepo } from '@promptwheel/core/services';
 import type { AutoSessionState } from './solo-auto-state.js';
 import { getNextScope } from './solo-auto-state.js';
 import { formatElapsed } from './solo-auto-utils.js';
@@ -29,7 +29,7 @@ import { formatTasteForPrompt } from './taste-profile.js';
 import { formatGoalContext } from './goals.js';
 import { sleep } from './dedup.js';
 import { buildBaselineHealthBlock } from './qa-stats.js';
-import { formatTrajectoryForPrompt } from '@blockspool/core/trajectory/shared';
+import { formatTrajectoryForPrompt } from '@promptwheel/core/trajectory/shared';
 
 export interface ScoutResult {
   proposals: TicketProposal[];
@@ -197,7 +197,7 @@ export async function runScoutPhase(state: AutoSessionState, preSelectedScope?: 
       customPrompt: effectivePrompt,
       autoApprove: false,
       backend: state.scoutBackend,
-      protectedFiles: ['.blockspool/**', ...(state.options.includeClaudeMd ? [] : ['CLAUDE.md', '.claude/**'])],
+      protectedFiles: ['.promptwheel/**', ...(state.options.includeClaudeMd ? [] : ['CLAUDE.md', '.claude/**'])],
       batchTokenBudget: state.batchTokenBudget,
       timeoutMs: state.endTime ? 0 : state.scoutTimeoutMs,
       maxFiles: state.maxScoutFiles,

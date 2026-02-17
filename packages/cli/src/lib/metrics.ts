@@ -2,7 +2,7 @@
  * Lightweight instrumentation for measuring system value.
  * Tracks when optimization systems trigger and their outcomes.
  *
- * Data stored in .blockspool/metrics.ndjson
+ * Data stored in .promptwheel/metrics.ndjson
  */
 
 import * as fs from 'node:fs';
@@ -23,7 +23,7 @@ let flushInterval: NodeJS.Timeout | null = null;
  * Initialize metrics for a session
  */
 export function initMetrics(repoRoot: string): void {
-  const dir = path.join(repoRoot, '.blockspool');
+  const dir = path.join(repoRoot, '.promptwheel');
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -78,7 +78,7 @@ export function closeMetrics(): void {
  * Read all metrics from a repo
  */
 export function readMetrics(repoRoot: string): MetricEvent[] {
-  const filePath = path.join(repoRoot, '.blockspool', 'metrics.ndjson');
+  const filePath = path.join(repoRoot, '.promptwheel', 'metrics.ndjson');
   if (!fs.existsSync(filePath)) return [];
 
   const content = fs.readFileSync(filePath, 'utf-8');

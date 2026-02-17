@@ -398,7 +398,7 @@ export function generateSpindleRecommendations(
   }
 
   recommendations.push(
-    'View full diagnostics: blockspool solo artifacts --type spindle',
+    'View full diagnostics: promptwheel solo artifacts --type spindle',
     'Disable Spindle (not recommended): config.spindle.enabled = false'
   );
 

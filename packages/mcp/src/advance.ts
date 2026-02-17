@@ -16,9 +16,9 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { DatabaseAdapter } from '@blockspool/core';
-import { repos, EXECUTION_DEFAULTS } from '@blockspool/core';
-import type { Project } from '@blockspool/core';
+import type { DatabaseAdapter } from '@promptwheel/core';
+import { repos, EXECUTION_DEFAULTS } from '@promptwheel/core';
+import type { Project } from '@promptwheel/core';
 import { RunManager } from './run-manager.js';
 import type {
   AdvanceResponse,
@@ -40,16 +40,16 @@ import {
   scoreStrategies,
   buildCriticBlock,
   buildPlanRejectionCriticBlock,
-} from '@blockspool/core/critic/shared';
+} from '@promptwheel/core/critic/shared';
 import {
   pickNextSector as pickNextSectorCore,
   computeCoverage as computeCoverageCore,
   buildSectorSummary as buildSectorSummaryCore,
-} from '@blockspool/core/sectors/shared';
+} from '@promptwheel/core/sectors/shared';
 import {
   getNextStep as getTrajectoryNextStep,
   formatTrajectoryForPrompt,
-} from '@blockspool/core/trajectory/shared';
+} from '@promptwheel/core/trajectory/shared';
 import {
   buildScoutPrompt,
   buildScoutEscalation,
@@ -322,7 +322,7 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
       sectorSummary = buildSectorSummaryCore(sectorsState, s.selected_sector_path ?? '');
     }
   } catch (err) {
-    console.warn(`[blockspool] Sector summary failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[promptwheel] Sector summary failed: ${err instanceof Error ? err.message : String(err)}`);
   }
   const coverageCtx = cov.sectors_total > 0
     ? { scannedSectors: cov.sectors_scanned, totalSectors: cov.sectors_total, percent: cov.percent, sectorPercent, sectorSummary }
@@ -347,7 +347,7 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
       }
     }
   } catch (err) {
-    console.warn(`[blockspool] Trajectory load failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[promptwheel] Trajectory load failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   const prompt = guidelinesBlock + metadataBlock + indexBlock + dedupBlock + trajectoryBlock + learningsBlock + escalationBlock + buildScoutPrompt(s.scope, s.categories, s.min_confidence,
@@ -460,26 +460,26 @@ async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> 
     const projectMeta = detectProjectMetadata(ctx.project.rootPath);
     const metadataBlock = formatMetadataForPrompt(projectMeta) + '\n\n';
 
-    // Read project setup command and QA baseline from .blockspool/
+    // Read project setup command and QA baseline from .promptwheel/
     let setupCommand: string | undefined;
     let baselineFailures: string[] = [];
     try {
-      const configPath = path.join(ctx.project.rootPath, '.blockspool', 'config.json');
+      const configPath = path.join(ctx.project.rootPath, '.promptwheel', 'config.json');
       if (fs.existsSync(configPath)) {
         const configData = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
         setupCommand = configData.setup;
       }
     } catch (err) {
-      console.warn(`[blockspool] Failed to read config.json: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[promptwheel] Failed to read config.json: ${err instanceof Error ? err.message : String(err)}`);
     }
     try {
-      const baselinePath = path.join(ctx.project.rootPath, '.blockspool', 'qa-baseline.json');
+      const baselinePath = path.join(ctx.project.rootPath, '.promptwheel', 'qa-baseline.json');
       if (fs.existsSync(baselinePath)) {
         const data = JSON.parse(fs.readFileSync(baselinePath, 'utf-8'));
         baselineFailures = data.failures ?? [];
       }
     } catch (err) {
-      console.warn(`[blockspool] Failed to read qa-baseline.json: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[promptwheel] Failed to read qa-baseline.json: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     for (const pt of parallelTickets) {
@@ -517,13 +517,13 @@ async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> 
       '',
       '## After All Subagents Return',
       '',
-      'For each subagent result, call `blockspool_ticket_event` to record the outcome:',
+      'For each subagent result, call `promptwheel_ticket_event` to record the outcome:',
       ...(s.create_prs
         ? ['- Success: `type: "PR_CREATED"`, `payload: { ticket_id, url, branch }`']
         : ['- Success: `type: "TICKET_RESULT"`, `payload: { ticket_id, status: "success", changed_files: [...] }`']),
       '- Failure: `type: "TICKET_RESULT"`, `payload: { ticket_id, status: "failed", reason: "..." }`',
       '',
-      'Then call `blockspool_advance` to continue.',
+      'Then call `promptwheel_advance` to continue.',
     ].join('\n');
 
     return {
@@ -840,7 +840,7 @@ async function advanceParallelExecute(ctx: AdvanceContext): Promise<AdvanceRespo
   return {
     next_action: 'PROMPT',
     phase: 'PARALLEL_EXECUTE',
-    prompt: `Parallel execution still in progress. ${activeWorkers.length} ticket(s) still active. Wait for all subagents to complete, then call blockspool_advance again.`,
+    prompt: `Parallel execution still in progress. ${activeWorkers.length} ticket(s) still active. Wait for all subagents to complete, then call promptwheel_advance again.`,
     reason: `${activeWorkers.length} ticket workers still active`,
     constraints: emptyConstraints(),
     digest: run.buildDigest(),

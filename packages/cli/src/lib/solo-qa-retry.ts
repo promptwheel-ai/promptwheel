@@ -2,9 +2,9 @@
  * QA failure detection and retry-with-test-fix logic
  */
 
-import type { DatabaseAdapter } from '@blockspool/core/db';
-import { runQa, getQaRunDetails } from '@blockspool/core/services';
-import type { tickets } from '@blockspool/core/repos';
+import type { DatabaseAdapter } from '@promptwheel/core/db';
+import { runQa, getQaRunDetails } from '@promptwheel/core/services';
+import type { tickets } from '@promptwheel/core/repos';
 import { buildTicketPrompt } from './solo-prompt-builder.js';
 import type { ExecutionBackend } from './execution-backends/index.js';
 import { gitExecFile } from './solo-git.js';

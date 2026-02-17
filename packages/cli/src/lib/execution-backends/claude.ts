@@ -9,7 +9,7 @@ import {
   isStreamJsonOutput,
   reconstructText,
   type StreamJsonEvent,
-} from '@blockspool/core/trace/shared';
+} from '@promptwheel/core/trace/shared';
 
 /** Format elapsed time as human-readable string */
 function formatElapsed(ms: number): string {
@@ -67,7 +67,7 @@ export async function runClaude(opts: {
   if (!process.env.ANTHROPIC_API_KEY) {
     throw new Error(
       'Running Claude Code in automation requires ANTHROPIC_API_KEY.\n' +
-      'Set the env var for API access, or use the BlockSpool plugin (/blockspool:run) inside Claude Code.'
+      'Set the env var for API access, or use the PromptWheel plugin (/promptwheel:run) inside Claude Code.'
     );
   }
 

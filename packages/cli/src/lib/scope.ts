@@ -1,7 +1,7 @@
 /**
  * Scope enforcement utilities
  *
- * Pure algorithms live in @blockspool/core/scope/shared.
+ * Pure algorithms live in @promptwheel/core/scope/shared.
  * This file re-exports them for CLI consumers.
  */
 
@@ -14,4 +14,4 @@ export {
   parseChangedFiles,
   type ScopeViolation,
   type ScopeExpansionResult,
-} from '@blockspool/core/scope/shared';
+} from '@promptwheel/core/scope/shared';

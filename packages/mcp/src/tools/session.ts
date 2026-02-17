@@ -14,12 +14,12 @@ import { processEvent } from '../event-processor.js';
 import { advanceTicketWorker, ingestTicketEvent } from '../ticket-worker.js';
 import type { EventType, SessionConfig } from '../types.js';
 import { deriveScopePolicy, isFileAllowed, serializeScopePolicy } from '../scope-policy.js';
-import { repos } from '@blockspool/core';
+import { repos } from '@promptwheel/core';
 import { loadFormula, applyFormula, listFormulas } from '../formulas.js';
 
 export function registerSessionTools(server: McpServer, getState: () => SessionManager) {
   server.tool(
-    'blockspool_start_session',
+    'promptwheel_start_session',
     'Initialize an improvement session. Creates a run folder with state.json and event log. Call this first.',
     {
       hours: z.number().optional().describe('Session duration in hours. Omit for unlimited.'),
@@ -106,19 +106,19 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
         });
         if (gitStatus.stdout && gitStatus.stdout.trim().length > 0) {
           const changedCount = gitStatus.stdout.trim().split('\n').length;
-          warnings.push(`${changedCount} uncommitted change(s) detected. Consider committing or stashing before running BlockSpool.`);
+          warnings.push(`${changedCount} uncommitted change(s) detected. Consider committing or stashing before running PromptWheel.`);
         }
 
-        // Ensure .blockspool/ is in .gitignore
+        // Ensure .promptwheel/ is in .gitignore
         const gitignorePath = join(state.projectPath, '.gitignore');
         try {
           const gitignore = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf8') : '';
-          if (!gitignore.includes('.blockspool')) {
-            appendFileSync(gitignorePath, `${gitignore.endsWith('\n') || gitignore === '' ? '' : '\n'}# BlockSpool session data\n.blockspool/\n`);
-            warnings.push('Added .blockspool/ to .gitignore.');
+          if (!gitignore.includes('.promptwheel')) {
+            appendFileSync(gitignorePath, `${gitignore.endsWith('\n') || gitignore === '' ? '' : '\n'}# PromptWheel session data\n.promptwheel/\n`);
+            warnings.push('Added .promptwheel/ to .gitignore.');
           }
         } catch (err) {
-          warnings.push(`Could not update .gitignore: ${err instanceof Error ? err.message : 'unknown error'}. Please add .blockspool/ to .gitignore manually.`);
+          warnings.push(`Could not update .gitignore: ${err instanceof Error ? err.message : 'unknown error'}. Please add .promptwheel/ to .gitignore manually.`);
         }
       }
 
@@ -175,7 +175,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
               framework: runState.project_metadata?.framework ?? null,
               linter: runState.project_metadata?.linter ?? null,
             },
-            message: 'Session started. Call blockspool_advance to begin.',
+            message: 'Session started. Call promptwheel_advance to begin.',
           }, null, 2),
         }],
       };
@@ -183,7 +183,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_advance',
+    'promptwheel_advance',
     'Get the next action to perform. This is the main loop driver. Call repeatedly until it returns STOP.',
     {},
     async () => {
@@ -198,10 +198,10 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
         // Clean up loop-state.json on terminal responses so stop hook doesn't deadlock
         if (response.next_action === 'STOP') {
           try {
-            unlinkSync(join(state.projectPath, '.blockspool', 'loop-state.json'));
+            unlinkSync(join(state.projectPath, '.promptwheel', 'loop-state.json'));
           } catch (err) {
             if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
-              console.warn(`[blockspool] failed to clean up loop-state.json: ${err.message}`);
+              console.warn(`[promptwheel] failed to clean up loop-state.json: ${err.message}`);
             }
           }
         }
@@ -225,8 +225,8 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_ingest_event',
-    'Report an event back to BlockSpool. Used after executing an action from advance(). Triggers state transitions.',
+    'promptwheel_ingest_event',
+    'Report an event back to PromptWheel. Used after executing an action from advance(). Triggers state transitions.',
     {
       type: z.string().describe('Event type (e.g., SCOUT_OUTPUT, PLAN_SUBMITTED, TICKET_RESULT, QA_PASSED, QA_FAILED, PR_CREATED, USER_OVERRIDE).'),
       payload: z.record(z.string(), z.unknown()).describe('Event payload data.'),
@@ -271,7 +271,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_session_status',
+    'promptwheel_session_status',
     'Get current session state: phase, budgets, tickets completed/failed, time remaining.',
     {},
     async () => {
@@ -313,7 +313,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_end_session',
+    'promptwheel_end_session',
     'Finalize the current session. Returns summary.',
     {},
     async () => {
@@ -324,10 +324,10 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
 
         // Clean up loop-state.json so the stop hook doesn't block exit
         try {
-          unlinkSync(join(state.projectPath, '.blockspool', 'loop-state.json'));
+          unlinkSync(join(state.projectPath, '.promptwheel', 'loop-state.json'));
         } catch (err) {
           if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
-            console.warn(`[blockspool] failed to clean up loop-state.json on end: ${err.message}`);
+            console.warn(`[promptwheel] failed to clean up loop-state.json on end: ${err.message}`);
           }
         }
 
@@ -380,7 +380,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_get_scope_policy',
+    'promptwheel_get_scope_policy',
     'Get the scope policy for the current ticket. Used by PreToolUse hooks to check if a file path is allowed before writes.',
     {
       file_path: z.string().optional().describe('Optional file path to check. If provided, returns whether this specific file is allowed.'),
@@ -456,7 +456,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_nudge',
+    'promptwheel_nudge',
     'Add a hint to guide the running session. Hints are consumed in the next scout cycle and appended to the scout prompt.',
     {
       hint: z.string().describe('Guidance for the scout (e.g., "focus on auth module", "skip test files").'),
@@ -489,7 +489,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_advance_ticket',
+    'promptwheel_advance_ticket',
     'Advance a single ticket through its PLAN→EXECUTE→QA→PR lifecycle (parallel mode). Called by subagents working on individual tickets.',
     {
       ticket_id: z.string().describe('The ticket ID to advance.'),
@@ -520,7 +520,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_ticket_event',
+    'promptwheel_ticket_event',
     'Report an event for a specific ticket (parallel mode). Used by subagents to report plan submissions, QA results, PR creation, etc.',
     {
       ticket_id: z.string().describe('The ticket ID this event belongs to.'),
@@ -555,8 +555,8 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
   );
 
   server.tool(
-    'blockspool_list_formulas',
-    'List all available formulas (built-in + custom from .blockspool/formulas/).',
+    'promptwheel_list_formulas',
+    'List all available formulas (built-in + custom from .promptwheel/formulas/).',
     {},
     async () => {
       const state = getState();
@@ -584,7 +584,7 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
 
 function pruneWorktrees(repoRoot: string): number {
   try {
-    const worktreesDir = join(repoRoot, '.blockspool', 'worktrees');
+    const worktreesDir = join(repoRoot, '.promptwheel', 'worktrees');
     if (!existsSync(worktreesDir)) return 0;
 
     const entries = readdirSync(worktreesDir).filter(e => {
@@ -617,12 +617,12 @@ function pruneWorktrees(repoRoot: string): number {
         }
         removed++;
       } catch (err) {
-        console.warn(`[blockspool] failed to remove worktree ${entry}: ${err instanceof Error ? err.message : String(err)}`);
+        console.warn(`[promptwheel] failed to remove worktree ${entry}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     return removed;
   } catch (err) {
-    console.warn(`[blockspool] failed to prune worktrees: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[promptwheel] failed to prune worktrees: ${err instanceof Error ? err.message : String(err)}`);
     return 0;
   }
 }

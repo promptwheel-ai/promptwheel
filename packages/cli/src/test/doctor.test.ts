@@ -36,7 +36,7 @@ function makeReport(overrides: Partial<DoctorReport> = {}): DoctorReport {
 describe('formatDoctorReport', () => {
   it('renders header', () => {
     const output = formatDoctorReport(makeReport());
-    expect(output).toContain('BlockSpool Doctor');
+    expect(output).toContain('PromptWheel Doctor');
   });
 
   it('renders pass checks with checkmark icon', () => {
@@ -146,7 +146,7 @@ describe('formatDoctorReport', () => {
   it('handles empty checks array', () => {
     const report = makeReport({ checks: [] });
     const output = formatDoctorReport(report);
-    expect(output).toContain('BlockSpool Doctor');
+    expect(output).toContain('PromptWheel Doctor');
     expect(output).toContain('Capabilities:');
   });
 

@@ -1,7 +1,7 @@
 /**
  * Pure learnings algorithms — no filesystem, no database, no crypto.
  *
- * Shared by both @blockspool/cli and @blockspool/mcp.
+ * Shared by both @promptwheel/cli and @promptwheel/mcp.
  * Callers handle file I/O (reading/writing learnings.json) and ID generation.
  */
 

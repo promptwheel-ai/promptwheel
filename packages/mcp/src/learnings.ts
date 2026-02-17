@@ -1,10 +1,10 @@
 /**
  * Cross-run learning mechanism.
  *
- * Persists learnings to `.blockspool/learnings.json` and provides
+ * Persists learnings to `.promptwheel/learnings.json` and provides
  * decay, consolidation, relevance scoring, and prompt formatting.
  *
- * Pure algorithms live in @blockspool/core/learnings/shared.
+ * Pure algorithms live in @promptwheel/core/learnings/shared.
  * This file wraps them with filesystem I/O.
  */
 
@@ -17,17 +17,17 @@ import {
   applyLearningsDecay,
   consolidateLearnings as coreConsolidate,
   LEARNINGS_DEFAULTS,
-} from '@blockspool/core/learnings/shared';
+} from '@promptwheel/core/learnings/shared';
 
 // Re-export pure functions and types from core
-export type { Learning, StructuredKnowledge } from '@blockspool/core/learnings/shared';
+export type { Learning, StructuredKnowledge } from '@promptwheel/core/learnings/shared';
 export {
   formatLearningsForPrompt,
   extractKeywords,
   selectRelevant,
   extractTags,
   LEARNINGS_DEFAULTS,
-} from '@blockspool/core/learnings/shared';
+} from '@promptwheel/core/learnings/shared';
 
 // Use core's Learning type locally
 type Learning = CoreLearning;
@@ -39,7 +39,7 @@ type Learning = CoreLearning;
 const LEARNINGS_FILE = 'learnings.json';
 
 function learningsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.blockspool', LEARNINGS_FILE);
+  return path.join(projectRoot, '.promptwheel', LEARNINGS_FILE);
 }
 
 function readLearnings(projectRoot: string): Learning[] {
@@ -50,7 +50,7 @@ function readLearnings(projectRoot: string): Learning[] {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
   } catch (err) {
-    console.warn(`[blockspool] failed to parse learnings.json: ${err instanceof Error ? err.message : String(err)}`);
+    console.warn(`[promptwheel] failed to parse learnings.json: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }

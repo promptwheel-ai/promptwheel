@@ -1,5 +1,5 @@
 /**
- * Direct Client — programmatic adapter for the BlockSpool canonical loop.
+ * Direct Client — programmatic adapter for the PromptWheel canonical loop.
  *
  * Proves the MCP tools work without Claude Code or stdio transport.
  * Any LLM (or test harness) can drive the loop:
@@ -18,9 +18,9 @@
 
 import * as path from 'node:path';
 import * as fs from 'node:fs';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import { repos } from '@blockspool/core';
-import type { DatabaseAdapter, Project } from '@blockspool/core';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import { repos } from '@promptwheel/core';
+import type { DatabaseAdapter, Project } from '@promptwheel/core';
 import { RunManager } from './run-manager.js';
 import { advance } from './advance.js';
 import { processEvent } from './event-processor.js';
@@ -34,7 +34,7 @@ import type {
 export interface DirectClientOptions {
   projectPath: string;
   projectName?: string;
-  /** Provide an existing DB adapter (for testing). If omitted, creates SQLite at .blockspool/state.sqlite */
+  /** Provide an existing DB adapter (for testing). If omitted, creates SQLite at .promptwheel/state.sqlite */
   db?: DatabaseAdapter;
 }
 
@@ -65,7 +65,7 @@ export class DirectClient {
     let ownsDb = false;
 
     if (!db) {
-      const bsDir = path.join(projectPath, '.blockspool');
+      const bsDir = path.join(projectPath, '.promptwheel');
       if (!fs.existsSync(bsDir)) {
         fs.mkdirSync(bsDir, { recursive: true });
       }
@@ -97,7 +97,7 @@ export class DirectClient {
     type: EventType,
     payload: Record<string, unknown>,
   ): Promise<{ processed: boolean; message: string }> {
-    // Log the raw event (matches what blockspool_ingest_event tool does)
+    // Log the raw event (matches what promptwheel_ingest_event tool does)
     this.run.appendEvent(type, payload);
     const result = await processEvent(this.run, this.db, type, payload);
     return { processed: result.processed, message: result.message };

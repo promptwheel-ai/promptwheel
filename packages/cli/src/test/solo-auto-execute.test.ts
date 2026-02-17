@@ -107,7 +107,7 @@ vi.mock('../lib/solo-utils.js', () => ({
   normalizeQaConfig: vi.fn().mockReturnValue({ commands: [] }),
 }));
 
-vi.mock('@blockspool/core/repos', () => ({
+vi.mock('@promptwheel/core/repos', () => ({
   tickets: {
     create: vi.fn().mockResolvedValue({
       id: 'tkt_mock',
@@ -155,9 +155,9 @@ import { recordDedupEntry } from '../lib/dedup-memory.js';
 import { addLearning } from '../lib/learnings.js';
 import { shouldContinue } from '../lib/solo-auto-state.js';
 import { recordTicketOutcome } from '../lib/sectors.js';
-import { runs } from '@blockspool/core/repos';
+import { runs } from '@promptwheel/core/repos';
 import type { AutoSessionState } from '../lib/solo-auto-state.js';
-import type { TicketProposal } from '@blockspool/core/scout';
+import type { TicketProposal } from '@promptwheel/core/scout';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -215,7 +215,7 @@ function makeState(overrides: Partial<AutoSessionState> = {}): AutoSessionState 
     milestoneTicketSummaries: [],
 
     deliveryMode: 'pr',
-    directBranch: 'blockspool-direct',
+    directBranch: 'promptwheel-direct',
     directFinalize: 'pr',
     completedDirectTickets: [],
 
@@ -344,7 +344,7 @@ describe('executeProposals', () => {
         success: true,
         durationMs: 5000,
         prUrl: 'https://github.com/test/repo/pull/1',
-        branchName: 'blockspool/tkt_mock',
+        branchName: 'promptwheel/tkt_mock',
       });
 
       const state = makeState();
@@ -360,7 +360,7 @@ describe('executeProposals', () => {
         success: true,
         durationMs: 5000,
         prUrl: 'https://github.com/test/repo/pull/1',
-        branchName: 'blockspool/tkt_mock',
+        branchName: 'promptwheel/tkt_mock',
       });
 
       const state = makeState();
@@ -376,7 +376,7 @@ describe('executeProposals', () => {
         success: true,
         durationMs: 5000,
         prUrl: 'https://github.com/test/repo/pull/1',
-        branchName: 'blockspool/tkt_mock',
+        branchName: 'promptwheel/tkt_mock',
       });
 
       const state = makeState();
@@ -682,7 +682,7 @@ describe('executeProposals', () => {
           failureReason: 'agent_error',
         });
 
-      const { runs } = await import('@blockspool/core/repos');
+      const { runs } = await import('@promptwheel/core/repos');
       const state = makeState();
       const proposals = [makeProposal()];
 

@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Adversarial review in MCP mode — review prompt now includes `blockspool_ingest_event` instructions
+- Adversarial review in MCP mode — review prompt now includes `promptwheel_ingest_event` instructions
 - Fallback parsing when LLM sends review results through `SCOUT_OUTPUT` instead of `PROPOSALS_REVIEWED`
 - `USER_OVERRIDE` to support `skip_review` mid-session
 - Directory-style `allowed_paths` normalization in scope validation
@@ -53,22 +53,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Project guidelines context** — automatically loads CLAUDE.md (Claude runs) or AGENTS.md (Codex runs) into every scout and execution prompt
 - Auto-creates baseline guidelines from `package.json` when no file exists
 - Configurable custom guidelines path, auto-create toggle, and refresh interval (`guidelinesRefreshCycles`)
-- `@blockspool/mcp` — MCP server package for plugin-based orchestration
+- `@promptwheel/mcp` — MCP server package for plugin-based orchestration
 - Configurable retention, auto-prune, periodic pull, and `prune` command
 - Deferred out-of-scope proposals with automatic retry when scope matches
 - Landing page: project guidelines feature card, FAQ entry, comparison matrix row
 
 ### Changed
-- Favicon replaced with BlockSpool logo (Next.js `icon.tsx` route)
+- Favicon replaced with PromptWheel logo (Next.js `icon.tsx` route)
 - Navbar logo size increased
 
 ## [0.1.0] - 2025-01-26
 
 ### Added
 - Initial open source release
-- `@blockspool/core` - Core business logic and database adapter interface
-- `@blockspool/cli` - Command-line interface with solo mode
-- `@blockspool/sqlite` - Zero-config SQLite adapter for local development
+- `@promptwheel/core` - Core business logic and database adapter interface
+- `@promptwheel/cli` - Command-line interface with solo mode
+- `@promptwheel/sqlite` - Zero-config SQLite adapter for local development
 - Solo mode commands: `init`, `scout`, `run`, `pr`, `auto`, `status`, `doctor`
 - TUI dashboard for monitoring long-running sessions
 - Built-in starter pack with CI fix automation
@@ -76,6 +76,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 - All packages published with npm provenance
 
-[Unreleased]: https://github.com/blockspool/blockspool/compare/v0.3.3...HEAD
-[0.3.3]: https://github.com/blockspool/blockspool/compare/v0.2.0...v0.3.3
-[0.1.0]: https://github.com/blockspool/blockspool/releases/tag/v0.2.0
+[Unreleased]: https://github.com/promptwheel-ai/promptwheel/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/promptwheel-ai/promptwheel/compare/v0.2.0...v0.3.3
+[0.1.0]: https://github.com/promptwheel-ai/promptwheel/releases/tag/v0.2.0

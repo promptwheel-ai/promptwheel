@@ -5,7 +5,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { runClaude, parseClaudeOutput } from '@blockspool/core/scout';
+import { runClaude, parseClaudeOutput } from '@promptwheel/core/scout';
 import { buildCodebaseIndex, formatIndexForPrompt } from './codebase-index.js';
 import { detectProjectMetadata, formatMetadataForPrompt } from './project-metadata/index.js';
 import {
@@ -13,7 +13,7 @@ import {
   parseTrajectoryYaml,
   type Trajectory,
   type TrajectoryStep,
-} from '@blockspool/core/trajectory/shared';
+} from '@promptwheel/core/trajectory/shared';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -34,7 +34,7 @@ export interface GenerateResult {
 
 export async function generateTrajectory(opts: GenerateOptions): Promise<GenerateResult> {
   // 1. Build codebase context
-  const excludeDirs = ['node_modules', 'dist', 'build', '.git', '.blockspool', 'coverage', '__pycache__'];
+  const excludeDirs = ['node_modules', 'dist', 'build', '.git', '.promptwheel', 'coverage', '__pycache__'];
   const codebaseIndex = buildCodebaseIndex(opts.repoRoot, excludeDirs, true);
   const projectMeta = detectProjectMetadata(opts.repoRoot);
 
@@ -76,7 +76,7 @@ export async function generateTrajectory(opts: GenerateOptions): Promise<Generat
 
   // 8. Write to disk
   const slug = slugify(trajectory.name);
-  const dir = path.join(opts.repoRoot, '.blockspool', 'trajectories');
+  const dir = path.join(opts.repoRoot, '.promptwheel', 'trajectories');
   fs.mkdirSync(dir, { recursive: true });
   const filePath = path.join(dir, `${slug}.yaml`);
   fs.writeFileSync(filePath, yaml, 'utf-8');

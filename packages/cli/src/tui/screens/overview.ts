@@ -62,7 +62,7 @@ export function createOverviewScreen(deps: OverviewScreenDeps = {}): TuiScreen {
       height: 1,
       width: '100%',
       tags: true,
-      content: '{bold}BlockSpool Solo{/bold}  {gray-fg}s{/gray-fg} scout  {gray-fg}q{/gray-fg} qa  {gray-fg}r{/gray-fg} refresh  {gray-fg}ctrl+c{/gray-fg} quit',
+      content: '{bold}PromptWheel Solo{/bold}  {gray-fg}s{/gray-fg} scout  {gray-fg}q{/gray-fg} qa  {gray-fg}r{/gray-fg} refresh  {gray-fg}ctrl+c{/gray-fg} quit',
     });
 
     left = blessed.box({
@@ -107,8 +107,8 @@ export function createOverviewScreen(deps: OverviewScreenDeps = {}): TuiScreen {
     if (!p) {
       projectLines.push('{red-fg}No project found{/red-fg}');
       projectLines.push('');
-      projectLines.push('Run: {bold}blockspool solo init{/bold}');
-      projectLines.push('Then: {bold}blockspool solo scout .{/bold}');
+      projectLines.push('Run: {bold}promptwheel solo init{/bold}');
+      projectLines.push('Then: {bold}promptwheel solo scout .{/bold}');
     } else {
       projectLines.push(`{bold}${p.name}{/bold}`);
       projectLines.push(`{gray-fg}${p.repoRoot}{/gray-fg}`);

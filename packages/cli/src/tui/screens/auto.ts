@@ -3,7 +3,7 @@
  *
  * Layout:
  * ┌─ Header ──────────────────────────────────────────────────────┐
- * │ BlockSpool v0.5.63 │ direct │ 12m │ Cycle 2 │ 3 done         │
+ * │ PromptWheel v0.5.63 │ direct │ 12m │ Cycle 2 │ 3 done         │
  * ├───────────────────────────────────────────────────────────────┤
  * │ > Fix auth  ✓ Add tests  ✗ Refactor  ○ Update docs           │
  * ├───────────────────────────────────────────────────────────────┤
@@ -87,7 +87,7 @@ export class AutoScreen {
 
     this.screen = blessed.screen({
       smartCSR: true,
-      title: `BlockSpool v${opts.version}`,
+      title: `PromptWheel v${opts.version}`,
       fullUnicode: true,
       tags: true,
     });
@@ -95,10 +95,10 @@ export class AutoScreen {
     // Log file for reviewing output outside TUI
     if (opts.repoRoot) {
       try {
-        const logDir = join(opts.repoRoot, '.blockspool');
+        const logDir = join(opts.repoRoot, '.promptwheel');
         mkdirSync(logDir, { recursive: true });
         this.logStream = createWriteStream(join(logDir, 'tui.log'), { flags: 'w' });
-        this.writeLog(`BlockSpool v${opts.version} — TUI session started at ${new Date().toISOString()}\n`);
+        this.writeLog(`PromptWheel v${opts.version} — TUI session started at ${new Date().toISOString()}\n`);
       } catch {
         // Non-fatal
       }
@@ -257,7 +257,7 @@ export class AutoScreen {
     const cycle = this.cycleCount > 0 ? ` │ Cycle ${this.cycleCount}` : '';
     const counts = ` │ ${this.doneCount} done${this.failedCount > 0 ? ` · ${this.failedCount} failed` : ''}`;
 
-    const content = ` {bold}BlockSpool v${this.opts.version}{/bold} │ ${this.opts.deliveryMode} │ ${elapsed}${timeLeft}${cycle}${counts}`;
+    const content = ` {bold}PromptWheel v${this.opts.version}{/bold} │ ${this.opts.deliveryMode} │ ${elapsed}${timeLeft}${cycle}${counts}`;
     this.header.setContent(content);
     this.screen.render();
   }

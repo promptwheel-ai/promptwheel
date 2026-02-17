@@ -11,9 +11,9 @@ import chalk from 'chalk';
 const _require = createRequire(import.meta.url);
 const CLI_VERSION: string = _require('../../package.json').version;
 import { spawnSync } from 'node:child_process';
-import type { DatabaseAdapter } from '@blockspool/core/db';
-import type { ScoutBackend } from '@blockspool/core/services';
-import { projects } from '@blockspool/core/repos';
+import type { DatabaseAdapter } from '@promptwheel/core/db';
+import type { ScoutBackend } from '@promptwheel/core/services';
+import { projects } from '@promptwheel/core/repos';
 import { createGitService } from './git.js';
 import {
   getAdapter,
@@ -62,8 +62,8 @@ import {
   loadTrajectoryState,
   loadTrajectory,
 } from './trajectory.js';
-import type { Trajectory, TrajectoryState, TrajectoryStep } from '@blockspool/core/trajectory/shared';
-import { getNextStep as getTrajectoryNextStep } from '@blockspool/core/trajectory/shared';
+import type { Trajectory, TrajectoryState, TrajectoryStep } from '@promptwheel/core/trajectory/shared';
+import { getNextStep as getTrajectoryNextStep } from '@promptwheel/core/trajectory/shared';
 import type { DisplayAdapter } from './display-adapter.js';
 import { SpinnerDisplayAdapter } from './display-adapter-spinner.js';
 import { LogDisplayAdapter } from './display-adapter-log.js';
@@ -192,7 +192,7 @@ async function initEnvironment(
   // Session lock
   const lockResult = acquireSessionLock(repoRoot);
   if (!lockResult.acquired) {
-    console.error(chalk.red('✗ Another BlockSpool session is already running in this repo'));
+    console.error(chalk.red('✗ Another PromptWheel session is already running in this repo'));
     process.exit(1);
   }
   if (lockResult.stalePid) {
@@ -250,7 +250,7 @@ async function initEnvironment(
   // Auto-init if needed (before .gitignore and dirty check so the
   // auto-committed .gitignore doesn't trip the "uncommitted changes" error)
   if (!isInitialized(repoRoot)) {
-    console.log(chalk.cyan('First run — initializing BlockSpool...'));
+    console.log(chalk.cyan('First run — initializing PromptWheel...'));
     const { detectedQa } = await initSolo(repoRoot);
     if (detectedQa.length > 0) {
       console.log(chalk.green(`  ✓ Detected QA: ${detectedQa.map(q => q.name).join(', ')}`));
@@ -259,12 +259,12 @@ async function initEnvironment(
     console.log();
   }
 
-  // Ensure .blockspool is in .gitignore
+  // Ensure .promptwheel is in .gitignore
   const gitignorePath = path.join(repoRoot, '.gitignore');
   if (fs.existsSync(gitignorePath)) {
     const giContent = fs.readFileSync(gitignorePath, 'utf-8');
-    if (!giContent.includes('.blockspool')) {
-      fs.appendFileSync(gitignorePath, '\n# BlockSpool local state\n.blockspool/\n');
+    if (!giContent.includes('.promptwheel')) {
+      fs.appendFileSync(gitignorePath, '\n# PromptWheel local state\n.promptwheel/\n');
     }
   }
 
@@ -278,9 +278,9 @@ async function initEnvironment(
     if (onlyGitignore) {
       const giPath = path.join(repoRoot, '.gitignore');
       const content = fs.readFileSync(giPath, 'utf-8');
-      if (content.includes('.blockspool')) {
+      if (content.includes('.promptwheel')) {
         spawnSync('git', ['add', '.gitignore'], { cwd: repoRoot });
-        spawnSync('git', ['commit', '-m', 'chore: add .blockspool to .gitignore'], { cwd: repoRoot });
+        spawnSync('git', ['commit', '-m', 'chore: add .promptwheel to .gitignore'], { cwd: repoRoot });
         console.log(chalk.gray('  Auto-committed .gitignore update'));
       }
     } else {
@@ -424,7 +424,7 @@ async function loadSessionData(
   }
 
   // Codebase index
-  const excludeDirs = ['node_modules', 'dist', 'build', '.git', '.blockspool', 'coverage', '__pycache__'];
+  const excludeDirs = ['node_modules', 'dist', 'build', '.git', '.promptwheel', 'coverage', '__pycache__'];
   let codebaseIndex: CodebaseIndex | null = null;
   try {
     codebaseIndex = buildCodebaseIndex(repoRoot, excludeDirs, true);
@@ -575,7 +575,7 @@ async function initDependencies(
 
   if (scoutBackendName !== 'claude') {
     if (scoutBackendName === 'codex' && options.codexMcp) {
-      const { CodexMcpScoutBackend } = await import('@blockspool/core/scout');
+      const { CodexMcpScoutBackend } = await import('@promptwheel/core/scout');
       scoutBackend = new CodexMcpScoutBackend({ apiKey: process.env.OPENAI_API_KEY, model: options.codexModel });
       console.log(chalk.cyan('  Scout: Codex MCP (persistent session)'));
     } else {
@@ -675,7 +675,7 @@ function printSessionHeader(
   const initialCategories = getCycleCategories(getCycleFormula(1));
 
   {
-    console.log(chalk.blue(`🧵 BlockSpool Auto v${CLI_VERSION}`));
+    console.log(chalk.blue(`🧵 PromptWheel Auto v${CLI_VERSION}`));
     console.log();
     if (runMode === 'wheel') {
       console.log(chalk.gray('  Mode: Wheel (Ctrl+C to stop gracefully)'));
@@ -688,7 +688,7 @@ function printSessionHeader(
             : `${Math.floor(totalMinutes / 60)}h ${Math.round(totalMinutes % 60)}m`;
         console.log(chalk.gray(`  Time budget: ${budgetLabel} (until ${endDate.toLocaleTimeString()})`));
         if ((totalMinutes ?? 0) >= 360) {
-          console.log(chalk.gray(`  Tip: For always-on improvement, try: blockspool solo daemon start`));
+          console.log(chalk.gray(`  Tip: For always-on improvement, try: promptwheel solo daemon start`));
         }
       }
     } else {
@@ -882,7 +882,7 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
 
   // Delivery mode — need autoConf for defaults
   const deliveryMode = options.deliveryMode ?? autoConf.deliveryMode ?? 'direct';
-  const directBranch = options.directBranch ?? autoConf.directBranch ?? 'blockspool-direct';
+  const directBranch = options.directBranch ?? autoConf.directBranch ?? 'promptwheel-direct';
   const directFinalize = options.directFinalize ?? autoConf.directFinalize ?? 'merge';
 
   printSessionHeader(resolved, deliveryMode, directBranch, directFinalize, autoConf, cachedQaBaseline, tmpGetCycleFormula, tmpGetCycleCategories);

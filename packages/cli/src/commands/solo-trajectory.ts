@@ -14,8 +14,8 @@ import {
   activateTrajectory,
   loadTrajectory,
 } from '../lib/trajectory.js';
-import type { StepStatus } from '@blockspool/core/trajectory/shared';
-import { getNextStep } from '@blockspool/core/trajectory/shared';
+import type { StepStatus } from '@promptwheel/core/trajectory/shared';
+import { getNextStep } from '@promptwheel/core/trajectory/shared';
 
 async function getRepoRoot(): Promise<string> {
   const git = createGitService();
@@ -52,7 +52,7 @@ export function registerTrajectoryCommands(solo: Command): void {
 
       if (trajectories.length === 0) {
         console.log(chalk.gray('No trajectories found.'));
-        console.log(chalk.gray('Create one at .blockspool/trajectories/<name>.yaml'));
+        console.log(chalk.gray('Create one at .promptwheel/trajectories/<name>.yaml'));
         return;
       }
 
@@ -249,7 +249,7 @@ export function registerTrajectoryCommands(solo: Command): void {
       if (state && state.trajectoryName === name) {
         clearTrajectoryState(repoRoot);
         console.log(chalk.green(`Trajectory "${name}" reset.`));
-        console.log(chalk.gray('  Run `blockspool trajectory activate ${name}` to start again.'));
+        console.log(chalk.gray('  Run `promptwheel trajectory activate ${name}` to start again.'));
       } else {
         console.log(chalk.gray(`Trajectory "${name}" is not active. Nothing to reset.`));
       }
@@ -296,7 +296,7 @@ export function registerTrajectoryCommands(solo: Command): void {
             console.log(chalk.green(`\nTrajectory activated. First step: ${state.currentStepId}`));
           }
         } else {
-          console.log(chalk.gray(`\nRun: blockspool trajectory activate ${result.trajectory.name}`));
+          console.log(chalk.gray(`\nRun: promptwheel trajectory activate ${result.trajectory.name}`));
         }
       } catch (err) {
         console.error(chalk.red(`Generation failed: ${(err as Error).message}`));

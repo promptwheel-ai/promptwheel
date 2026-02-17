@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { getAdaptiveParallelCount, isDuplicateProposal } from '../lib/dedup.js';
-import type { TicketProposal } from '@blockspool/core/scout';
+import type { TicketProposal } from '@promptwheel/core/scout';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -185,25 +185,25 @@ describe('isDuplicateProposal', () => {
     const result = await isDuplicateProposal(
       { title: 'fix login bug' },
       [],
-      ['blockspool/tkt_abc123/fix-login-bug'],
+      ['promptwheel/tkt_abc123/fix-login-bug'],
       0.5,
     );
     expect(result.isDuplicate).toBe(true);
     expect(result.reason).toContain('Open PR branch');
-    expect(result.reason).toContain('blockspool/tkt_abc123/fix-login-bug');
+    expect(result.reason).toContain('promptwheel/tkt_abc123/fix-login-bug');
   });
 
   it('ignores PR branches that do not match', async () => {
     const result = await isDuplicateProposal(
       { title: 'Fix authentication bug' },
       [],
-      ['blockspool/tkt_xyz/optimize-database-queries'],
+      ['promptwheel/tkt_xyz/optimize-database-queries'],
     );
     expect(result.isDuplicate).toBe(false);
   });
 
-  it('handles branches without the blockspool prefix', async () => {
-    // Branch doesn't match the blockspool prefix pattern, so full branch name
+  it('handles branches without the promptwheel prefix', async () => {
+    // Branch doesn't match the promptwheel prefix pattern, so full branch name
     // is used as branchTitle after replace (no-op on non-matching pattern)
     const result = await isDuplicateProposal(
       { title: 'feature add logging' },
@@ -251,7 +251,7 @@ describe('isDuplicateProposal', () => {
     const result = await isDuplicateProposal(
       { title: 'Fix login bug' },
       ['Fix login bug'], // exact title match
-      ['blockspool/tkt_abc/fix-login-bug'], // also matches branch
+      ['promptwheel/tkt_abc/fix-login-bug'], // also matches branch
     );
     // Should hit title match first
     expect(result.isDuplicate).toBe(true);

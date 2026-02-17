@@ -9,8 +9,8 @@ import {
   formatTasteForPrompt,
   type TasteProfile,
 } from '../lib/taste-profile.js';
-import type { SectorState, Sector } from '@blockspool/core/sectors/shared';
-import type { Learning } from '@blockspool/core/learnings/shared';
+import type { SectorState, Sector } from '@promptwheel/core/sectors/shared';
+import type { Learning } from '@promptwheel/core/learnings/shared';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,7 +61,7 @@ function makeSectorState(sectors: Sector[]): SectorState {
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taste-profile-test-'));
-  fs.mkdirSync(path.join(tmpDir, '.blockspool'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, '.promptwheel'), { recursive: true });
 });
 
 afterEach(() => {
@@ -244,9 +244,9 @@ describe('loadTasteProfile / saveTasteProfile', () => {
     expect(loaded).toEqual(profile);
   });
 
-  it('creates .blockspool directory if missing', () => {
+  it('creates .promptwheel directory if missing', () => {
     const freshDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taste-fresh-'));
-    // No .blockspool directory yet
+    // No .promptwheel directory yet
     const profile: TasteProfile = {
       preferredCategories: [],
       avoidCategories: [],
@@ -260,7 +260,7 @@ describe('loadTasteProfile / saveTasteProfile', () => {
   });
 
   it('returns null for corrupted JSON', () => {
-    const fp = path.join(tmpDir, '.blockspool', 'taste-profile.json');
+    const fp = path.join(tmpDir, '.promptwheel', 'taste-profile.json');
     fs.writeFileSync(fp, 'not valid json');
     expect(loadTasteProfile(tmpDir)).toBeNull();
   });

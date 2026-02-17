@@ -1,22 +1,22 @@
 {
-  "name": "@blockspool/cli",
+  "name": "@promptwheel/cli",
   "version": "0.6.0",
-  "description": "BlockSpool CLI - Continuous codebase improvement tool",
-  "author": "BlockSpool",
-  "homepage": "https://blockspool.com",
+  "description": "PromptWheel CLI - Continuous codebase improvement tool",
+  "author": "PromptWheel",
+  "homepage": "https://promptwheel.com",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/blockspool/blockspool.git",
+    "url": "git+https://github.com/promptwheel-ai/promptwheel.git",
     "directory": "packages/cli"
   },
   "bugs": {
-    "url": "https://github.com/blockspool/blockspool/issues"
+    "url": "https://github.com/promptwheel-ai/promptwheel/issues"
   },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "blockspool": "dist/bin/blockspool.js"
+    "promptwheel": "dist/bin/promptwheel.js"
   },
   "exports": {
     ".": {
@@ -29,14 +29,14 @@
     "!dist/test"
   ],
   "scripts": {
-    "build": "npx tsc && chmod +x dist/bin/blockspool.js",
+    "build": "npx tsc && chmod +x dist/bin/promptwheel.js",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
-    "dev": "tsx src/bin/blockspool.ts"
+    "dev": "tsx src/bin/promptwheel.ts"
   },
   "keywords": [
-    "blockspool",
+    "promptwheel",
     "cli",
     "ai",
     "coding",
@@ -54,8 +54,8 @@
     "node": ">=18.0.0"
   },
   "dependencies": {
-    "@blockspool/core": "^0.6.0",
-    "@blockspool/sqlite": "^0.6.0",
+    "@promptwheel/core": "^0.6.0",
+    "@promptwheel/sqlite": "^0.6.0",
     "chalk": "^5.3.0",
     "commander": "^14.0.3",
     "minimatch": "^10.1.1",

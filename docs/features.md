@@ -1,6 +1,6 @@
 # Features
 
-Detailed reference for BlockSpool's capabilities.
+Detailed reference for PromptWheel's capabilities.
 
 ---
 
@@ -16,13 +16,13 @@ The trust ladder controls which categories of changes are auto-approved:
 
 ```bash
 # Default (no test proposals)
-blockspool
+promptwheel
 
 # Include test proposals
-blockspool --tests
+promptwheel --tests
 
 # Safe mode (restricted)
-blockspool --safe
+promptwheel --safe
 ```
 
 Test proposals are excluded by default because they tend to dominate scout output. When enabled via `--tests`, the scout prompt limits them to 1 per batch and `maxTestRatio` (default 0.4) hard-caps them at the filter layer.
@@ -42,10 +42,10 @@ Milestone mode batches N tickets into a single PR instead of creating individual
 
 ```bash
 # Individual PRs (default)
-blockspool --hours 4
+promptwheel --hours 4
 
 # Milestone mode (recommended for long runs)
-blockspool --hours 8 --batch-size 30
+promptwheel --hours 8 --batch-size 30
 ```
 
 In milestone mode, the scout scans the milestone branch (not `main`), so it sees all prior work from the current run. This prevents duplicate proposals and ensures each cycle builds on the last.
@@ -93,11 +93,11 @@ Blocks writes containing:
 
 ### QA Retry with Test Fix
 
-When a refactor/perf/types ticket breaks tests, BlockSpool automatically retries once — expanding scope to include test files and fixing them without reverting the original changes.
+When a refactor/perf/types ticket breaks tests, PromptWheel automatically retries once — expanding scope to include test files and fixing them without reverting the original changes.
 
 ### Rebase-Retry
 
-When a merge to the milestone branch conflicts, BlockSpool rebases the ticket branch onto the milestone tip and retries before marking the ticket as blocked.
+When a merge to the milestone branch conflicts, PromptWheel rebases the ticket branch onto the milestone tip and retries before marking the ticket as blocked.
 
 ---
 
@@ -117,7 +117,7 @@ Every proposal goes through a devil's advocate scoring challenge before approval
 
 ### Cross-Run Learnings
 
-BlockSpool remembers failures and successes across sessions. Relevant learnings are injected into future scout and execution prompts so agents avoid repeating mistakes and build on what works.
+PromptWheel remembers failures and successes across sessions. Relevant learnings are injected into future scout and execution prompts so agents avoid repeating mistakes and build on what works.
 
 ### Codebase Index
 
@@ -167,9 +167,9 @@ Loads CLAUDE.md (Claude) or AGENTS.md (Codex) into every prompt. Auto-creates a 
 Steer a running session with nudges:
 
 ```bash
-blockspool nudge "focus on auth module"
-blockspool nudge --list
-blockspool nudge --clear
+promptwheel nudge "focus on auth module"
+promptwheel nudge --list
+promptwheel nudge --clear
 ```
 
 Nudges are consumed in the next scout cycle and appended to the scout prompt.

@@ -2,14 +2,14 @@
  * Proposal filtering, dedup, scoring, and ticket creation.
  *
  * Pure algorithms (schema validation, normalization, scoring, balancing,
- * review prompt, description formatting) live in @blockspool/core/proposals/shared.
+ * review prompt, description formatting) live in @promptwheel/core/proposals/shared.
  * This file wraps them with database I/O, event logging, and MCP-specific
  * dedup and deferred-proposal management.
  */
 
-import type { DatabaseAdapter, TicketCategory } from '@blockspool/core';
-import { repos } from '@blockspool/core';
-import { bigramSimilarity } from '@blockspool/core/dedup/shared';
+import type { DatabaseAdapter, TicketCategory } from '@promptwheel/core';
+import { repos } from '@promptwheel/core';
+import { bigramSimilarity } from '@promptwheel/core/dedup/shared';
 import {
   type RawProposal,
   type ValidatedProposal,
@@ -20,13 +20,13 @@ import {
   formatProposalDescription,
   computePriority,
   PROPOSALS_DEFAULTS,
-} from '@blockspool/core/proposals/shared';
+} from '@promptwheel/core/proposals/shared';
 import { minimatch } from 'minimatch';
 import { RunManager } from './run-manager.js';
 import { recordDedupEntries } from './dedup-memory.js';
 
 // Re-export core types and functions
-export type { RawProposal, ValidatedProposal, ReviewedProposal } from '@blockspool/core/proposals/shared';
+export type { RawProposal, ValidatedProposal, ReviewedProposal } from '@promptwheel/core/proposals/shared';
 export {
   validateProposalSchema,
   normalizeProposal,
@@ -38,7 +38,7 @@ export {
   formatProposalDescription,
   computePriority,
   PROPOSALS_DEFAULTS,
-} from '@blockspool/core/proposals/shared';
+} from '@promptwheel/core/proposals/shared';
 
 // ---------------------------------------------------------------------------
 // Filter result

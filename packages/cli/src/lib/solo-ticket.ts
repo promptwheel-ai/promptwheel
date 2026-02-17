@@ -3,7 +3,7 @@
  */
 
 import * as path from 'node:path';
-import { runSteps } from '@blockspool/core/repos';
+import { runSteps } from '@promptwheel/core/repos';
 import {
   writeJsonArtifact,
   type RunSummaryArtifact,
@@ -13,7 +13,7 @@ import {
   DEFAULT_SPINDLE_CONFIG,
   type SpindleConfig,
 } from '../lib/spindle/index.js';
-import { getBlockspoolDir } from './solo-config.js';
+import { getPromptwheelDir } from './solo-config.js';
 import { ClaudeExecutionBackend } from './execution-backends/index.js';
 import { cleanupWorktree } from './solo-git.js';
 import type {
@@ -54,9 +54,9 @@ async function buildTicketContext(opts: RunTicketOptions): Promise<TicketContext
   } = opts;
 
   const startTime = Date.now();
-  const branchName = `blockspool/${ticket.id}`;
-  const worktreePath = path.join(repoRoot, '.blockspool', 'worktrees', ticket.id);
-  const baseDir = getBlockspoolDir(repoRoot);
+  const branchName = `promptwheel/${ticket.id}`;
+  const worktreePath = path.join(repoRoot, '.promptwheel', 'worktrees', ticket.id);
+  const baseDir = getPromptwheelDir(repoRoot);
 
   // Create all steps upfront
   const stepRecords = new Map<StepName, Awaited<ReturnType<typeof runSteps.create>>>();

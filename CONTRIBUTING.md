@@ -1,6 +1,6 @@
-# Contributing to BlockSpool
+# Contributing to PromptWheel
 
-Thanks for your interest in contributing to BlockSpool!
+Thanks for your interest in contributing to PromptWheel!
 
 ## Getting Started
 
@@ -13,22 +13,22 @@ Thanks for your interest in contributing to BlockSpool!
 
 ```bash
 # Clone the repo
-git clone https://github.com/blockspool/blockspool.git
-cd blockspool
+git clone https://github.com/promptwheel-ai/promptwheel.git
+cd promptwheel
 
 # Install dependencies
 npm install
 
 # Run the CLI in development
-npx tsx packages/cli/src/bin/blockspool.ts solo --help
+npx tsx packages/cli/src/bin/promptwheel.ts solo --help
 ```
 
 ## Project Structure
 
 ```
-blockspool/
+promptwheel/
 ├── packages/
-│   ├── cli/          # Main CLI (blockspool solo)
+│   ├── cli/          # Main CLI (promptwheel solo)
 │   ├── core/         # Core types and utilities
 │   └── sqlite/       # SQLite adapter for solo mode
 ├── docs/             # Documentation

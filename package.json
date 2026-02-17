@@ -1,16 +1,16 @@
 {
-  "name": "blockspool",
+  "name": "promptwheel",
   "version": "0.6.0",
   "description": "Continuous codebase improvement tool — scouts, executes, and batches into milestone PRs",
-  "author": "BlockSpool",
+  "author": "PromptWheel",
   "license": "Apache-2.0",
-  "homepage": "https://github.com/blockspool/blockspool",
+  "homepage": "https://github.com/promptwheel-ai/promptwheel",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/blockspool/blockspool.git"
+    "url": "git+https://github.com/promptwheel-ai/promptwheel.git"
   },
   "bugs": {
-    "url": "https://github.com/blockspool/blockspool/issues"
+    "url": "https://github.com/promptwheel-ai/promptwheel/issues"
   },
   "keywords": [
     "ai",
@@ -25,7 +25,7 @@
   ],
   "scripts": {
     "build": "tsc --build packages/core packages/sqlite packages/mcp packages/cli",
-    "dev": "npx tsx packages/cli/src/bin/blockspool.ts",
+    "dev": "npx tsx packages/cli/src/bin/promptwheel.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint packages/*/src/",

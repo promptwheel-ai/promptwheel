@@ -10,8 +10,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { createSQLiteAdapter } from '@blockspool/sqlite';
-import type { DatabaseAdapter } from '@blockspool/core';
+import { createSQLiteAdapter } from '@promptwheel/sqlite';
+import type { DatabaseAdapter } from '@promptwheel/core';
 import { DirectClient } from '../direct-client.js';
 
 let tmpDir: string;
@@ -148,7 +148,7 @@ describe('DirectClient — golden path', () => {
     // Step 9: Report PR created
     await client.ingestEvent('PR_CREATED', {
       url: 'https://github.com/test/test/pull/1',
-      branch: 'blockspool/extract-helper',
+      branch: 'promptwheel/extract-helper',
     });
 
     // Step 10: Advance → should go to NEXT_TICKET, then DONE (no more tickets)
@@ -258,7 +258,7 @@ describe('DirectClient — events.ndjson format', () => {
 
     const state = client.getState();
     const eventsPath = path.join(
-      tmpDir, '.blockspool', 'runs', state.run_id, 'events.ndjson',
+      tmpDir, '.promptwheel', 'runs', state.run_id, 'events.ndjson',
     );
 
     expect(fs.existsSync(eventsPath)).toBe(true);

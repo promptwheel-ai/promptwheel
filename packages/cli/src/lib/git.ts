@@ -5,7 +5,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execSync } from 'node:child_process';
-import type { GitService } from '@blockspool/core/services';
+import type { GitService } from '@promptwheel/core/services';
 
 /**
  * Find git repository root from a path

@@ -6,8 +6,8 @@ import * as path from 'node:path';
 import {
   runQa,
   getQaRunDetails,
-} from '@blockspool/core/services';
-import { projects } from '@blockspool/core/repos';
+} from '@promptwheel/core/services';
+import { projects } from '@promptwheel/core/repos';
 import { createExecRunner } from '../exec.js';
 import { createLogger } from '../logger.js';
 import { normalizeQaConfig } from '../solo-utils.js';
@@ -236,7 +236,7 @@ export async function run(ctx: TicketContext): Promise<StepResult> {
             } else {
               errorParts.push('');
               errorParts.push('(QA retry with test-fix also failed)');
-              errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
+              errorParts.push(`To retry: promptwheel solo run ${ticket.id}`);
               errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
               const result = {
                 success: false,
@@ -251,7 +251,7 @@ export async function run(ctx: TicketContext): Promise<StepResult> {
           } else {
             errorParts.push('');
             errorParts.push('(QA retry agent execution failed)');
-            errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
+            errorParts.push(`To retry: promptwheel solo run ${ticket.id}`);
             errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
             const result = {
               success: false,
@@ -265,7 +265,7 @@ export async function run(ctx: TicketContext): Promise<StepResult> {
           }
         } catch {
           errorParts.push('');
-          errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
+          errorParts.push(`To retry: promptwheel solo run ${ticket.id}`);
           errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
           const result = {
             success: false,
@@ -279,7 +279,7 @@ export async function run(ctx: TicketContext): Promise<StepResult> {
         }
       } else {
         errorParts.push('');
-        errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
+        errorParts.push(`To retry: promptwheel solo run ${ticket.id}`);
         errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
         const result = {
           success: false,
@@ -293,7 +293,7 @@ export async function run(ctx: TicketContext): Promise<StepResult> {
       }
     } else {
       errorParts.push('');
-      errorParts.push(`To retry: blockspool solo run ${ticket.id}`);
+      errorParts.push(`To retry: promptwheel solo run ${ticket.id}`);
       errorParts.push(`Worktree preserved for inspection: ${worktreePath}`);
       const result = {
         success: false,

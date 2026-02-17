@@ -18,8 +18,8 @@ let tmpDir: string;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hints-test-'));
-  // Create .blockspool dir like a real repo would have
-  fs.mkdirSync(path.join(tmpDir, '.blockspool'), { recursive: true });
+  // Create .promptwheel dir like a real repo would have
+  fs.mkdirSync(path.join(tmpDir, '.promptwheel'), { recursive: true });
 });
 
 afterEach(() => {
@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 function hintsFile(): string {
-  return path.join(tmpDir, '.blockspool', 'hints.json');
+  return path.join(tmpDir, '.promptwheel', 'hints.json');
 }
 
 function readRawHints(): Hint[] {
@@ -77,12 +77,12 @@ describe('addHint', () => {
     expect(hint.text).toHaveLength(500);
   });
 
-  it('creates .blockspool directory if missing', () => {
+  it('creates .promptwheel directory if missing', () => {
     const freshDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hints-fresh-'));
     try {
       const hint = addHint(freshDir, 'auto-create dir');
       expect(hint.text).toBe('auto-create dir');
-      expect(fs.existsSync(path.join(freshDir, '.blockspool', 'hints.json'))).toBe(true);
+      expect(fs.existsSync(path.join(freshDir, '.promptwheel', 'hints.json'))).toBe(true);
     } finally {
       fs.rmSync(freshDir, { recursive: true, force: true });
     }
@@ -180,7 +180,7 @@ describe('pruning', () => {
 describe('atomic writes', () => {
   it('does not leave tmp file after write', () => {
     addHint(tmpDir, 'test');
-    const tmpFile = path.join(tmpDir, '.blockspool', 'hints.json.tmp');
+    const tmpFile = path.join(tmpDir, '.promptwheel', 'hints.json.tmp');
     expect(fs.existsSync(tmpFile)).toBe(false);
   });
 });

@@ -16,12 +16,12 @@ import {
   clearTrajectoryState,
   activateTrajectory,
 } from '../trajectory-io.js';
-import { getNextStep } from '@blockspool/core/trajectory/shared';
+import { getNextStep } from '@promptwheel/core/trajectory/shared';
 
 export function registerTrajectoryTools(server: McpServer, getState: () => SessionManager) {
-  // ── blockspool_trajectory_list ────────────────────────────────────────────
+  // ── promptwheel_trajectory_list ────────────────────────────────────────────
   server.tool(
-    'blockspool_trajectory_list',
+    'promptwheel_trajectory_list',
     'List all available trajectories and their status.',
     {},
     async () => {
@@ -73,9 +73,9 @@ export function registerTrajectoryTools(server: McpServer, getState: () => Sessi
     },
   );
 
-  // ── blockspool_trajectory_show ────────────────────────────────────────────
+  // ── promptwheel_trajectory_show ────────────────────────────────────────────
   server.tool(
-    'blockspool_trajectory_show',
+    'promptwheel_trajectory_show',
     'Show full details of a trajectory including all steps and their status.',
     {
       name: z.string().describe('The trajectory name to show.'),
@@ -139,9 +139,9 @@ export function registerTrajectoryTools(server: McpServer, getState: () => Sessi
     },
   );
 
-  // ── blockspool_trajectory_activate ────────────────────────────────────────
+  // ── promptwheel_trajectory_activate ────────────────────────────────────────
   server.tool(
-    'blockspool_trajectory_activate',
+    'promptwheel_trajectory_activate',
     'Activate a trajectory. Creates initial step states and sets the first step as active.',
     {
       name: z.string().describe('The trajectory name to activate.'),
@@ -189,9 +189,9 @@ export function registerTrajectoryTools(server: McpServer, getState: () => Sessi
     },
   );
 
-  // ── blockspool_trajectory_pause ───────────────────────────────────────────
+  // ── promptwheel_trajectory_pause ───────────────────────────────────────────
   server.tool(
-    'blockspool_trajectory_pause',
+    'promptwheel_trajectory_pause',
     'Pause the currently active trajectory. The session continues but ignores trajectory steps.',
     {},
     async () => {
@@ -242,9 +242,9 @@ export function registerTrajectoryTools(server: McpServer, getState: () => Sessi
     },
   );
 
-  // ── blockspool_trajectory_resume ──────────────────────────────────────────
+  // ── promptwheel_trajectory_resume ──────────────────────────────────────────
   server.tool(
-    'blockspool_trajectory_resume',
+    'promptwheel_trajectory_resume',
     'Resume a paused trajectory.',
     {},
     async () => {
@@ -303,9 +303,9 @@ export function registerTrajectoryTools(server: McpServer, getState: () => Sessi
     },
   );
 
-  // ── blockspool_trajectory_skip ────────────────────────────────────────────
+  // ── promptwheel_trajectory_skip ────────────────────────────────────────────
   server.tool(
-    'blockspool_trajectory_skip',
+    'promptwheel_trajectory_skip',
     'Skip a trajectory step. Marks it as skipped and advances to the next eligible step.',
     {
       step_id: z.string().describe('The step ID to skip.'),
@@ -387,9 +387,9 @@ export function registerTrajectoryTools(server: McpServer, getState: () => Sessi
     },
   );
 
-  // ── blockspool_trajectory_reset ───────────────────────────────────────────
+  // ── promptwheel_trajectory_reset ───────────────────────────────────────────
   server.tool(
-    'blockspool_trajectory_reset',
+    'promptwheel_trajectory_reset',
     'Reset a trajectory, clearing all step state. The trajectory definition remains.',
     {
       name: z.string().describe('The trajectory name to reset.'),

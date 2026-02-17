@@ -1,7 +1,7 @@
 /**
  * Run Manager — creates and manages run folders on disk.
  *
- * Each run lives at `.blockspool/runs/<run_id>/` and contains:
+ * Each run lives at `.promptwheel/runs/<run_id>/` and contains:
  *   - state.json   — current RunState (overwritten on every change)
  *   - events.ndjson — append-only event log
  *   - diffs/        — patch files per step
@@ -10,7 +10,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { prefixedId, SESSION_DEFAULTS, SCOUT_DEFAULTS } from '@blockspool/core';
+import { prefixedId, SESSION_DEFAULTS, SCOUT_DEFAULTS } from '@promptwheel/core';
 import type {
   RunState,
   RunEvent,
@@ -29,7 +29,7 @@ import { loadLearnings } from './learnings.js';
 // Defaults
 // ---------------------------------------------------------------------------
 
-// All defaults imported from @blockspool/core — see config/defaults.ts
+// All defaults imported from @promptwheel/core — see config/defaults.ts
 
 function emptySpindle(): SpindleState {
   return {
@@ -60,9 +60,9 @@ export class RunManager {
     return this.projectPath;
   }
 
-  /** The base .blockspool directory */
+  /** The base .promptwheel directory */
   private get bsDir(): string {
-    return path.join(this.projectPath, '.blockspool');
+    return path.join(this.projectPath, '.promptwheel');
   }
 
   /** Create a new run, write initial state.json and SESSION_START event */
@@ -71,12 +71,12 @@ export class RunManager {
       throw new Error('Run already active. End it first.');
     }
 
-    // Bootstrap .blockspool/ directory early — fail with a clear message
+    // Bootstrap .promptwheel/ directory early — fail with a clear message
     try {
       fs.mkdirSync(this.bsDir, { recursive: true });
     } catch (err) {
       throw new Error(
-        `Cannot create .blockspool directory at ${this.bsDir}: ${err instanceof Error ? err.message : String(err)}. Check file permissions.`,
+        `Cannot create .promptwheel directory at ${this.bsDir}: ${err instanceof Error ? err.message : String(err)}. Check file permissions.`,
       );
     }
 
@@ -90,13 +90,13 @@ export class RunManager {
           const lockPid = parseInt(lockContent, 10);
           // Check if the process is still alive
           if (lockPid && !isNaN(lockPid)) {
-            try { process.kill(lockPid, 0); throw new Error(`Another BlockSpool session is active (PID ${lockPid}). End it first or delete .blockspool/session.lock.`); }
+            try { process.kill(lockPid, 0); throw new Error(`Another PromptWheel session is active (PID ${lockPid}). End it first or delete .promptwheel/session.lock.`); }
             catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') throw e; /* Process dead — stale lock, overwrite */ }
           }
         }
         fs.writeFileSync(lockPath, String(process.pid), 'utf8');
       } catch (err) {
-        if (err instanceof Error && err.message.includes('Another BlockSpool session')) throw err;
+        if (err instanceof Error && err.message.includes('Another PromptWheel session')) throw err;
         // Ignore lock write failures — non-fatal
       }
     }
@@ -278,7 +278,7 @@ export class RunManager {
       }
     } catch (err) {
       if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
-        console.warn(`[blockspool] failed to seed coverage from sectors.json: ${err.message}`);
+        console.warn(`[promptwheel] failed to seed coverage from sectors.json: ${err.message}`);
       }
     }
 
@@ -308,7 +308,7 @@ export class RunManager {
   /** Get current state or throw */
   require(): RunState {
     if (!this.state) {
-      throw new Error('No active run. Call blockspool_start_session first.');
+      throw new Error('No active run. Call promptwheel_start_session first.');
     }
     return this.state;
   }

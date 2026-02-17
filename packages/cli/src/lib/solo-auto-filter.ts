@@ -6,8 +6,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import chalk from 'chalk';
 import { minimatch } from 'minimatch';
-import type { TicketProposal } from '@blockspool/core/scout';
-import { SCOUT_DEFAULTS } from '@blockspool/core';
+import type { TicketProposal } from '@promptwheel/core/scout';
+import { SCOUT_DEFAULTS } from '@promptwheel/core';
 import type { AutoSessionState } from './solo-auto-state.js';
 import { runClaude, type ExecutionBackend } from './execution-backends/index.js';
 import {
@@ -106,7 +106,7 @@ export async function filterProposals(
   // Baseline-healing confidence boost: nudge proposals that target failing QA commands
   const baselineFailingKeywords: Set<string> = new Set();
   try {
-    const blPath = path.join(state.repoRoot, '.blockspool', 'qa-baseline.json');
+    const blPath = path.join(state.repoRoot, '.promptwheel', 'qa-baseline.json');
     if (fs.existsSync(blPath)) {
       const blData = JSON.parse(fs.readFileSync(blPath, 'utf8'));
       for (const name of (blData.failures ?? [])) {
@@ -135,7 +135,7 @@ export async function filterProposals(
     for (const dp of deferred) {
       proposals.push({
         id: `deferred-${Date.now()}`,
-        category: dp.category as import('@blockspool/core/scout').ProposalCategory,
+        category: dp.category as import('@promptwheel/core/scout').ProposalCategory,
         title: dp.title,
         description: dp.description,
         files: dp.files,

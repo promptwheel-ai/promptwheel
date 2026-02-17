@@ -2,8 +2,8 @@
  * Sector-based scout scanning with staleness-based rotation.
  *
  * Pure algorithms (rotation, classification, coverage, recording) live in
- * @blockspool/core/sectors/shared. This file provides I/O wrappers
- * (persistence to `.blockspool/sectors.json`) and re-exports.
+ * @promptwheel/core/sectors/shared. This file provides I/O wrappers
+ * (persistence to `.promptwheel/sectors.json`) and re-exports.
  */
 
 import * as fs from 'node:fs';
@@ -31,22 +31,22 @@ export {
   recordMergeOutcome,
   getSectorCategoryAffinity,
   suggestScopeAdjustment,
-} from '@blockspool/core/sectors/shared';
+} from '@promptwheel/core/sectors/shared';
 
 // Import for local use
-import type { Sector, SectorState, CodebaseModuleLike } from '@blockspool/core/sectors/shared';
+import type { Sector, SectorState, CodebaseModuleLike } from '@promptwheel/core/sectors/shared';
 import {
   buildSectors,
   normalizeSectorFields,
   mergeSectors,
   pickNextSector as pickNextSectorCore,
-} from '@blockspool/core/sectors/shared';
+} from '@promptwheel/core/sectors/shared';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const STATE_DIR = '.blockspool';
+const STATE_DIR = '.promptwheel';
 const STATE_FILE = 'sectors.json';
 
 // ---------------------------------------------------------------------------

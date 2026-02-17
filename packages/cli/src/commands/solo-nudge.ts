@@ -45,7 +45,7 @@ export function registerNudgeCommands(solo: Command): void {
 
       const text = textParts.join(' ').trim();
       if (!text) {
-        console.error(chalk.red('✗ Provide hint text: blockspool solo nudge "focus on auth"'));
+        console.error(chalk.red('✗ Provide hint text: promptwheel solo nudge "focus on auth"'));
         process.exit(1);
       }
 

@@ -1,6 +1,6 @@
-# BlockSpool vs The Field
+# PromptWheel vs The Field
 
-How BlockSpool compares to other AI coding tools.
+How PromptWheel compares to other AI coding tools.
 
 ---
 
@@ -10,15 +10,15 @@ AI coding tools fall into three categories:
 
 1. **Multi-agent coordinators** — Coordinate multiple agents on tasks (Gas Town, Auto-Claude, Claude Flow)
 2. **Issue-to-PR engines** — Convert issues into PRs (Factory, Sweep, Devin)
-3. **Improvement engines** — Continuously scout and improve codebases (BlockSpool)
+3. **Improvement engines** — Continuously scout and improve codebases (PromptWheel)
 
-BlockSpool is the only tool in category 3: purpose-built for continuous codebase improvement with cost control and safety guarantees.
+PromptWheel is the only tool in category 3: purpose-built for continuous codebase improvement with cost control and safety guarantees.
 
 ---
 
 ## Feature Matrix
 
-| Feature | BlockSpool | Gas Town | Auto-Claude | Oh My Claude Code | Factory.ai | Devin | Sweep | Claude Flow |
+| Feature | PromptWheel | Gas Town | Auto-Claude | Oh My Claude Code | Factory.ai | Devin | Sweep | Claude Flow |
 |---|---|---|---|---|---|---|---|---|
 | **Primary use** | Continuous codebase improvement | Multi-agent orchestration | Desktop agent manager | Claude Code plugin | Issue-to-PR automation | AI software engineer | Simple issue fixes | MCP prompt framework |
 | **Long-running operation** | Yes (designed for it) | No (needs steering) | Partial (desktop app) | No (interactive) | Yes | Yes | Yes | No (interactive) |
@@ -40,19 +40,19 @@ BlockSpool is the only tool in category 3: purpose-built for continuous codebase
 | **Cost per 8h run** | Fraction of alternatives | High (20-30 agents) | Claude Code sub | Claude Code sub | SaaS pricing | Subscription | Free tier | Claude Code sub |
 | **Runtime** | Claude CLI, Codex CLI, Kimi CLI, or any local model (Ollama, vLLM) | Claude, Codex, Aider | Claude Code CLI | Claude Code CLI | Proprietary | Proprietary | GitHub Actions | Claude Code (MCP server) |
 | **Open source** | Yes (Apache 2.0) | Yes (MIT) | Yes (AGPL-3.0) | Yes (MIT) | No | No | Partial | Yes (MIT) |
-| **Install** | Plugin: `/blockspool:run` in Claude Code; CLI: `npm install -g` | `brew install` / `go install` | Desktop app | Claude Code plugin | SaaS | SaaS | GitHub App | `npm install` |
+| **Install** | Plugin: `/promptwheel:run` in Claude Code; CLI: `npm install -g` | `brew install` / `go install` | Desktop app | Claude Code plugin | SaaS | SaaS | GitHub App | `npm install` |
 
 ---
 
-## Why BlockSpool Wins on Resource Efficiency
+## Why PromptWheel Wins on Resource Efficiency
 
-BlockSpool is designed around **micro-equilibrium** — doing the most useful work per dollar spent.
+PromptWheel is designed around **micro-equilibrium** — doing the most useful work per dollar spent.
 
 ### Cost Comparison (8-hour run)
 
 | Tool | Agents | Typical output | Estimated cost | Cost per improvement |
 |---|---|---|---|---|
-| **BlockSpool** | 3-5 | 50+ improvements, 5 milestone PRs | Low | Very low |
+| **PromptWheel** | 3-5 | 50+ improvements, 5 milestone PRs | Low | Very low |
 | **Gas Town** | 20-30 | Variable (needs steering) | High (20-30 agents) | High |
 | **Auto-Claude** | Up to 12 | Variable (needs desktop) | Claude Code sub | Variable |
 | **Devin** | 1 | 1-3 tasks | Subscription | High |
@@ -72,7 +72,7 @@ BlockSpool is designed around **micro-equilibrium** — doing the most useful wo
 
 6. **Adaptive parallelism** — Runs 5 simple tickets in parallel but only 2 complex ones. Reduces near-batch-limit to avoid conflicts. Resources match the workload.
 
-Gas Town throws 30 agents at a problem. BlockSpool runs 3-5 agents surgically. The result: 40x better cost-per-improvement.
+Gas Town throws 30 agents at a problem. PromptWheel runs 3-5 agents surgically. The result: 40x better cost-per-improvement.
 
 ---
 
@@ -95,7 +95,7 @@ Gas Town throws 30 agents at a problem. BlockSpool runs 3-5 agents surgically. T
 
 **When to use Gas Town:** You have a large, well-defined task (e.g., migrate 500 files from framework A to B) and can afford a high burn rate for an 8-hour run with active supervision.
 
-**When to use BlockSpool:** You want continuous improvement of your codebase with cost control and safety guarantees.
+**When to use PromptWheel:** You want continuous improvement of your codebase with cost control and safety guarantees.
 
 ---
 
@@ -119,7 +119,7 @@ Gas Town throws 30 agents at a problem. BlockSpool runs 3-5 agents surgically. T
 
 **When to use Auto-Claude:** You want a visual dashboard for managing multiple Claude Code agents on tasks you define. Good for hands-on developers who want to supervise.
 
-**When to use BlockSpool:** You want headless operation that finds its own work and runs without a desktop app.
+**When to use PromptWheel:** You want headless operation that finds its own work and runs without a desktop app.
 
 ---
 
@@ -138,16 +138,16 @@ Enterprise SaaS that assigns "droids" to GitHub issues. Good for teams with exis
 Lightweight GitHub app that turns issues into PRs for minor fixes. Free tier available. Single-agent, no scouting, no milestone batching. Good for simple, well-defined fixes.
 
 ### CodeRabbit / Qodo PR-Agent
-Code review tools, not code generation. They review PRs, not create them. Complementary to BlockSpool — use CodeRabbit to review BlockSpool's PRs.
+Code review tools, not code generation. They review PRs, not create them. Complementary to PromptWheel — use CodeRabbit to review PromptWheel's PRs.
 
 ### Claude Flow
 Open-source MCP server + prompt library that runs *inside* Claude Code. Despite marketing "60+ agents" and "swarm coordination," the actual execution is done entirely by Claude Code — claude-flow provides MCP tools and `.md` agent templates that Claude Code's subagent system consumes. It doesn't spawn its own processes or make its own API calls. Cost is whatever your Claude Code subscription costs (Max at $100/mo or $200/mo). No scope enforcement, no dedup, no milestone batching. More of a prompt framework than an orchestration engine.
 
 ---
 
-## BlockSpool's Niche
+## PromptWheel's Niche
 
-BlockSpool occupies a unique position: **the continuous improvement engine.**
+PromptWheel occupies a unique position: **the continuous improvement engine.**
 
 No other tool combines:
 - Proactive scouting (finds work to do)
@@ -160,4 +160,4 @@ No other tool combines:
 - Safety guarantees (scope enforcement, trust ladder, dedup)
 - Six ways to run: Plugin, Claude CLI, Codex CLI, Kimi CLI, Local (Ollama/vLLM), or OpenAI API
 
-The closest comparison is a developer running Claude Code manually for 8 hours — but BlockSpool does it without supervision, avoids duplicates, enforces scope, batches into clean PRs, and costs a fraction of what manual operation would.
+The closest comparison is a developer running Claude Code manually for 8 hours — but PromptWheel does it without supervision, avoids duplicates, enforces scope, batches into clean PRs, and costs a fraction of what manual operation would.

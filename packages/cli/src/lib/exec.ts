@@ -15,7 +15,7 @@ import type {
   ExecResult,
   ExecOutput,
   ExecStatus,
-} from '@blockspool/core';
+} from '@promptwheel/core';
 
 export interface NodeExecRunnerOptions {
   defaultMaxLogBytes?: number; // per stream
@@ -133,7 +133,7 @@ export class NodeExecRunner implements ExecRunner {
       ? spec.artifactsDir
       : path.join(repoRoot, spec.artifactsDir);
 
-    // Layout: .blockspool/artifacts/<runId>/attempt-<n>/
+    // Layout: .promptwheel/artifacts/<runId>/attempt-<n>/
     const attemptDirAbs = path.join(artifactsDirAbs, spec.runId, `attempt-${spec.attempt}`);
     await ensureDir(attemptDirAbs);
 

@@ -1,4 +1,4 @@
-import { repos } from '@blockspool/core';
+import { repos } from '@promptwheel/core';
 import type { EventContext, ProcessResult } from './event-helpers.js';
 import {
   classifyQaError,
@@ -89,7 +89,7 @@ export async function handleQaPassed(ctx: EventContext, payload: Record<string, 
         });
       }
     } catch (err) {
-      console.warn(`[blockspool] record success learning: ${err instanceof Error ? err.message : String(err)}`);
+      console.warn(`[promptwheel] record success learning: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

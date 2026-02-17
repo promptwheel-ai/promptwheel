@@ -1,7 +1,7 @@
 /**
  * DatabaseAdapter - Abstract interface for database operations
  *
- * This interface allows BlockSpool to work with different database backends:
+ * This interface allows PromptWheel to work with different database backends:
  * - PostgreSQL (for teams/cloud)
  * - SQLite (for individual developers, zero-config)
  *
@@ -89,7 +89,7 @@ export interface QueryStats {
 /**
  * Database adapter interface
  *
- * All database operations in BlockSpool go through this interface,
+ * All database operations in PromptWheel go through this interface,
  * allowing seamless switching between backends.
  */
 export interface DatabaseAdapter {
@@ -211,7 +211,7 @@ export function detectDatabaseType(url: string): 'postgres' | 'sqlite' | 'unknow
  * Default database URL based on environment
  *
  * - If DATABASE_URL is set, use it (Postgres)
- * - Otherwise, default to SQLite at ~/.blockspool/data.db
+ * - Otherwise, default to SQLite at ~/.promptwheel/data.db
  */
 export function getDefaultDatabaseUrl(): string {
   if (process.env.DATABASE_URL) {
@@ -220,5 +220,5 @@ export function getDefaultDatabaseUrl(): string {
 
   // Default to SQLite for zero-config mode
   const home = process.env.HOME || process.env.USERPROFILE || '.';
-  return `${home}/.blockspool/data.db`;
+  return `${home}/.promptwheel/data.db`;
 }

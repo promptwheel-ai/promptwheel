@@ -1,7 +1,7 @@
 /**
  * Project guidelines loader — loads CLAUDE.md or AGENTS.md for prompt injection.
  *
- * Pure resolution logic and formatting live in @blockspool/core/guidelines/shared.
+ * Pure resolution logic and formatting live in @promptwheel/core/guidelines/shared.
  * This file wraps them with filesystem I/O.
  */
 
@@ -14,11 +14,11 @@ import {
   resolveGuidelinesPaths,
   getBaselineFilename,
   generateBaselineGuidelines,
-} from '@blockspool/core/guidelines/shared';
+} from '@promptwheel/core/guidelines/shared';
 
 // Re-export types and pure functions
-export type { ProjectGuidelines, GuidelinesBackend } from '@blockspool/core/guidelines/shared';
-export { formatGuidelinesForPrompt } from '@blockspool/core/guidelines/shared';
+export type { ProjectGuidelines, GuidelinesBackend } from '@promptwheel/core/guidelines/shared';
+export { formatGuidelinesForPrompt } from '@promptwheel/core/guidelines/shared';
 
 export interface GuidelinesOptions {
   /** Which backend is running. Determines default file search order. */

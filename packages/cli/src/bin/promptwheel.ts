@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /**
- * BlockSpool CLI entry point
+ * PromptWheel CLI entry point
  *
- * `blockspool` with no subcommand runs auto mode.
+ * `promptwheel` with no subcommand runs auto mode.
  * All solo subcommands are available at the top level:
  *
- *   blockspool                     # auto mode (scout → fix → PR)
- *   blockspool --codex             # Full Codex (no Anthropic key)
- *   blockspool ci                  # Fix CI failures
- *   blockspool scout .             # Scan for improvements
- *   blockspool status              # Show local state
- *   blockspool update              # Self-update to latest version
- *   blockspool solo auto           # Explicit (backwards compat)
+ *   promptwheel                     # auto mode (scout → fix → PR)
+ *   promptwheel --codex             # Full Codex (no Anthropic key)
+ *   promptwheel ci                  # Fix CI failures
+ *   promptwheel scout .             # Scan for improvements
+ *   promptwheel status              # Show local state
+ *   promptwheel update              # Self-update to latest version
+ *   promptwheel solo auto           # Explicit (backwards compat)
  */
 
 import { Command } from 'commander';
@@ -27,20 +27,20 @@ const CURRENT_VERSION = '0.6.0';
 const program = new Command();
 
 program
-  .name('blockspool')
+  .name('promptwheel')
   .description('Continuous codebase improvement tool')
   .version(CURRENT_VERSION);
 
-// `blockspool update` — self-update command
+// `promptwheel update` — self-update command
 program
   .command('update')
-  .description('Update blockspool to the latest version')
+  .description('Update promptwheel to the latest version')
   .action(async () => {
     const success = await runSelfUpdate();
     process.exit(success ? 0 : 1);
   });
 
-// `blockspool solo <cmd>` — backwards compat
+// `promptwheel solo <cmd>` — backwards compat
 program.addCommand(soloCommand);
 
 // Detect if argv[2] is a known solo subcommand name — if so, lift it.
@@ -51,7 +51,7 @@ const isSubcommand = firstArg && knownSubs.has(firstArg) && firstArg !== 'solo';
 
 // Skip update check in CI or when explicitly disabled
 const skipUpdateCheck = process.env.CI === 'true' ||
-  process.env.BLOCKSPOOL_SKIP_UPDATE_CHECK === '1' ||
+  process.env.PROMPTWHEEL_SKIP_UPDATE_CHECK === '1' ||
   process.argv.includes('--skip-update-check');
 
 // Check for updates in background (non-blocking)
@@ -61,7 +61,7 @@ const updateCheck = (!skipUpdateCheck && firstArg !== 'update' && firstArg !== '
 
 async function main() {
   if (isSubcommand) {
-    // `blockspool scout .` → delegate to `solo scout .`
+    // `promptwheel scout .` → delegate to `solo scout .`
     // Insert 'solo' so Commander routes correctly
     process.argv.splice(2, 0, 'solo');
     await program.parseAsync();
@@ -69,10 +69,10 @@ async function main() {
     // Explicit update command
     await program.parseAsync();
   } else if (firstArg === 'solo' || firstArg === '--help' || firstArg === '-h' || firstArg === '--version' || firstArg === '-V') {
-    // Explicit `blockspool solo ...` or help/version
+    // Explicit `promptwheel solo ...` or help/version
     await program.parseAsync();
   } else {
-    // `blockspool [flags...]` → `solo auto [flags...]`
+    // `promptwheel [flags...]` → `solo auto [flags...]`
     // Insert 'solo auto' before the flags
     process.argv.splice(2, 0, 'solo', 'auto');
     await program.parseAsync();

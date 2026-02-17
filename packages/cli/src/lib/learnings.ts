@@ -1,11 +1,11 @@
 /**
  * Cross-run learning mechanism.
  *
- * Persists learnings to `.blockspool/learnings.json` and provides
+ * Persists learnings to `.promptwheel/learnings.json` and provides
  * decay, consolidation, relevance scoring, and prompt formatting.
  *
  * Pure algorithms (decay, consolidation, formatting, keyword extraction,
- * relevance scoring) live in @blockspool/core/learnings/shared.
+ * relevance scoring) live in @promptwheel/core/learnings/shared.
  * This file wraps them with filesystem I/O and adds CLI-specific
  * extensions (metrics instrumentation, effectiveness tracking).
  */
@@ -20,17 +20,17 @@ import {
   applyLearningsDecay,
   consolidateLearnings as coreConsolidate,
   LEARNINGS_DEFAULTS,
-} from '@blockspool/core/learnings/shared';
+} from '@promptwheel/core/learnings/shared';
 
 // Re-export pure functions and types from core
-export type { Learning, StructuredKnowledge } from '@blockspool/core/learnings/shared';
+export type { Learning, StructuredKnowledge } from '@promptwheel/core/learnings/shared';
 export {
   formatLearningsForPrompt,
   extractKeywords,
   selectRelevant,
   extractTags,
   LEARNINGS_DEFAULTS,
-} from '@blockspool/core/learnings/shared';
+} from '@promptwheel/core/learnings/shared';
 
 // Use core's Learning type locally
 type Learning = CoreLearning;
@@ -42,7 +42,7 @@ type Learning = CoreLearning;
 const LEARNINGS_FILE = 'learnings.json';
 
 function learningsPath(projectRoot: string): string {
-  return path.join(projectRoot, '.blockspool', LEARNINGS_FILE);
+  return path.join(projectRoot, '.promptwheel', LEARNINGS_FILE);
 }
 
 function readLearnings(projectRoot: string): Learning[] {

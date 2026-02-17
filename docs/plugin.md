@@ -1,6 +1,6 @@
 # Plugin (Claude Code)
 
-The BlockSpool plugin runs inside Claude Code sessions. It uses Claude Code's own authentication — no API key needed.
+The PromptWheel plugin runs inside Claude Code sessions. It uses Claude Code's own authentication — no API key needed.
 
 ---
 
@@ -8,13 +8,13 @@ The BlockSpool plugin runs inside Claude Code sessions. It uses Claude Code's ow
 
 ```bash
 # Add the marketplace (one-time)
-/plugin marketplace add blockspool/blockspool
+/plugin marketplace add promptwheel-ai/promptwheel
 
 # Install the plugin
-/plugin install blockspool@blockspool
+/plugin install promptwheel@promptwheel
 
 # Restart Claude Code, then run:
-/blockspool:run
+/promptwheel:run
 ```
 
 If commands don't appear after restart, check that the plugin is enabled in `~/.claude/settings.json`:
@@ -22,7 +22,7 @@ If commands don't appear after restart, check that the plugin is enabled in `~/.
 ```json
 {
   "enabledPlugins": {
-    "blockspool@blockspool": true
+    "promptwheel@promptwheel": true
   }
 }
 ```
@@ -30,14 +30,14 @@ If commands don't appear after restart, check that the plugin is enabled in `~/.
 ### Updating
 
 ```bash
-/plugin update blockspool@blockspool
+/plugin update promptwheel@promptwheel
 ```
 
 ---
 
 ## Skills
 
-### `/blockspool:run`
+### `/promptwheel:run`
 
 Start an improvement session. Scouts the codebase, creates tickets, executes changes, and creates PRs.
 
@@ -54,62 +54,62 @@ Start an improvement session. Scouts the codebase, creates tickets, executes cha
 | `wheel` | Unattended wheel execution mode | `false` |
 
 ```
-/blockspool:run                                  Single cycle
-/blockspool:run wheel hours=4                    Wheel mode (unattended)
-/blockspool:run hours=4 batch_size=20            4-hour run with milestone PRs
-/blockspool:run formula=security-audit           Focus on vulnerabilities
-/blockspool:run deep=true                        Architectural review
-/blockspool:run cycles=5 parallel=3              5 cycles, 3 tickets at a time
+/promptwheel:run                                  Single cycle
+/promptwheel:run wheel hours=4                    Wheel mode (unattended)
+/promptwheel:run hours=4 batch_size=20            4-hour run with milestone PRs
+/promptwheel:run formula=security-audit           Focus on vulnerabilities
+/promptwheel:run deep=true                        Architectural review
+/promptwheel:run cycles=5 parallel=3              5 cycles, 3 tickets at a time
 ```
 
-### `/blockspool:status`
+### `/promptwheel:status`
 
 Show current session state: phase, budget, tickets completed, spindle risk.
 
-### `/blockspool:nudge`
+### `/promptwheel:nudge`
 
 Send a hint to guide the next scout cycle.
 
 ```
-/blockspool:nudge hint="focus on authentication module"
-/blockspool:nudge hint="skip test files, focus on SQL injection"
+/promptwheel:nudge hint="focus on authentication module"
+/promptwheel:nudge hint="skip test files, focus on SQL injection"
 ```
 
-### `/blockspool:cancel`
+### `/promptwheel:cancel`
 
 Gracefully end the current session. Displays summary of work completed.
 
-### `/blockspool:scout`
+### `/promptwheel:scout`
 
 Run a standalone scout pass — find improvements without executing them.
 
-### `/blockspool:analytics`
+### `/promptwheel:analytics`
 
 View metrics: throughput, success rates, time per ticket, formula effectiveness.
 
-### `/blockspool:audit`
+### `/promptwheel:audit`
 
 Analyze ticket quality across the current session/project.
 
-### `/blockspool:heal`
+### `/promptwheel:heal`
 
 Diagnose and recover blocked tickets. Options: diagnose, retry, expand scope.
 
-### `/blockspool:history`
+### `/promptwheel:history`
 
 View recent session runs with summary stats.
 
-### `/blockspool:trajectory`
+### `/promptwheel:trajectory`
 
 Manage improvement trajectories — list, show, activate, pause, resume, skip, or reset.
 
-### `/blockspool:guidelines`
+### `/promptwheel:guidelines`
 
 Audit, restructure, or generate CLAUDE.md/AGENTS.md project guidelines.
 
-### `/blockspool:formulas`
+### `/promptwheel:formulas`
 
-List available formulas (built-in and custom from `.blockspool/formulas/`).
+List available formulas (built-in and custom from `.promptwheel/formulas/`).
 
 ---
 
@@ -142,13 +142,13 @@ If you prefer not to use the marketplace, add the MCP server directly to your pr
 ```json
 {
   "mcpServers": {
-    "blockspool": {
+    "promptwheel": {
       "command": "npx",
-      "args": ["-y", "@blockspool/mcp"],
+      "args": ["-y", "@promptwheel/mcp"],
       "env": {}
     }
   }
 }
 ```
 
-This gives you the MCP tools (`blockspool_start_session`, `blockspool_advance`, etc.) but not the slash command skills or hooks.
+This gives you the MCP tools (`promptwheel_start_session`, `promptwheel_advance`, etc.) but not the slash command skills or hooks.

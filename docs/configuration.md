@@ -1,6 +1,6 @@
 # Configuration Reference
 
-BlockSpool configuration is stored in `.blockspool/config.json`. All settings are optional — sensible defaults are used when omitted.
+PromptWheel configuration is stored in `.promptwheel/config.json`. All settings are optional — sensible defaults are used when omitted.
 
 ## Example Configuration
 
@@ -62,7 +62,7 @@ BlockSpool configuration is stored in `.blockspool/config.json`. All settings ar
 
 ## `retention` Settings
 
-BlockSpool accumulates state over time (run folders, history, artifacts). The retention system caps all unbounded state with configurable item limits.
+PromptWheel accumulates state over time (run folders, history, artifacts). The retention system caps all unbounded state with configurable item limits.
 
 | Field | Default | Description |
 |-------|---------|-------------|
@@ -73,22 +73,22 @@ BlockSpool accumulates state over time (run folders, history, artifacts). The re
 | `maxDeferredProposals` | `20` | Max deferred proposals in run-state |
 | `maxCompletedTickets` | `200` | Hard-delete oldest completed tickets beyond cap |
 | `maxSpindleFileEditKeys` | `50` | Cap file_edit_counts keys in spindle state |
-| `maxMergedBranches` | `10` | Keep last N local blockspool/* branches |
+| `maxMergedBranches` | `10` | Keep last N local promptwheel/* branches |
 
 ### Auto-prune
 
-On every `blockspool` session start, stale items are pruned automatically: run folders, history, artifacts, spool archives, deferred proposals, completed tickets, and orphaned worktrees.
+On every `promptwheel` session start, stale items are pruned automatically: run folders, history, artifacts, spool archives, deferred proposals, completed tickets, and orphaned worktrees.
 
 ### Manual prune
 
-`blockspool prune` runs the full cleanup including merged git branches (which are skipped during auto-prune to avoid touching git state on startup).
+`promptwheel prune` runs the full cleanup including merged git branches (which are skipped during auto-prune to avoid touching git state on startup).
 
 ```bash
 # See what would be deleted
-blockspool prune --dry-run
+promptwheel prune --dry-run
 
 # Delete stale items
-blockspool prune
+promptwheel prune
 ```
 
 ---
@@ -164,19 +164,19 @@ QA commands are auto-detected from `package.json` for Node.js projects. You only
 
 ### SQLite (Default)
 
-No configuration needed. Database stored at `.blockspool/state.sqlite`.
+No configuration needed. Database stored at `.promptwheel/state.sqlite`.
 
 ### PostgreSQL
 
 Set the `DATABASE_URL` environment variable:
 
 ```bash
-export DATABASE_URL="postgresql://user:password@localhost:5432/blockspool"
+export DATABASE_URL="postgresql://user:password@localhost:5432/promptwheel"
 ```
 
 Or in `.env`:
 ```
-DATABASE_URL=postgresql://user:password@localhost:5432/blockspool
+DATABASE_URL=postgresql://user:password@localhost:5432/promptwheel
 ```
 
 ---
@@ -189,8 +189,8 @@ DATABASE_URL=postgresql://user:password@localhost:5432/blockspool
 | `OPENAI_API_KEY` | OpenAI API key for CLI + Codex | — |
 | `MOONSHOT_API_KEY` | Moonshot API key for CLI + Kimi | — |
 | `DATABASE_URL` | PostgreSQL connection string | SQLite |
-| `BLOCKSPOOL_CONFIG` | Config file path | `.blockspool/config.json` |
-| `BLOCKSPOOL_LOG_LEVEL` | Logging level | `info` |
+| `PROMPTWHEEL_CONFIG` | Config file path | `.promptwheel/config.json` |
+| `PROMPTWHEEL_LOG_LEVEL` | Logging level | `info` |
 | `GITHUB_TOKEN` | GitHub token for PR creation | From `gh` CLI |
 
 ---
@@ -200,12 +200,12 @@ DATABASE_URL=postgresql://user:password@localhost:5432/blockspool
 Add to your `.gitignore`:
 
 ```gitignore
-# BlockSpool
-.blockspool/state.sqlite
-.blockspool/state.sqlite-journal
-.blockspool/state.sqlite-wal
+# PromptWheel
+.promptwheel/state.sqlite
+.promptwheel/state.sqlite-journal
+.promptwheel/state.sqlite-wal
 ```
 
 Keep in version control:
-- `.blockspool/config.json` — share configuration with your team
-- `.blockspool/formulas/` — custom formulas
+- `.promptwheel/config.json` — share configuration with your team
+- `.promptwheel/formulas/` — custom formulas

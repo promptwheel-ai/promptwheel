@@ -5,12 +5,12 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import chalk from 'chalk';
-import type { TicketProposal } from '@blockspool/core/scout';
-import { tickets, runs } from '@blockspool/core/repos';
+import type { TicketProposal } from '@promptwheel/core/scout';
+import { tickets, runs } from '@promptwheel/core/repos';
 import type { AutoSessionState } from './solo-auto-state.js';
 import { shouldContinue } from './solo-auto-state.js';
 import { soloRunTicket, captureQaBaseline, baselineToPassFail } from './solo-ticket.js';
-import { getBlockspoolDir } from './solo-config.js';
+import { getPromptwheelDir } from './solo-config.js';
 import { formatGuidelinesForPrompt } from './guidelines.js';
 import { selectRelevant, formatLearningsForPrompt, extractTags, addLearning, confirmLearning, recordAccess, type StructuredKnowledge } from './learnings.js';
 import { classifyFailure } from './failure-classifier.js';
@@ -58,7 +58,7 @@ export async function processOneProposal(
     description: proposal.description || proposal.title,
     priority: 2,
     allowedPaths: proposal.files?.length ? proposal.files : (proposal.allowed_paths ?? []),
-    forbiddenPaths: ['node_modules', '.git', '.blockspool', 'dist', 'build'],
+    forbiddenPaths: ['node_modules', '.git', '.promptwheel', 'dist', 'build'],
   });
 
   state.displayAdapter.ticketAdded(ticket.id, proposal.title, slotLabel);
@@ -187,12 +187,12 @@ export async function processOneProposal(
           }
         }
 
-        // Direct delivery — merge ticket branch into blockspool-direct
+        // Direct delivery — merge ticket branch into promptwheel-direct
         if (state.deliveryMode === 'direct' && result.branchName) {
           const mergeResult = await mergeTicketToMilestone(
             state.repoRoot,
             result.branchName,
-            state.repoRoot, // main repo is checked out on blockspool-direct
+            state.repoRoot, // main repo is checked out on promptwheel-direct
           );
           await deleteTicketBranch(state.repoRoot, result.branchName);
           if (!mergeResult.success) {
@@ -208,7 +208,7 @@ export async function processOneProposal(
                 ticketId: currentTicket.id,
                 metadata: { auto: true, mergeConflictRetry: retryCount },
               });
-              continue; // re-run soloRunTicket with fresh worktree from updated blockspool-direct
+              continue; // re-run soloRunTicket with fresh worktree from updated promptwheel-direct
             }
             state.displayAdapter.ticketDone(currentTicket.id, false, 'Merge conflict with direct branch');
             return { success: false };
@@ -364,7 +364,7 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
           output: result?.output ?? '',
         };
       }
-      const baselinePath = path.join(getBlockspoolDir(state.repoRoot), 'qa-baseline.json');
+      const baselinePath = path.join(getPromptwheelDir(state.repoRoot), 'qa-baseline.json');
       fs.writeFileSync(baselinePath, JSON.stringify({
         failures: baselineFailures,
         details: baselineDetails,
