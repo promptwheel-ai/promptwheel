@@ -110,8 +110,8 @@ describe('buildCodebaseIndex', () => {
   });
 
   it('detects large files (>300 LOC estimated)', () => {
-    // 40 bytes per line heuristic, so 301 * 40 = 12040 bytes
-    mkfile('src/lib/big.ts', 'x'.repeat(12100));
+    // 45 bytes per line heuristic, so 301 * 45 = 13545 bytes
+    mkfile('src/lib/big.ts', 'x'.repeat(13600));
 
     const idx = buildCodebaseIndex(tmpDir);
     expect(idx.large_files.length).toBeGreaterThan(0);
@@ -143,12 +143,12 @@ describe('buildCodebaseIndex', () => {
     expect(idx.untested_modules).not.toContain('src/lib');
   });
 
-  it('caps modules at 50', () => {
-    for (let i = 0; i < 60; i++) {
+  it('caps modules at 80', () => {
+    for (let i = 0; i < 90; i++) {
       mkfile(`src/mod${i}/file.ts`, '');
     }
     const idx = buildCodebaseIndex(tmpDir);
-    expect(idx.modules.length).toBeLessThanOrEqual(50);
+    expect(idx.modules.length).toBeLessThanOrEqual(80);
   });
 
   it('records sampled file mtimes', () => {

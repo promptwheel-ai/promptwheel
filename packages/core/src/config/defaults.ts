@@ -43,15 +43,30 @@ export const SCOUT_DEFAULTS = {
   CATEGORIES: ['refactor', 'docs', 'perf', 'security', 'fix', 'cleanup', 'types'] as readonly string[],
   /** Directories excluded from scanning */
   EXCLUDE_DIRS: [
-    'node_modules',
-    'dist',
-    'build',
-    '.next',
-    'coverage',
-    'assets',
-    'public/static',
-    'vendor',
-    '.git',
+    // JS/TS
+    'node_modules', 'dist', 'build', '.next', 'coverage',
+    // Python
+    '__pycache__', '.venv', 'venv', '.tox', '*.egg-info',
+    // Rust
+    'target',
+    // Java/Kotlin
+    '.gradle', '.mvn',
+    // Elixir
+    '_build', 'deps',
+    // Ruby
+    '.bundle',
+    // C#
+    'bin', 'obj',
+    // Swift
+    '.build', '.swiftpm',
+    // Dart
+    '.dart_tool',
+    // Haskell
+    '.stack-work', 'dist-newstyle', '.cabal-sandbox',
+    // Zig
+    'zig-cache', 'zig-out',
+    // General
+    'assets', 'public/static', 'vendor', '.git',
   ] as readonly string[],
 } as const;
 

@@ -14,7 +14,8 @@ export const ALWAYS_DENIED: string[] = [
   '.env', '.env.*',
   'node_modules/**', '.git/**', '.blockspool/**',
   'dist/**', 'build/**', 'coverage/**',
-  '*.lock', 'package-lock.json',
+  // Lock files are auto-generated; governed by per-ticket allowed_paths instead
+  'package-lock.json',
 ];
 
 // ---------------------------------------------------------------------------
@@ -314,16 +315,46 @@ export function analyzeViolationsForExpansion(
 
     const isSiblingFile = allowedDirs.has(fileDir);
     const isRelatedFile =
+      // JS/TS
       fileName.endsWith('.d.ts') ||
       fileName.includes('.test.') ||
       fileName.includes('.spec.') ||
-      fileName === 'index.ts' ||
-      fileName === 'index.tsx' ||
-      fileName === 'index.js' ||
-      fileName === 'types.ts' ||
-      fileName === 'types.tsx';
+      fileName === 'index.ts' || fileName === 'index.tsx' || fileName === 'index.js' ||
+      fileName === 'types.ts' || fileName === 'types.tsx' ||
+      // Python
+      fileName === '__init__.py' || fileName === 'conftest.py' ||
+      fileName.startsWith('test_') || fileName.endsWith('_test.py') ||
+      // Rust
+      fileName === 'mod.rs' || fileName === 'lib.rs' || fileName === 'build.rs' ||
+      // Go
+      fileName === 'go.mod' || fileName === 'go.sum' ||
+      fileName.endsWith('_test.go') ||
+      // Java/Kotlin
+      fileName.endsWith('Test.java') || fileName.endsWith('Test.kt') ||
+      // C#
+      fileName.endsWith('.csproj') || fileName.endsWith('.sln') ||
+      fileName.endsWith('Tests.cs') || fileName.endsWith('Test.cs') ||
+      // Ruby
+      fileName.endsWith('_spec.rb') || fileName === 'Rakefile' || fileName === 'Gemfile.lock' ||
+      // Elixir
+      fileName.endsWith('_test.exs') || fileName === 'mix.lock' ||
+      // Swift
+      fileName === 'Package.swift' || fileName.endsWith('Tests.swift') ||
+      // Dart
+      fileName === 'pubspec.yaml' || fileName === 'pubspec.lock' ||
+      fileName.endsWith('_test.dart') ||
+      // Scala
+      fileName.endsWith('Spec.scala') || fileName.endsWith('Test.scala') ||
+      fileName === 'build.sbt' ||
+      // Haskell
+      fileName.endsWith('Spec.hs') || fileName === 'stack.yaml' ||
+      fileName.endsWith('.cabal') ||
+      // Zig
+      fileName === 'build.zig' || fileName === 'build.zig.zon' ||
+      // C/C++
+      fileName === 'CMakeLists.txt' || fileName === 'Makefile';
     const isSubdirectory = [...allowedDirs].some(dir => fileDir.startsWith(dir + '/'));
-    const isRootConfig = !fileDir && /^(vitest|vite|jest|tsconfig|eslint|prettier|babel|rollup|webpack|next|tailwind)\b/.test(fileName);
+    const isRootConfig = !fileDir && /^(vitest|vite|jest|tsconfig|eslint|prettier|babel|rollup|webpack|next|tailwind|pyproject|setup|Cargo|go\.mod|go\.sum|Gemfile|mix|pom|build\.gradle|CMakeLists|Makefile)\b/.test(fileName);
 
     if (isSiblingFile || isRelatedFile || isSubdirectory || isRootConfig) {
       pathsToAdd.push(normalizedFile);

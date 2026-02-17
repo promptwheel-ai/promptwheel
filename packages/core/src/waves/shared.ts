@@ -63,6 +63,12 @@ export const CONFLICT_PRONE_FILENAMES = new Set([
   'pom.xml',          // Maven
   'Gemfile',          // Ruby
   'mix.exs',          // Elixir
+  'Package.swift',    // Swift
+  'pubspec.yaml',     // Dart/Flutter
+  'build.sbt',        // Scala
+  'stack.yaml',       // Haskell
+  'build.zig',        // Zig
+  'CMakeLists.txt',   // C/C++
 ]);
 
 /**

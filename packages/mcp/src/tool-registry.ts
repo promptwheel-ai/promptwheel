@@ -71,12 +71,14 @@ export class ToolRegistry {
               if (spec) {
                 this.specs.push(spec);
               }
-            } catch {
-              // Skip invalid tool files silently
+            } catch (err) {
+              console.warn(`[blockspool] failed to load custom tool file ${file}: ${err instanceof Error ? err.message : String(err)}`);
             }
           }
-        } catch {
-          // Non-fatal — can't read tools directory
+        } catch (err) {
+          if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
+            console.warn(`[blockspool] failed to read tools directory: ${err.message}`);
+          }
         }
       }
     }

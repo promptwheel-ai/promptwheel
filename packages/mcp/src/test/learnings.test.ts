@@ -336,6 +336,9 @@ describe('Integration: event processor', () => {
       categories: ['refactor', 'test'],
       learnings: true,
     });
+    // Mark learnings as already loaded so ensureLearningsLoaded() is a no-op
+    // (tests manage learnings state manually via addLearning/readLearningsFile)
+    run.require().learnings_loaded = true;
   });
 
   afterEach(() => {

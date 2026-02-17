@@ -146,8 +146,8 @@ Each proposal should make the codebase meaningfully safer, faster, or more corre
 2. Verification commands should be:
    - Runnable without manual setup
    - NOT include grep/wc/file-specific test commands
-   - Prefer "npm run build" for non-test categories
-   - Prefer "npm test" for test categories
+   - Use the project's actual test/build commands (e.g. npm test, pytest, cargo test, go test ./..., mvn test, mix test)
+   - Match the project's language and tooling — do NOT use npm commands for non-Node projects
 
 3. Generate at most ${maxProposals} proposals, prioritized by impact. Fewer is better if the remaining proposals would be low-impact.
 
@@ -168,7 +168,7 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       "title": "Short actionable title (imperative mood)",
       "description": "What needs to be done and why",
       "acceptance_criteria": ["Criterion 1", "Criterion 2"],
-      "verification_commands": ["npm run build"],
+      "verification_commands": ["<project test command>"],
       "allowed_paths": ["path/to/file.ts"],
       "files": ["path/to/file.ts"],
       "confidence": 75,

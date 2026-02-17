@@ -16,6 +16,8 @@ export interface ServerOptions {
   db: DatabaseAdapter;
   projectPath: string;
   projectName?: string;
+  /** Register trajectory tools (default: true for backward compat, plugins may set false) */
+  trajectoryTools?: boolean;
 }
 
 export async function createServer(options: ServerOptions): Promise<{
@@ -35,7 +37,7 @@ export async function createServer(options: ServerOptions): Promise<{
 
   const server = new McpServer({
     name: 'blockspool',
-    version: '0.5.63',
+    version: '0.6.0',
   });
 
   // Register tool groups
@@ -43,7 +45,9 @@ export async function createServer(options: ServerOptions): Promise<{
   registerExecuteTools(server, getState);
   registerGitTools(server, getState);
   registerIntelligenceTools(server, getState);
-  registerTrajectoryTools(server, getState);
+  if (options.trajectoryTools !== false) {
+    registerTrajectoryTools(server, getState);
+  }
 
   return { server, state };
 }

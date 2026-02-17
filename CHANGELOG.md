@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-16
+
+### Added
+
+- **Language-agnostic mode** — Full support for Python, Rust, Go, Java, Ruby, Elixir, C#, Swift, Dart/Flutter, Scala, Haskell, Zig, and C/C++ projects
+- **Dry-run mode** (`--dry-run`) — Scout-only execution, no tickets created or code modified
+- **Session-level QA commands** (`qa_commands`) — Always run specified commands after every ticket
+- **Per-ticket spindle detection** — Loop detection isolated per ticket instead of global
+- **QA classification system** — Smarter parsing of QA results with pass/fail/error distinction
+- **Timeout watchdog** — Detects and terminates agents stalled for 50+ steps
+- **Skip adversarial review** (`skip_review: true`) — Bypass two-Claude review pattern for faster iteration
+- **Marketplace skills** — All 12 plugin skills discoverable in Claude Code marketplace
+
+### Changed
+
+- **Codebase index** — Import extraction for 12+ languages, binary file detection, deeper walking (3 levels), module limit raised to 80
+- **Project metadata detection** — New: Dart/Flutter, Scala, Haskell, Zig, C/C++ (CMake). Fixed Gradle/Kotlin
+- **Polyglot tool auto-approve** — Test runner patterns for pytest, cargo test, go test, mvn test, mix test, dotnet test, phpunit, swift test, make test
+- **Scope enforcement** — Removed overly broad `*.lock` deny rule. Added polyglot related-file recognition
+- **Excluded directories** — Added `__pycache__`, `.venv`, `target`, `.gradle`, `_build`, `deps`, `.bundle`
+- **Session robustness** — PID-based lock file, dirty git warning, auto `.gitignore` management
+
+### Fixed
+
+- Adversarial review in MCP mode — review prompt now includes `blockspool_ingest_event` instructions
+- Fallback parsing when LLM sends review results through `SCOUT_OUTPUT` instead of `PROPOSALS_REVIEWED`
+- `USER_OVERRIDE` to support `skip_review` mid-session
+- Directory-style `allowed_paths` normalization in scope validation
+- Binary file detection in codebase index — was skipping all small files due to zero-padded buffer
+
 ## [0.5.30] - 2026-02-02
 
 ### Changed

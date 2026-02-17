@@ -69,7 +69,8 @@ function readRunState(projectRoot: string): RunState {
       recentDiffs: parsed.recentDiffs,
       qualitySignals: parsed.qualitySignals ?? undefined,
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[blockspool] failed to parse run-state.json: ${err instanceof Error ? err.message : String(err)}`);
     return {
       totalCycles: 0,
       lastDocsAuditCycle: 0,

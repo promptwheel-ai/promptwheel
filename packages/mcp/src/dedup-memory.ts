@@ -39,7 +39,8 @@ function readEntries(projectRoot: string): DedupEntry[] {
     const raw = fs.readFileSync(fp, 'utf8');
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? parsed : [];
-  } catch {
+  } catch (err) {
+    console.warn(`[blockspool] failed to parse dedup-memory.json: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }

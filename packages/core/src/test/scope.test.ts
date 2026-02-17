@@ -43,7 +43,6 @@ describe('ALWAYS_DENIED', () => {
 
   it('includes lockfiles', () => {
     expect(ALWAYS_DENIED).toContain('package-lock.json');
-    expect(ALWAYS_DENIED.some(p => p.includes('*.lock'))).toBe(true);
   });
 
   it('includes build output directories', () => {

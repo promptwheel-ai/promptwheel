@@ -53,7 +53,21 @@ export interface ClassifyResult {
 // ---------------------------------------------------------------------------
 
 export const SOURCE_EXTENSIONS = new Set([
-  '.ts', '.js', '.py', '.rs', '.go', '.rb', '.java', '.cs', '.ex', '.php', '.swift',
+  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
+  '.py',
+  '.rs',
+  '.go',
+  '.rb',
+  '.java', '.kt', '.kts', '.scala',
+  '.cs',
+  '.ex', '.exs',
+  '.php',
+  '.swift',
+  '.dart',
+  '.c', '.cpp', '.h', '.hpp',
+  '.hs',
+  '.lua',
+  '.zig',
 ]);
 
 /** Directory-name hint — fast path when the name is unambiguous. */
@@ -212,7 +226,7 @@ export function extractImports(content: string, filePath: string): string[] {
   const ext = path.extname(filePath);
   const imports: string[] = [];
 
-  if (ext === '.ts' || ext === '.js') {
+  if (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx' || ext === '.mjs' || ext === '.cjs') {
     for (const m of content.matchAll(new RegExp(JS_IMPORT_RE.source, 'g'))) {
       const spec = m[1] ?? m[2];
       if (spec) imports.push(spec);
@@ -224,6 +238,57 @@ export function extractImports(content: string, filePath: string): string[] {
     }
   } else if (ext === '.go') {
     for (const m of content.matchAll(new RegExp(GO_IMPORT_RE.source, 'g'))) {
+      if (m[1]) imports.push(m[1]);
+    }
+  } else if (ext === '.rs') {
+    // Rust: use crate::..., use std::..., use super::...
+    for (const m of content.matchAll(/\buse\s+((?:crate|super|self|std)\b[\w:]+)/g)) {
+      if (m[1]) imports.push(m[1]);
+    }
+  } else if (ext === '.java' || ext === '.kt' || ext === '.kts' || ext === '.scala') {
+    // Java/Kotlin/Scala: import package.Class
+    for (const m of content.matchAll(/\bimport\s+([\w.]+)/g)) {
+      if (m[1]) imports.push(m[1]);
+    }
+  } else if (ext === '.rb') {
+    // Ruby: require 'lib' or require_relative 'path'
+    for (const m of content.matchAll(/\brequire(?:_relative)?\s+['"]([^'"]+)['"]/g)) {
+      if (m[1]) imports.push(m[1]);
+    }
+  } else if (ext === '.cs') {
+    // C#: using Namespace;
+    for (const m of content.matchAll(/\busing\s+([\w.]+)\s*;/g)) {
+      if (m[1]) imports.push(m[1]);
+    }
+  } else if (ext === '.swift') {
+    // Swift: import Module
+    for (const m of content.matchAll(/\bimport\s+(\w+)/g)) {
+      if (m[1]) imports.push(m[1]);
+    }
+  } else if (ext === '.ex' || ext === '.exs') {
+    // Elixir: alias/import/use Module
+    for (const m of content.matchAll(/\b(?:alias|import|use)\s+([\w.]+)/g)) {
+      if (m[1]) imports.push(m[1]);
+    }
+  } else if (ext === '.php') {
+    // PHP: use Namespace\Class;
+    for (const m of content.matchAll(/\buse\s+([\w\\]+)/g)) {
+      if (m[1]) imports.push(m[1]);
+    }
+  } else if (ext === '.dart') {
+    // Dart: import 'package:...';
+    for (const m of content.matchAll(/\bimport\s+['"]([^'"]+)['"]/g)) {
+      if (m[1]) imports.push(m[1]);
+    }
+  } else if (ext === '.c' || ext === '.cpp' || ext === '.h' || ext === '.hpp') {
+    // C/C++: #include "local.h" (skip <system.h>)
+    for (const m of content.matchAll(/#include\s+"([^"]+)"/g)) {
+      if (m[1]) imports.push(m[1]);
+    }
+  } else if (ext === '.hs') {
+    // Haskell: import Module.Name
+    // eslint-disable-next-line security/detect-unsafe-regex
+    for (const m of content.matchAll(/\bimport\s+(?:qualified\s+)?([\w.]+)/g)) {
       if (m[1]) imports.push(m[1]);
     }
   }

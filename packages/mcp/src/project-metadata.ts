@@ -350,7 +350,9 @@ export function detectProjectMetadata(projectRoot: string): ProjectMetadata {
     if (pom.includes('spring-boot')) { meta.framework = meta.framework ?? 'Spring Boot'; }
     meta.signals.push('pom.xml detected');
   } else if (exists('build.gradle') || exists('build.gradle.kts')) {
-    const lang = exists('build.gradle.kts') ? 'Kotlin' : 'Java';
+    // Check for .kt files to determine if Kotlin project (build script format isn't reliable)
+    const hasKotlinFiles = hasFileWithExtension(path.join(projectRoot, 'src'), '.kt');
+    const lang = hasKotlinFiles ? 'Kotlin' : 'Java';
     if (!meta.languages.includes(lang)) meta.languages.push(lang);
     meta.package_manager = meta.package_manager ?? 'gradle';
     if (!meta.test_runner) {
@@ -417,6 +419,116 @@ export function detectProjectMetadata(projectRoot: string): ProjectMetadata {
     meta.signals.push('Package.swift detected');
   }
 
+  // -----------------------------------------------------------------------
+  // Dart / Flutter
+  // -----------------------------------------------------------------------
+  if (exists('pubspec.yaml')) {
+    if (!meta.languages.includes('Dart')) meta.languages.push('Dart');
+    meta.package_manager = meta.package_manager ?? 'pub';
+
+    if (!meta.test_runner) {
+      meta.test_runner = {
+        name: 'dart-test',
+        run_command: exists('.flutter-plugins') || exists('android') ? 'flutter test' : 'dart test',
+        filter_syntax: exists('.flutter-plugins') || exists('android') ? 'flutter test <path>' : 'dart test <path>',
+      };
+    }
+
+    if (exists('.flutter-plugins') || exists('android') || exists('ios')) {
+      meta.framework = meta.framework ?? 'Flutter';
+    }
+
+    meta.linter = meta.linter ?? (exists('analysis_options.yaml') ? 'dart-analyzer' : null);
+    meta.signals.push('pubspec.yaml detected');
+  }
+
+  // -----------------------------------------------------------------------
+  // Scala
+  // -----------------------------------------------------------------------
+  if (exists('build.sbt')) {
+    if (!meta.languages.includes('Scala')) meta.languages.push('Scala');
+    meta.package_manager = meta.package_manager ?? 'sbt';
+
+    if (!meta.test_runner) {
+      meta.test_runner = {
+        name: 'sbt-test',
+        run_command: 'sbt test',
+        filter_syntax: 'sbt "testOnly <ClassName>"',
+      };
+    }
+
+    meta.signals.push('build.sbt detected');
+  }
+
+  // -----------------------------------------------------------------------
+  // Haskell
+  // -----------------------------------------------------------------------
+  if (exists('stack.yaml') || exists('cabal.project') || existsGlob(projectRoot, '*.cabal')) {
+    if (!meta.languages.includes('Haskell')) meta.languages.push('Haskell');
+    meta.package_manager = meta.package_manager ?? (exists('stack.yaml') ? 'stack' : 'cabal');
+
+    if (!meta.test_runner) {
+      meta.test_runner = exists('stack.yaml')
+        ? { name: 'stack-test', run_command: 'stack test', filter_syntax: 'stack test --test-arguments "<pattern>"' }
+        : { name: 'cabal-test', run_command: 'cabal test', filter_syntax: 'cabal test --test-option="<pattern>"' };
+    }
+
+    meta.signals.push(exists('stack.yaml') ? 'stack.yaml detected' : 'cabal project detected');
+  }
+
+  // -----------------------------------------------------------------------
+  // Zig
+  // -----------------------------------------------------------------------
+  if (exists('build.zig')) {
+    if (!meta.languages.includes('Zig')) meta.languages.push('Zig');
+
+    if (!meta.test_runner) {
+      meta.test_runner = {
+        name: 'zig-test',
+        run_command: 'zig build test',
+        filter_syntax: 'zig build test',
+      };
+    }
+
+    meta.signals.push('build.zig detected');
+  }
+
+  // -----------------------------------------------------------------------
+  // C / C++ (CMake or Makefile)
+  // -----------------------------------------------------------------------
+  if (exists('CMakeLists.txt')) {
+    const hasCpp = hasFileWithExtension(projectRoot, '.cpp') || hasFileWithExtension(projectRoot, '.hpp');
+    const lang = hasCpp ? 'C++' : 'C';
+    if (!meta.languages.includes(lang)) meta.languages.push(lang);
+    meta.package_manager = meta.package_manager ?? 'cmake';
+
+    if (!meta.test_runner) {
+      meta.test_runner = {
+        name: 'ctest',
+        run_command: 'cmake --build build && ctest --test-dir build',
+        filter_syntax: 'ctest --test-dir build -R <pattern>',
+      };
+    }
+
+    meta.signals.push('CMakeLists.txt detected');
+  }
+
+  // Final fallback: if no language or test runner was detected, check for
+  // common test patterns that work across ecosystems
+  if (meta.languages.length === 0) {
+    // Check for Makefile (common in C/C++, polyglot projects)
+    if (exists('Makefile') || exists('makefile') || exists('GNUmakefile')) {
+      meta.signals.push('Makefile detected — unknown language');
+      if (!meta.test_runner) {
+        meta.test_runner = {
+          name: 'make',
+          run_command: 'make test',
+          filter_syntax: 'make test',
+        };
+      }
+    }
+  }
+
   return meta;
 }
 
@@ -424,15 +536,25 @@ export function detectProjectMetadata(projectRoot: string): ProjectMetadata {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Simple glob check for a single pattern at root level */
-function existsGlob(dir: string, pattern: string): boolean {
+/** Check if any file with the given extension exists in dir (non-recursive, checks top-level + src/) */
+function hasFileWithExtension(dir: string, ext: string): boolean {
   try {
-    const ext = pattern.replace('*', '');
     const entries = fs.readdirSync(dir);
-    return entries.some(e => e.endsWith(ext));
+    if (entries.some(e => e.endsWith(ext))) return true;
+    // Also check src/ subdirectory
+    const srcDir = path.join(dir, 'src');
+    try {
+      return fs.readdirSync(srcDir).some(e => e.endsWith(ext));
+    } catch { return false; }
   } catch {
     return false;
   }
+}
+
+/** @deprecated Use hasFileWithExtension instead */
+function existsGlob(dir: string, pattern: string): boolean {
+  const ext = pattern.replace('*', '');
+  return hasFileWithExtension(dir, ext);
 }
 
 // ---------------------------------------------------------------------------

@@ -120,7 +120,10 @@ function parseFormulaFile(filePath: string, name: string): Formula | null {
       exclude: parsed.exclude ? parseStringList(parsed.exclude) : undefined,
       tags: parsed.tags ? parseStringList(parsed.tags) : undefined,
     };
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
+      console.warn(`[blockspool] failed to parse formula file ${filePath}: ${err.message}`);
+    }
     return null;
   }
 }

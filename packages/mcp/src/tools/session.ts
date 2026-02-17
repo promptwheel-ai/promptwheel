@@ -3,8 +3,9 @@
  */
 
 import { join, resolve } from 'node:path';
-import { unlinkSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs';
+import { unlinkSync, existsSync, readdirSync, statSync, rmSync, readFileSync, appendFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { loadGuidelines } from '../guidelines.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { SessionManager } from '../state.js';
@@ -45,6 +46,8 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
       direct: z.boolean().optional().describe('Direct mode: edit in place without worktrees/branches (default: true for simple solo use). Auto-disabled when create_prs=true or parallel>1.'),
       cross_verify: z.boolean().optional().describe('Cross-verify: use a separate verifier agent for QA instead of self-verification (default: false).'),
       skip_review: z.boolean().optional().describe('Skip adversarial review: create tickets directly from scout proposals without a second review pass (default: false).'),
+      dry_run: z.boolean().optional().describe('Dry-run mode: scout only, no ticket creation or execution (default: false).'),
+      qa_commands: z.array(z.string()).optional().describe('QA commands to always run after every ticket (e.g. ["pytest", "cargo test"]).'),
     },
     async (params) => {
       const state = getState();
@@ -75,6 +78,8 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
         direct: params.direct,
         cross_verify: params.cross_verify,
         skip_review: params.skip_review,
+        dry_run: params.dry_run,
+        qa_commands: params.qa_commands,
       };
 
       let formulaInfo: { name: string; description: string } | undefined;
@@ -86,7 +91,70 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
         }
       }
 
+      // Pre-start validation: detect environment and adjust config
+      const warnings: string[] = [];
+
+      // Git repo check — force direct mode if not a git repo
+      const isGitRepo = existsSync(join(state.projectPath, '.git'));
+      if (!isGitRepo) {
+        config = { ...config, direct: true, create_prs: false };
+        warnings.push('Not a git repository — PR creation disabled, using direct mode.');
+      } else {
+        // Check for uncommitted changes
+        const gitStatus = spawnSync('git', ['status', '--porcelain'], {
+          cwd: state.projectPath, encoding: 'utf-8', timeout: 5000,
+        });
+        if (gitStatus.stdout && gitStatus.stdout.trim().length > 0) {
+          const changedCount = gitStatus.stdout.trim().split('\n').length;
+          warnings.push(`${changedCount} uncommitted change(s) detected. Consider committing or stashing before running BlockSpool.`);
+        }
+
+        // Ensure .blockspool/ is in .gitignore
+        const gitignorePath = join(state.projectPath, '.gitignore');
+        try {
+          const gitignore = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf8') : '';
+          if (!gitignore.includes('.blockspool')) {
+            appendFileSync(gitignorePath, `${gitignore.endsWith('\n') || gitignore === '' ? '' : '\n'}# BlockSpool session data\n.blockspool/\n`);
+            warnings.push('Added .blockspool/ to .gitignore.');
+          }
+        } catch (err) {
+          warnings.push(`Could not update .gitignore: ${err instanceof Error ? err.message : 'unknown error'}. Please add .blockspool/ to .gitignore manually.`);
+        }
+      }
+
+      // Guidelines awareness
+      const guidelines = loadGuidelines(state.projectPath);
+      if (guidelines) {
+        warnings.push(`Using project guidelines from ${guidelines.source}.`);
+      } else {
+        warnings.push('No CLAUDE.md found — consider adding project guidelines for better results.');
+      }
+
+      // Scope suggestion for large repos
+      if (!config.scope || config.scope === '**') {
+        const sourceDirs = ['src', 'lib', 'app', 'packages'].filter(
+          d => existsSync(join(state.projectPath, d)),
+        );
+        if (sourceDirs.length > 0) {
+          try {
+            const topEntries = readdirSync(state.projectPath).filter(
+              e => !e.startsWith('.') && e !== 'node_modules',
+            );
+            if (topEntries.length > 50) {
+              warnings.push(
+                `Large project (${topEntries.length}+ top-level entries). Consider narrowing scope: ${sourceDirs.map(d => `${d}/**`).join(', ')}`,
+              );
+            }
+          } catch { /* ignore readdir failures */ }
+        }
+      }
+
       const runState = state.start(config);
+
+      // Test runner info
+      if (!runState.project_metadata?.test_run_command) {
+        warnings.push('No test runner detected — QA will rely on commands from scout proposals. Consider adding a test script (e.g. package.json scripts.test, pytest.ini, Makefile test target).');
+      }
 
       return {
         content: [{
@@ -100,6 +168,13 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
             expires_at: runState.expires_at,
             run_dir: state.run.dir,
             formula: formulaInfo,
+            warnings: warnings.length > 0 ? warnings : undefined,
+            detected: {
+              languages: runState.project_metadata?.languages ?? [],
+              test_runner: runState.project_metadata?.test_runner_name ?? null,
+              framework: runState.project_metadata?.framework ?? null,
+              linter: runState.project_metadata?.linter ?? null,
+            },
             message: 'Session started. Call blockspool_advance to begin.',
           }, null, 2),
         }],
@@ -124,8 +199,10 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
         if (response.next_action === 'STOP') {
           try {
             unlinkSync(join(state.projectPath, '.blockspool', 'loop-state.json'));
-          } catch {
-            // File may not exist — that's fine
+          } catch (err) {
+            if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
+              console.warn(`[blockspool] failed to clean up loop-state.json: ${err.message}`);
+            }
           }
         }
 
@@ -203,6 +280,13 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
         const status = state.getStatus();
         const digest = state.run.buildDigest();
         const warnings = state.run.getBudgetWarnings();
+        const s = state.run.require();
+
+        // Surface last QA failure details if any tickets have failed
+        const lastFailure = s.last_qa_failure ? {
+          failed_commands: s.last_qa_failure.failed_commands,
+          error_snippet: s.last_qa_failure.error_output.slice(0, 200),
+        } : undefined;
 
         return {
           content: [{
@@ -211,6 +295,8 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
               ...status,
               digest,
               budget_warnings: warnings.length > 0 ? warnings : undefined,
+              last_qa_failure: lastFailure,
+              last_plan_rejection: s.last_plan_rejection_reason ?? undefined,
             }, null, 2),
           }],
         };
@@ -239,8 +325,10 @@ export function registerSessionTools(server: McpServer, getState: () => SessionM
         // Clean up loop-state.json so the stop hook doesn't block exit
         try {
           unlinkSync(join(state.projectPath, '.blockspool', 'loop-state.json'));
-        } catch {
-          // File may not exist — that's fine
+        } catch (err) {
+          if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
+            console.warn(`[blockspool] failed to clean up loop-state.json on end: ${err.message}`);
+          }
         }
 
         // Clean up orphaned worktrees
@@ -528,12 +616,13 @@ function pruneWorktrees(repoRoot: string): number {
           rmSync(worktreePath, { recursive: true, force: true });
         }
         removed++;
-      } catch {
-        // Individual removal failure is non-fatal
+      } catch (err) {
+        console.warn(`[blockspool] failed to remove worktree ${entry}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     return removed;
-  } catch {
+  } catch (err) {
+    console.warn(`[blockspool] failed to prune worktrees: ${err instanceof Error ? err.message : String(err)}`);
     return 0;
   }
 }

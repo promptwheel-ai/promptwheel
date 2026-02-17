@@ -10,15 +10,19 @@ Pass `wheel` for unattended wheel mode with parallel subagents and stop-hook loo
 ## Arguments
 
 Parse from `$ARGUMENTS` (all optional, key=value format):
+
+**Common:**
 - **wheel** — Enable wheel mode (parallel subagents, stop hook, no human approval)
-- **hours** — Time budget for multi-cycle runs (e.g. `hours=4`)
 - **formula** — Formula to use (e.g. `security-audit`, `test-coverage`, `cleanup`)
-- **cycles** — Number of scout→execute cycles (default: 1)
+- **hours** — Time budget for multi-cycle runs (e.g. `hours=4`)
+- **scope** — Directory to scan (auto-detected)
 - **deep** — Enable deep architectural review mode
+
+**Advanced (rarely needed):**
+- **cycles** — Number of scout→execute cycles (default: 1)
 - **parallel** — Concurrent tickets in wheel mode (default 2, max 5). Ignored in orchestration mode.
 - **batch_size** — Milestone batching (merge N tickets into one PR)
 - **min_impact_score** — Filter proposals (1-10, default 3)
-- **scope** — Directory to scan (auto-detected)
 - **direct** — Edit in place without worktrees (default: true). Auto-disabled when using PRs or parallel>1.
 
 ## Mode Detection

@@ -617,3 +617,141 @@ describe('advance — parallel execution event forwarding', () => {
     expect(result.message).toBe('PR created outside PR phase');
   });
 });
+
+// ---------------------------------------------------------------------------
+// dry_run mode
+// ---------------------------------------------------------------------------
+
+describe('advance — dry_run mode', () => {
+  it('stops at NEXT_TICKET phase with dry_run message', async () => {
+    startRun({ dry_run: true });
+    const s = run.require();
+
+    // Simulate scout completing and moving to NEXT_TICKET
+    s.phase = 'NEXT_TICKET';
+
+    const resp = await advance(ctx());
+
+    expect(resp.next_action).toBe('STOP');
+    expect(resp.phase).toBe('DONE');
+    expect(resp.reason).toContain('Dry-run mode');
+    expect(resp.reason).toContain('no tickets executed');
+  });
+
+  it('initializes dry_run from session config', () => {
+    startRun({ dry_run: true });
+    expect(run.require().dry_run).toBe(true);
+  });
+
+  it('defaults dry_run to false', () => {
+    startRun();
+    expect(run.require().dry_run).toBe(false);
+  });
+
+  it('does not stop scout phase in dry_run mode', async () => {
+    startRun({ dry_run: true });
+    const s = run.require();
+    s.phase = 'SCOUT';
+
+    const resp = await advance(ctx());
+
+    // Scout should still proceed normally
+    expect(resp.next_action).toBe('PROMPT');
+    expect(resp.phase).toBe('SCOUT');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// qa_commands session-level
+// ---------------------------------------------------------------------------
+
+describe('advance — qa_commands merging', () => {
+  it('initializes qa_commands from session config', () => {
+    startRun({ qa_commands: ['pytest', 'cargo test'] });
+    expect(run.require().qa_commands).toEqual(['pytest', 'cargo test']);
+  });
+
+  it('defaults qa_commands to empty array', () => {
+    startRun();
+    expect(run.require().qa_commands).toEqual([]);
+  });
+
+  it('merges session qa_commands with ticket verification commands in QA phase', async () => {
+    startRun({ qa_commands: ['make lint', 'make test'] });
+    const s = run.require();
+
+    // Create a ticket with its own verification commands
+    const ticket = await repos.tickets.create(db, {
+      projectId: project.id,
+      title: 'Test QA merge',
+      description: 'Test that session qa_commands merge with ticket commands',
+      category: 'refactor',
+      priority: 5,
+      allowedPaths: ['src/'],
+      verificationCommands: ['npm test'],
+    });
+
+    // Set up state for QA phase
+    s.phase = 'QA';
+    s.current_ticket_id = ticket.id;
+    s.qa_retries = 0;
+
+    const resp = await advance(ctx());
+
+    expect(resp.next_action).toBe('PROMPT');
+    expect(resp.phase).toBe('QA');
+    // Should contain both ticket and session commands
+    expect(resp.constraints.required_commands).toContain('npm test');
+    expect(resp.constraints.required_commands).toContain('make lint');
+    expect(resp.constraints.required_commands).toContain('make test');
+  });
+
+  it('deduplicates overlapping commands', async () => {
+    startRun({ qa_commands: ['npm test', 'make lint'] });
+    const s = run.require();
+
+    const ticket = await repos.tickets.create(db, {
+      projectId: project.id,
+      title: 'Test dedup',
+      description: 'Dedup test',
+      category: 'refactor',
+      priority: 5,
+      allowedPaths: ['src/'],
+      verificationCommands: ['npm test'], // same as session
+    });
+
+    s.phase = 'QA';
+    s.current_ticket_id = ticket.id;
+    s.qa_retries = 0;
+
+    const resp = await advance(ctx());
+
+    // npm test should appear only once
+    const npmTestCount = resp.constraints.required_commands.filter(c => c === 'npm test').length;
+    expect(npmTestCount).toBe(1);
+    expect(resp.constraints.required_commands).toContain('make lint');
+  });
+
+  it('works with empty ticket verification commands', async () => {
+    startRun({ qa_commands: ['pytest'] });
+    const s = run.require();
+
+    const ticket = await repos.tickets.create(db, {
+      projectId: project.id,
+      title: 'No ticket commands',
+      description: 'Test',
+      category: 'docs',
+      priority: 5,
+      allowedPaths: ['docs/'],
+      verificationCommands: [],
+    });
+
+    s.phase = 'QA';
+    s.current_ticket_id = ticket.id;
+    s.qa_retries = 0;
+
+    const resp = await advance(ctx());
+
+    expect(resp.constraints.required_commands).toContain('pytest');
+  });
+});

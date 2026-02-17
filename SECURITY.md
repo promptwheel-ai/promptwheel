@@ -48,6 +48,7 @@ When using BlockSpool:
 
 | Version | Supported |
 |---------|-----------|
+| 0.6.x   | Yes       |
 | 0.5.x   | Yes       |
 | < 0.5   | No        |
 

@@ -47,8 +47,8 @@ export function loadTrajectories(repoRoot: string): Trajectory[] {
       if (trajectory.name && trajectory.steps.length > 0) {
         trajectories.push(trajectory);
       }
-    } catch {
-      // Skip malformed trajectory files
+    } catch (err) {
+      console.warn(`[blockspool] failed to load trajectory file ${file}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -72,8 +72,8 @@ export function loadTrajectoryState(repoRoot: string): TrajectoryState | null {
     if (fs.existsSync(p)) {
       return JSON.parse(fs.readFileSync(p, 'utf-8'));
     }
-  } catch {
-    // Corrupted file — return null
+  } catch (err) {
+    console.warn(`[blockspool] failed to parse trajectory-state.json: ${err instanceof Error ? err.message : String(err)}`);
   }
   return null;
 }

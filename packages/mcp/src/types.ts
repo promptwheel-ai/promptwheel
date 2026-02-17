@@ -147,9 +147,6 @@ export interface RunState {
   spindle: SpindleState;
   spindle_recoveries: number;
 
-  // Intent tracking
-  recent_intent_hashes: string[];
-
   // Directories already explored by scout (for rotation across cycles)
   scouted_dirs: string[];
 
@@ -176,8 +173,10 @@ export interface RunState {
 
   // Cross-run learnings
   learnings_enabled: boolean;
+  /** True once learnings have been lazy-loaded from disk */
+  learnings_loaded: boolean;
   injected_learning_ids: string[];
-  /** Cached learnings loaded at session start (avoids redundant file I/O) */
+  /** Cached learnings (lazy-loaded on first use, not at session start) */
   cached_learnings: import('./learnings.js').Learning[];
 
   // Sector rotation
@@ -188,6 +187,12 @@ export interface RunState {
   active_trajectory: string | null;
   trajectory_step_id: string | null;
   trajectory_step_title: string | null;
+
+  // Dry-run mode — scout only, no execution
+  dry_run: boolean;
+
+  // User-specified QA commands (always run in addition to ticket verification commands)
+  qa_commands: string[];
 }
 
 export interface ProjectMetadataSnapshot {
@@ -213,6 +218,8 @@ export interface TicketWorkerState {
   plan_rejections: number;
   qa_retries: number;
   step_count: number;
+  /** Session-level step_count when this worker last made progress */
+  last_active_at_step: number;
   spindle: SpindleState;
   // Critic: last QA failure context for retry guidance
   last_qa_failure: { failed_commands: string[]; error_output: string } | null;
@@ -273,6 +280,9 @@ export type EventType =
   | 'HINT_CONSUMED'
   | 'USER_OVERRIDE'
   | 'PROPOSALS_REVIEWED'
+  | 'SECTOR_ROTATION_FAILED'
+  | 'WORKER_TIMEOUT'
+  | 'LEARNINGS_LOAD_FAILED'
   | 'SESSION_END';
 
 export interface RunEvent {
@@ -361,4 +371,8 @@ export interface SessionConfig {
   cross_verify?: boolean;
   /** Skip adversarial review: create tickets directly from scout proposals without a second review pass. Default: false. */
   skip_review?: boolean;
+  /** Dry-run mode: scout only, no ticket creation or execution. Default: false. */
+  dry_run?: boolean;
+  /** User-specified QA commands to run after every ticket (in addition to scout-proposed verification commands). */
+  qa_commands?: string[];
 }

@@ -22,7 +22,7 @@ import {
   runSelfUpdate,
 } from '../lib/update-check.js';
 
-const CURRENT_VERSION = '0.5.63';
+const CURRENT_VERSION = '0.6.0';
 
 const program = new Command();
 
@@ -86,6 +86,16 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error(err);
+  if (err instanceof Error) {
+    // User-friendly error: message only, no stack trace
+    const prefix = '\x1b[31m✗\x1b[0m';
+    console.error(`${prefix} ${err.message}`);
+    // Show stack in verbose/debug mode
+    if (process.env.DEBUG || process.argv.includes('--verbose') || process.argv.includes('-v')) {
+      console.error(err.stack);
+    }
+  } else {
+    console.error(err);
+  }
   process.exit(1);
 });

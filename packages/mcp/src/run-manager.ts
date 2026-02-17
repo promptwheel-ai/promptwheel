@@ -51,6 +51,7 @@ export class RunManager {
   private state: RunState | null = null;
   private runDir: string | null = null;
   private eventsPath: string | null = null;
+  private learningsDecayRate?: number;
 
   constructor(private readonly projectPath: string) {}
 
@@ -68,6 +69,36 @@ export class RunManager {
   create(projectId: string, config: SessionConfig): RunState {
     if (this.state) {
       throw new Error('Run already active. End it first.');
+    }
+
+    // Bootstrap .blockspool/ directory early — fail with a clear message
+    try {
+      fs.mkdirSync(this.bsDir, { recursive: true });
+    } catch (err) {
+      throw new Error(
+        `Cannot create .blockspool directory at ${this.bsDir}: ${err instanceof Error ? err.message : String(err)}. Check file permissions.`,
+      );
+    }
+
+    // Session lock — prevent concurrent sessions from corrupting state
+    // Skip in test environments to avoid PID collisions with test runner
+    if (!process.env.VITEST && !process.env.NODE_ENV?.includes('test')) {
+      const lockPath = path.join(this.bsDir, 'session.lock');
+      try {
+        if (fs.existsSync(lockPath)) {
+          const lockContent = fs.readFileSync(lockPath, 'utf8').trim();
+          const lockPid = parseInt(lockContent, 10);
+          // Check if the process is still alive
+          if (lockPid && !isNaN(lockPid)) {
+            try { process.kill(lockPid, 0); throw new Error(`Another BlockSpool session is active (PID ${lockPid}). End it first or delete .blockspool/session.lock.`); }
+            catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') throw e; /* Process dead — stale lock, overwrite */ }
+          }
+        }
+        fs.writeFileSync(lockPath, String(process.pid), 'utf8');
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('Another BlockSpool session')) throw err;
+        // Ignore lock write failures — non-fatal
+      }
     }
 
     const runId = prefixedId('run');
@@ -150,7 +181,6 @@ export class RunManager {
 
       spindle: emptySpindle(),
       spindle_recoveries: 0,
-      recent_intent_hashes: [],
       scouted_dirs: [],
       deferred_proposals: [],
 
@@ -163,6 +193,7 @@ export class RunManager {
       scout_exploration_log: [],
 
       learnings_enabled: config.learnings !== false,
+      learnings_loaded: false,
       injected_learning_ids: [],
       cached_learnings: [],
 
@@ -177,6 +208,10 @@ export class RunManager {
       active_trajectory: null,
       trajectory_step_id: null,
       trajectory_step_title: null,
+
+      // Dry-run + QA commands
+      dry_run: config.dry_run ?? false,
+      qa_commands: config.qa_commands ?? [],
     };
 
     // Detect project metadata (test runner, framework, etc.)
@@ -241,14 +276,14 @@ export class RunManager {
           }
         }
       }
-    } catch {
-      // Non-fatal — sectors.json seeding is best-effort
+    } catch (err) {
+      if (err instanceof Error && !('code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT')) {
+        console.warn(`[blockspool] failed to seed coverage from sectors.json: ${err.message}`);
+      }
     }
 
-    // Apply decay to cross-run learnings and cache (if enabled)
-    if (this.state.learnings_enabled) {
-      this.state.cached_learnings = loadLearnings(this.projectPath, config.learnings_decay_rate);
-    }
+    // Store decay rate for lazy loading later
+    this.learningsDecayRate = config.learnings_decay_rate;
 
     // Create run folder
     const runsDir = path.join(this.bsDir, 'runs');
@@ -325,6 +360,7 @@ export class RunManager {
     s.qa_retries = 0;
     s.last_qa_failure = null;
     s.last_plan_rejection_reason = null;
+    s.spindle = emptySpindle(); // Fresh spindle per ticket — prevents false positives from prior ticket
     this.persistState();
     this.appendEvent('TICKET_ASSIGNED', { ticket_id: ticketId });
   }
@@ -401,6 +437,12 @@ export class RunManager {
       prs_created: s.prs_created,
       step_count: s.step_count,
     });
+    // Release session lock
+    try {
+      const lockPath = path.join(this.bsDir, 'session.lock');
+      if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
+    } catch { /* ignore cleanup failures */ }
+
     const finalState = { ...s };
     this.state = null;
     this.runDir = null;
@@ -422,6 +464,7 @@ export class RunManager {
       plan_rejections: 0,
       qa_retries: 0,
       step_count: 0,
+      last_active_at_step: s.step_count,
       spindle: emptySpindle(),
       last_qa_failure: null,
     };
@@ -588,6 +631,23 @@ export class RunManager {
         percent: s.files_total > 0 ? Math.round((s.files_scanned / s.files_total) * 100) : 0,
       },
     };
+  }
+
+  // -----------------------------------------------------------------------
+  // Lazy learnings
+  // -----------------------------------------------------------------------
+
+  /** Lazy-load learnings from disk on first access. No-op if already loaded or disabled. */
+  ensureLearningsLoaded(): void {
+    const s = this.require();
+    if (s.learnings_loaded || !s.learnings_enabled) return;
+    try {
+      s.cached_learnings = loadLearnings(this.projectPath, this.learningsDecayRate);
+    } catch (err) {
+      this.appendEvent('LEARNINGS_LOAD_FAILED', { error: err instanceof Error ? err.message : String(err) });
+      s.cached_learnings = [];
+    }
+    s.learnings_loaded = true;
   }
 
   // -----------------------------------------------------------------------

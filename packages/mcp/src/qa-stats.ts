@@ -73,7 +73,8 @@ export function loadQaStats(projectRoot: string): QaStatsStore {
       disabledCommands: Array.isArray(parsed.disabledCommands) ? parsed.disabledCommands : [],
       lastCalibratedQualityRate: parsed.lastCalibratedQualityRate ?? null,
     };
-  } catch {
+  } catch (err) {
+    console.warn(`[blockspool] failed to parse qa-stats.json: ${err instanceof Error ? err.message : String(err)}`);
     return { commands: {}, lastUpdated: 0, disabledCommands: [], lastCalibratedQualityRate: null };
   }
 }

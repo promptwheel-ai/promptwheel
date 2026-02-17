@@ -41,7 +41,7 @@ describe('buildCodebaseIndex', () => {
     writeFile(root, 'src/services/bar.ts', 'export const y = 2;');
     writeFile(root, 'src/utils/helpers.ts', 'export function h() {}');
     writeFile(root, 'src/api/routes.ts', 'export default {};');
-    writeFile(root, 'src/components/Button.tsx'); // .tsx not in source extensions
+    writeFile(root, 'src/components/Button.tsx'); // .tsx is a source extension
 
     const idx = buildCodebaseIndex(root);
 
@@ -56,8 +56,9 @@ describe('buildCodebaseIndex', () => {
     expect(byPath['src/api']).toBeDefined();
     expect(byPath['src/api'].purpose).toBe('api');
 
-    // .tsx is not a source extension, so components should not appear
-    expect(byPath['src/components']).toBeUndefined();
+    // .tsx is a source extension, so components should appear
+    expect(byPath['src/components']).toBeDefined();
+    expect(byPath['src/components'].purpose).toBe('ui');
   });
 
   it('scans JS/TS imports and builds dependency edges', () => {
@@ -124,8 +125,8 @@ describe('buildCodebaseIndex', () => {
   });
 
   it('detects large files via byte heuristic', () => {
-    // 300 LOC * 40 bytes/line = 12000 bytes
-    const bigContent = 'x'.repeat(12100);
+    // 300 LOC * 45 bytes/line = 13500 bytes — need >300 estimated lines
+    const bigContent = 'x'.repeat(13600);
     writeFile(root, 'src/services/big.ts', bigContent);
     writeFile(root, 'src/services/small.ts', 'const x = 1;');
 

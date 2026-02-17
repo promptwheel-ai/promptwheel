@@ -55,6 +55,7 @@ export async function advanceTicketWorker(
 ): Promise<TicketWorkerResponse> {
   const { run, db } = ctx;
   const s = run.require();
+  run.ensureLearningsLoaded();
   const worker = run.getTicketWorker(ticketId);
 
   if (!worker) {
@@ -68,9 +69,9 @@ export async function advanceTicketWorker(
     };
   }
 
-  // Increment worker step count
+  // Increment worker step count and mark as active
   worker.step_count++;
-  run.updateTicketWorker(ticketId, { step_count: worker.step_count });
+  run.updateTicketWorker(ticketId, { step_count: worker.step_count, last_active_at_step: s.step_count });
 
   // Budget check per ticket
   if (worker.step_count > s.ticket_step_budget) {

@@ -85,6 +85,14 @@ export interface BaselineInput {
   hasTypeScript?: boolean;
   scripts?: Record<string, string>;
   isMonorepo?: boolean;
+  /** Detected test runner command (language-agnostic) */
+  testCommand?: string;
+  /** Detected lint command */
+  lintCommand?: string;
+  /** Detected build command */
+  buildCommand?: string;
+  /** Primary language */
+  language?: string;
 }
 
 /**
@@ -116,18 +124,30 @@ export function generateBaselineGuidelines(
   parts.push('- Do not introduce new dependencies without justification.');
   parts.push('');
 
-  // Verification section
+  // Verification section — prefer detected commands, fall back to package.json scripts
   const scripts = input.scripts ?? {};
   const verifyCommands: string[] = [];
 
-  let lintCmd = '';
-  if (scripts.lint) lintCmd = 'npm run lint';
-  if (scripts.typecheck || scripts['type-check']) {
-    lintCmd = lintCmd ? `${lintCmd} && npm run typecheck` : 'npm run typecheck';
+  if (input.lintCommand) {
+    verifyCommands.push(input.lintCommand);
+  } else {
+    let lintCmd = '';
+    if (scripts.lint) lintCmd = 'npm run lint';
+    if (scripts.typecheck || scripts['type-check']) {
+      lintCmd = lintCmd ? `${lintCmd} && npm run typecheck` : 'npm run typecheck';
+    }
+    if (lintCmd) verifyCommands.push(lintCmd);
   }
-  if (lintCmd) verifyCommands.push(lintCmd);
-  if (scripts.test) verifyCommands.push('npm test');
-  if (scripts.build) verifyCommands.push('npm run build');
+  if (input.testCommand) {
+    verifyCommands.push(input.testCommand);
+  } else if (scripts.test) {
+    verifyCommands.push('npm test');
+  }
+  if (input.buildCommand) {
+    verifyCommands.push(input.buildCommand);
+  } else if (scripts.build) {
+    verifyCommands.push('npm run build');
+  }
 
   if (verifyCommands.length > 0) {
     parts.push('## Verification');

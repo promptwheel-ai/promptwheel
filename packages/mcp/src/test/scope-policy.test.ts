@@ -197,6 +197,22 @@ describe('validatePlanScope', () => {
     );
     expect(result.valid).toBe(true);
   });
+
+  it('accepts files inside directory-style allowed_paths (trailing slash)', () => {
+    const dirPolicy = deriveScopePolicy({
+      allowedPaths: ['src/test/', 'src/lib/foo.ts'],
+      category: 'test',
+      maxLinesPerTicket: 1000,
+    });
+    const result = validatePlanScope(
+      [
+        { path: 'src/test/foo.test.ts', action: 'create', reason: 'new test' },
+        { path: 'src/lib/foo.ts', action: 'modify', reason: 'export function' },
+      ],
+      50, 'low', dirPolicy,
+    );
+    expect(result.valid).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -232,6 +248,17 @@ describe('isFileAllowed', () => {
 
   it('denies files with credentials in name', () => {
     expect(isFileAllowed('src/credentials.json', policy)).toBe(false);
+  });
+
+  it('allows files inside directory-style allowed_paths (trailing slash)', () => {
+    const dirPolicy = deriveScopePolicy({
+      allowedPaths: ['src/handlers/', 'src/utils/validate.ts'],
+      category: 'refactor',
+      maxLinesPerTicket: 500,
+    });
+    expect(isFileAllowed('src/handlers/signup.ts', dirPolicy)).toBe(true);
+    expect(isFileAllowed('src/utils/validate.ts', dirPolicy)).toBe(true);
+    expect(isFileAllowed('src/other/foo.ts', dirPolicy)).toBe(false);
   });
 });
 

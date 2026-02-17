@@ -24,6 +24,17 @@ import {
 // Re-export for existing consumers
 export { detectCredentialInContent as containsCredentials } from '@blockspool/core/scope/shared';
 
+/**
+ * Normalize an allowed_path for minimatch:
+ * - Directory-style paths ending with `/` become `dir/**` (match anything inside)
+ * - Paths without globs or extensions that look like directories get `/**` appended
+ * - Everything else is left as-is
+ */
+function normalizeAllowedGlob(glob: string): string {
+  if (glob.endsWith('/')) return glob + '**';
+  return glob;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -110,6 +121,8 @@ export interface PlanFile {
 export interface PlanValidationResult {
   valid: boolean;
   reason: string | null;
+  /** All violations found (empty when valid). Joined into `reason` for backward compat. */
+  violations: string[];
 }
 
 export function validatePlanScope(
@@ -118,37 +131,33 @@ export function validatePlanScope(
   riskLevel: string,
   policy: ScopePolicy,
 ): PlanValidationResult {
+  const violations: string[] = [];
+
   // 1. Must have files
   if (!files || files.length === 0) {
-    return { valid: false, reason: 'Plan must include at least one file to touch' };
+    return { valid: false, reason: 'Plan must include at least one file to touch', violations: ['Plan must include at least one file to touch'] };
   }
 
   // 2. Check estimated lines
   if (estimatedLines > policy.max_lines) {
-    return {
-      valid: false,
-      reason: `Estimated lines (${estimatedLines}) exceeds max (${policy.max_lines})`,
-    };
+    violations.push(`Estimated lines (${estimatedLines}) exceeds max (${policy.max_lines})`);
   }
 
   // 3. Check max files
   if (files.length > policy.max_files) {
-    return {
-      valid: false,
-      reason: `Plan touches ${files.length} files, max allowed is ${policy.max_files}`,
-    };
+    violations.push(`Plan touches ${files.length} files, max allowed is ${policy.max_files}`);
   }
 
   // 4. Valid risk level
   if (!riskLevel || !['low', 'medium', 'high'].includes(riskLevel)) {
-    return { valid: false, reason: 'Plan must specify risk_level: low, medium, or high' };
+    violations.push('Plan must specify risk_level: low, medium, or high');
   }
 
   // 5. Check each file against denied paths
   for (const f of files) {
     for (const deniedGlob of policy.denied_paths) {
       if (minimatch(f.path, deniedGlob, { dot: true })) {
-        return { valid: false, reason: `Plan touches denied path: ${f.path} (matches ${deniedGlob})` };
+        violations.push(`Plan touches denied path: ${f.path} (matches ${deniedGlob})`);
       }
     }
   }
@@ -157,7 +166,7 @@ export function validatePlanScope(
   for (const f of files) {
     for (const pattern of policy.denied_patterns) {
       if (pattern.test(f.path)) {
-        return { valid: false, reason: `Plan touches sensitive file: ${f.path}` };
+        violations.push(`Plan touches sensitive file: ${f.path}`);
       }
     }
   }
@@ -166,18 +175,18 @@ export function validatePlanScope(
   if (policy.allowed_paths.length > 0) {
     for (const f of files) {
       const isAllowed = policy.allowed_paths.some(glob =>
-        minimatch(f.path, glob, { dot: true }),
+        minimatch(f.path, normalizeAllowedGlob(glob), { dot: true }),
       );
       if (!isAllowed) {
-        return {
-          valid: false,
-          reason: `File ${f.path} is outside allowed paths: ${policy.allowed_paths.join(', ')}`,
-        };
+        violations.push(`File ${f.path} is outside allowed paths: ${policy.allowed_paths.join(', ')}`);
       }
     }
   }
 
-  return { valid: true, reason: null };
+  if (violations.length > 0) {
+    return { valid: false, reason: violations.join('; '), violations };
+  }
+  return { valid: true, reason: null, violations: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -223,7 +232,7 @@ export function isFileAllowed(filePath: string, policy: ScopePolicy): boolean {
   // Check allowed paths (empty = everything allowed)
   if (policy.allowed_paths.length > 0) {
     return policy.allowed_paths.some(glob =>
-      minimatch(filePath, glob, { dot: true }),
+      minimatch(filePath, normalizeAllowedGlob(glob), { dot: true }),
     );
   }
 
@@ -264,19 +273,33 @@ export const CATEGORY_TOOL_POLICIES: Record<string, CategoryToolPolicy> = {
     auto_approve_patterns: [
       'Read(*)', 'Glob(*)', 'Grep(*)',
       'Edit(*.test.*)', 'Edit(*.spec.*)', 'Edit(*__tests__*)',
+      'Edit(test_*)', 'Edit(*_test.go)', 'Edit(*_test.py)', 'Edit(*Test.java)',
       'Write(*.test.*)', 'Write(*.spec.*)', 'Write(*__tests__*)',
+      'Write(test_*)', 'Write(*_test.go)', 'Write(*_test.py)', 'Write(*Test.java)',
       'Bash(npm test*)', 'Bash(npx vitest*)', 'Bash(npx jest*)', 'Bash(npx tsc*)',
+      'Bash(pytest*)', 'Bash(cargo test*)', 'Bash(go test*)', 'Bash(mvn test*)',
+      'Bash(./gradlew test*)', 'Bash(bundle exec rspec*)', 'Bash(mix test*)',
+      'Bash(dotnet test*)', 'Bash(swift test*)', 'Bash(make test*)',
+      'Bash(dart test*)', 'Bash(flutter test*)', 'Bash(sbt test*)',
+      'Bash(stack test*)', 'Bash(cabal test*)', 'Bash(zig build test*)',
+      'Bash(ctest*)', 'Bash(phpunit*)',
       'Bash(git diff*)', 'Bash(git status*)',
     ],
-    constraint_note: 'This is a **test** ticket. You may ONLY edit test files (*.test.*, *.spec.*, __tests__/**). Do NOT modify production source code.',
+    constraint_note: 'This is a **test** ticket. You may ONLY edit test files (*.test.*, *.spec.*, __tests__/**, test_*.py, *_test.go, *Test.java, etc.). Do NOT modify production source code.',
   },
   security: {
     auto_approve_patterns: [
       'Read(*)', 'Glob(*)', 'Grep(*)', 'Edit(*)', 'Write(*)',
       'Bash(npm test*)', 'Bash(npx vitest*)', 'Bash(npx tsc*)',
+      'Bash(pytest*)', 'Bash(cargo test*)', 'Bash(go test*)', 'Bash(mvn test*)',
+      'Bash(./gradlew test*)', 'Bash(make test*)',
+      'Bash(dart test*)', 'Bash(flutter test*)', 'Bash(sbt test*)',
+      'Bash(stack test*)', 'Bash(cabal test*)', 'Bash(zig build test*)',
+      'Bash(ctest*)', 'Bash(dotnet test*)', 'Bash(swift test*)',
+      'Bash(mix test*)', 'Bash(bundle exec rspec*)', 'Bash(phpunit*)',
       'Bash(git diff*)', 'Bash(git status*)',
     ],
-    constraint_note: 'This is a **security** ticket. You have full read/edit access but MUST NOT run `npm install`, `npm add`, or install any new dependencies. Do NOT run arbitrary shell commands beyond testing and type-checking.',
+    constraint_note: 'This is a **security** ticket. You have full read/edit access but MUST NOT install new dependencies (`npm install`, `pip install`, `cargo add`, `go get`, `bundle add`, `composer require`, etc.). Do NOT run arbitrary shell commands beyond testing and type-checking.',
   },
 };
 
@@ -307,7 +330,26 @@ export function isCategoryFileAllowed(filePath: string, category: string | null)
 
   const CATEGORY_FILE_PATTERNS: Record<string, string[]> = {
     docs: ['*.md', '*.mdx', '*.txt', '*.rst', '**/*.md', '**/*.mdx', '**/*.txt', '**/*.rst'],
-    test: ['*.test.*', '*.spec.*', '**/*.test.*', '**/*.spec.*', '**/__tests__/**', '__tests__/**'],
+    test: [
+      // JS/TS
+      '*.test.*', '*.spec.*', '**/*.test.*', '**/*.spec.*', '**/__tests__/**', '__tests__/**',
+      // Python
+      'test_*', '**/test_*', '*_test.py', '**/*_test.py', '**/tests/**', 'tests/**', '**/conftest.py',
+      // Go
+      '*_test.go', '**/*_test.go',
+      // Rust (tests/ dir)
+      'tests/**', '**/tests/**',
+      // Java/Kotlin
+      '*Test.java', '**/*Test.java', '*Test.kt', '**/*Test.kt', '**/src/test/**',
+      // Ruby
+      '*_spec.rb', '**/*_spec.rb', '**/spec/**',
+      // Elixir
+      '*_test.exs', '**/*_test.exs',
+      // Swift
+      '*Tests.swift', '**/*Tests.swift',
+      // PHP
+      '*Test.php', '**/*Test.php',
+    ],
   };
 
   const patterns = CATEGORY_FILE_PATTERNS[category];

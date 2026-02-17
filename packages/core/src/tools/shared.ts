@@ -108,7 +108,11 @@ export const BUILTIN_TOOL_SPECS: ToolSpec[] = [
   {
     name: 'Edit:test',
     description: 'Edit test files only',
-    approve_patterns: ['Edit(*.test.*)', 'Edit(*.spec.*)', 'Edit(*__tests__*)'],
+    approve_patterns: [
+      'Edit(*.test.*)', 'Edit(*.spec.*)', 'Edit(*__tests__*)',
+      'Edit(test_*)', 'Edit(*_test.go)', 'Edit(*_test.py)', 'Edit(*Test.java)', 'Edit(*Test.kt)',
+      'Edit(*_test.exs)', 'Edit(*Tests.swift)', 'Edit(*_spec.rb)',
+    ],
     phase_access: ['EXECUTE'],
     trust_levels: ALL_TRUST,
     category_access: ['test'],
@@ -116,7 +120,11 @@ export const BUILTIN_TOOL_SPECS: ToolSpec[] = [
   {
     name: 'Write:test',
     description: 'Write test files only',
-    approve_patterns: ['Write(*.test.*)', 'Write(*.spec.*)', 'Write(*__tests__*)'],
+    approve_patterns: [
+      'Write(*.test.*)', 'Write(*.spec.*)', 'Write(*__tests__*)',
+      'Write(test_*)', 'Write(*_test.go)', 'Write(*_test.py)', 'Write(*Test.java)', 'Write(*Test.kt)',
+      'Write(*_test.exs)', 'Write(*Tests.swift)', 'Write(*_spec.rb)',
+    ],
     phase_access: ['EXECUTE'],
     trust_levels: ALL_TRUST,
     category_access: ['test'],
@@ -126,7 +134,31 @@ export const BUILTIN_TOOL_SPECS: ToolSpec[] = [
   {
     name: 'Bash:test',
     description: 'Run tests and type checks',
-    approve_patterns: ['Bash(npm test*)', 'Bash(npx vitest*)', 'Bash(npx jest*)', 'Bash(npx tsc*)'],
+    approve_patterns: [
+      // JS/TS
+      'Bash(npm test*)', 'Bash(npx vitest*)', 'Bash(npx jest*)', 'Bash(npx tsc*)',
+      'Bash(yarn test*)', 'Bash(pnpm test*)', 'Bash(bun test*)',
+      // Python
+      'Bash(pytest*)', 'Bash(python -m pytest*)', 'Bash(tox*)', 'Bash(python -m unittest*)',
+      // Rust
+      'Bash(cargo test*)', 'Bash(cargo check*)', 'Bash(cargo clippy*)',
+      // Go
+      'Bash(go test*)', 'Bash(go vet*)',
+      // Java/Kotlin
+      'Bash(mvn test*)', 'Bash(./gradlew test*)', 'Bash(gradle test*)',
+      // Ruby
+      'Bash(bundle exec rspec*)', 'Bash(bundle exec rake test*)',
+      // Elixir
+      'Bash(mix test*)',
+      // .NET
+      'Bash(dotnet test*)',
+      // PHP
+      'Bash(./vendor/bin/phpunit*)', 'Bash(phpunit*)',
+      // Swift
+      'Bash(swift test*)',
+      // Make
+      'Bash(make test*)', 'Bash(make check*)',
+    ],
     phase_access: ['EXECUTE', 'QA'],
     trust_levels: ALL_TRUST,
     category_access: null,
@@ -170,7 +202,7 @@ export const BUILTIN_TOOL_SPECS: ToolSpec[] = [
     phase_access: ['EXECUTE'],
     trust_levels: ALL_TRUST,
     category_access: ['security'],
-    constraint_note: 'This is a **security** ticket. You have full read/edit access but MUST NOT run `npm install`, `npm add`, or install any new dependencies. Do NOT run arbitrary shell commands beyond testing and type-checking.',
+    constraint_note: 'This is a **security** ticket. You have full read/edit access but MUST NOT install new dependencies (`npm install`, `pip install`, `cargo add`, `go get`, `bundle add`, `composer require`, etc.). Do NOT run arbitrary shell commands beyond testing and type-checking.',
   },
 ];
 

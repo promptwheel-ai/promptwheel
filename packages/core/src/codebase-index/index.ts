@@ -122,7 +122,7 @@ export function buildCodebaseIndex(
   }
 
   function walkForModules(dir: string, depth: number): void {
-    if (modules.length >= 50) return;
+    if (modules.length >= 80) return;
 
     let entries: fs.Dirent[];
     try {
@@ -149,7 +149,7 @@ export function buildCodebaseIndex(
     // Register this dir as a module if it has source files
     if (sourceFiles.length > 0 && depth > 0) {
       const relPath = path.relative(projectRoot, dir);
-      if (relPath && modules.length < 50) {
+      if (relPath && modules.length < 80) {
         // Placeholder — classified after import scanning (Step 2)
         modules.push({
           path: relPath,
@@ -164,9 +164,9 @@ export function buildCodebaseIndex(
     }
 
     // Recurse into subdirs (up to depth 2)
-    if (depth < 2) {
+    if (depth < 3) {
       for (const sub of subdirs) {
-        if (modules.length >= 50) break;
+        if (modules.length >= 80) break;
         walkForModules(path.join(dir, sub.name), depth + 1);
       }
     }
@@ -195,9 +195,12 @@ export function buildCodebaseIndex(
         sampledFileMtimes[relFile] = fs.statSync(filePath).mtimeMs;
 
         const fd = fs.openSync(filePath, 'r');
-        const buf = Buffer.alloc(4096); // ~50 lines worth
+        const buf = Buffer.alloc(4096);
         const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
         fs.closeSync(fd);
+        // Skip binary files (check for null bytes in first 512 bytes of actual content)
+        const checkLen = Math.min(bytesRead, 512);
+        if (checkLen > 0 && buf.subarray(0, checkLen).indexOf(0) !== -1) continue;
         const content = buf.toString('utf8', 0, bytesRead);
         // Trim to ~50 lines
         const lines = content.split('\n').slice(0, 50).join('\n');
@@ -285,7 +288,8 @@ export function buildCodebaseIndex(
       if (largeFiles.length >= 20) break;
       try {
         const stat = fs.statSync(filePath);
-        const estimatedLines = Math.round(stat.size / 40);
+        // Heuristic: ~45 bytes/line for code (accounts for indentation)
+        const estimatedLines = Math.round(stat.size / 45);
         if (estimatedLines > 300) {
           largeFiles.push({
             path: path.relative(projectRoot, filePath),
@@ -304,11 +308,23 @@ export function buildCodebaseIndex(
   const entrypointNames = [
     'index.ts', 'index.js', 'main.ts', 'main.js',
     'app.ts', 'app.js', 'server.ts', 'server.js',
-    'main.py', 'app.py', 'main.go', 'main.rs',
-    'index.php', 'main.swift', 'main.rb', 'main.ex',
+    'main.py', 'app.py', 'manage.py', 'wsgi.py',
+    'main.go',
+    'main.rs', 'lib.rs',
+    'index.php', 'artisan',
+    'main.swift',
+    'main.rb', 'config/application.rb',
+    'main.ex', 'lib.ex',
+    'main.dart', 'lib/main.dart',
+    'Main.java', 'Application.java',
+    'Program.cs', 'Main.cs',          // C#
+    'Main.scala',                      // Scala
+    'main.c', 'main.cpp',
+    'Main.hs',
+    'main.zig',
   ];
 
-  const searchDirs = [projectRoot, path.join(projectRoot, 'src')];
+  const searchDirs = [projectRoot, path.join(projectRoot, 'src'), path.join(projectRoot, 'cmd')];
   for (const dir of searchDirs) {
     for (const name of entrypointNames) {
       if (entrypoints.length >= 10) break;

@@ -27,7 +27,7 @@ export { scanFiles, batchFiles, batchFilesByTokens, batchFilesByModule, estimate
 /**
  * Default verification commands — used only when the scout returns none.
  */
-const DEFAULT_VERIFICATION_COMMANDS: string[] = ['npm run build'];
+const DEFAULT_VERIFICATION_COMMANDS: string[] = [];
 
 /**
  * Expand allowed paths for test proposals to include test file locations

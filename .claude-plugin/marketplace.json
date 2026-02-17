@@ -10,7 +10,7 @@
     {
       "name": "blockspool",
       "description": "Continuous codebase improvement — scouts improvements, executes in parallel, batches into milestone PRs",
-      "version": "0.5.63",
+      "version": "0.6.0",
       "author": {
         "name": "BlockSpool",
         "email": "support@blockspool.com"
@@ -23,7 +23,15 @@
         "./skills/run",
         "./skills/status",
         "./skills/nudge",
-        "./skills/cancel"
+        "./skills/cancel",
+        "./skills/analytics",
+        "./skills/audit",
+        "./skills/heal",
+        "./skills/trajectory",
+        "./skills/formulas",
+        "./skills/history",
+        "./skills/scout",
+        "./skills/guidelines"
       ]
     }
   ]

@@ -163,7 +163,7 @@ interface RawStep {
   measure?: { cmd?: string; target?: number; direction?: string };
 }
 
-function validateAndBuild(raw: { name: string; description: string; steps: unknown[] }): Trajectory {
+export function validateAndBuild(raw: { name: string; description: string; steps: unknown[] }): Trajectory {
   const steps: TrajectoryStep[] = (raw.steps as RawStep[]).map((s) => ({
     id: String(s.id || '').replace(/[^a-z0-9-]/gi, '-').toLowerCase(),
     title: String(s.title || ''),

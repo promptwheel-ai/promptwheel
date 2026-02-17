@@ -28,19 +28,12 @@ import type {
 } from './types.js';
 import { TERMINAL_PHASES } from './types.js';
 import { deriveScopePolicy } from './scope-policy.js';
-import { getRegistry } from './tool-registry.js';
 import { checkSpindle, getFileEditWarnings } from './spindle.js';
 import { loadFormula } from './formulas.js';
-import type { Formula } from './formulas.js';
 import { loadGuidelines, formatGuidelinesForPrompt } from './guidelines.js';
 import { detectProjectMetadata, formatMetadataForPrompt } from './project-metadata.js';
 import { formatIndexForPrompt, refreshCodebaseIndex, hasStructuralChanges } from './codebase-index.js';
 import { buildProposalReviewPrompt, type ValidatedProposal } from './proposals.js';
-import {
-  selectRelevant,
-  formatLearningsForPrompt,
-  recordAccess,
-} from './learnings.js';
 import { loadDedupMemory, formatDedupForPrompt } from './dedup-memory.js';
 import {
   computeRetryRisk,
@@ -48,135 +41,38 @@ import {
   buildCriticBlock,
   buildPlanRejectionCriticBlock,
 } from '@blockspool/core/critic/shared';
-import type { AdaptiveRiskAssessment } from '@blockspool/core/learnings/shared';
 import {
   pickNextSector as pickNextSectorCore,
   computeCoverage as computeCoverageCore,
   buildSectorSummary as buildSectorSummaryCore,
 } from '@blockspool/core/sectors/shared';
-import type { SectorState } from '@blockspool/core/sectors/shared';
 import {
-  type Trajectory,
-  type TrajectoryState,
-  parseTrajectoryYaml,
   getNextStep as getTrajectoryNextStep,
   formatTrajectoryForPrompt,
 } from '@blockspool/core/trajectory/shared';
+import {
+  buildScoutPrompt,
+  buildScoutEscalation,
+  buildPlanPrompt,
+  buildExecutePrompt,
+  buildQaPrompt,
+  buildPrPrompt,
+  buildInlineTicketPrompt,
+} from './advance-prompts.js';
+import {
+  loadTrajectoryData,
+  loadSectorsState,
+  buildLearningsBlock,
+  buildRiskContextBlock,
+  getScoutAutoApprove,
+  getExecuteAutoApprove,
+  getQaAutoApprove,
+  getPrAutoApprove,
+} from './advance-helpers.js';
 
 const MAX_PLAN_REJECTIONS = 3;
 const MAX_QA_RETRIES = EXECUTION_DEFAULTS.MAX_QA_RETRIES;
 const MAX_SPINDLE_RECOVERIES = 3;
-const DEFAULT_LEARNINGS_BUDGET = 2000;
-
-/** Load trajectory state from project root — returns null if missing/invalid. */
-function loadTrajectoryData(rootPath: string): { trajectory: Trajectory; state: TrajectoryState } | null {
-  try {
-    const statePath = path.join(rootPath, '.blockspool', 'trajectory-state.json');
-    if (!fs.existsSync(statePath)) return null;
-    const trajState: TrajectoryState = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-    if (trajState.paused) return null;
-
-    const trajDir = path.join(rootPath, '.blockspool', 'trajectories');
-    if (!fs.existsSync(trajDir)) return null;
-
-    const files = fs.readdirSync(trajDir).filter(f => f.endsWith('.yaml') || f.endsWith('.yml'));
-    for (const file of files) {
-      const content = fs.readFileSync(path.join(trajDir, file), 'utf8');
-      const traj = parseTrajectoryYaml(content);
-      if (traj.name === trajState.trajectoryName && traj.steps.length > 0) {
-        return { trajectory: traj, state: trajState };
-      }
-    }
-  } catch {
-    // Non-fatal
-  }
-  return null;
-}
-
-/** Load sectors.json from project root — returns null if missing/invalid. */
-function loadSectorsState(rootPath: string): SectorState | null {
-  try {
-    const filePath = path.join(rootPath, '.blockspool', 'sectors.json');
-    if (!fs.existsSync(filePath)) return null;
-    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    if (data?.version !== 2 || !Array.isArray(data.sectors)) return null;
-    return data as SectorState;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Build a learnings block for prompt injection. Tracks injected IDs in state.
- * Uses cached learnings from RunState (loaded at session start) to avoid redundant file I/O.
- */
-function buildLearningsBlock(
-  run: RunManager,
-  contextPaths: string[],
-  contextCommands: string[],
-): string {
-  const s = run.require();
-  if (!s.learnings_enabled) return '';
-
-  const projectPath = run.rootPath;
-
-  // Use cached learnings from session start (decay already applied)
-  const allLearnings = s.cached_learnings;
-  if (allLearnings.length === 0) return '';
-
-  const relevant = selectRelevant(allLearnings, { paths: contextPaths, commands: contextCommands });
-  const budget = DEFAULT_LEARNINGS_BUDGET;
-  const block = formatLearningsForPrompt(relevant, budget);
-  if (!block) return '';
-
-  // Track which learnings were injected
-  const injectedIds = relevant
-    .filter(l => block.includes(l.text))
-    .map(l => l.id);
-  s.injected_learning_ids = [...new Set([...s.injected_learning_ids, ...injectedIds])];
-
-  // Record access
-  if (injectedIds.length > 0) {
-    recordAccess(projectPath, injectedIds);
-  }
-
-  return block + '\n\n';
-}
-
-/**
- * Build a risk context block for prompts when adaptive trust detects elevated/high risk.
- * Returns empty string for low/normal risk.
- */
-function buildRiskContextBlock(riskAssessment: AdaptiveRiskAssessment | undefined): string {
-  if (!riskAssessment) return '';
-  if (riskAssessment.level === 'low' || riskAssessment.level === 'normal') return '';
-
-  const lines = [
-    '<risk-context>',
-    `## Adaptive Risk: ${riskAssessment.level.toUpperCase()} (score: ${riskAssessment.score})`,
-    '',
-  ];
-
-  if (riskAssessment.fragile_paths.length > 0) {
-    lines.push('### Known Fragile Paths');
-    for (const fp of riskAssessment.fragile_paths.slice(0, 5)) {
-      lines.push(`- \`${fp}\``);
-    }
-    lines.push('');
-  }
-
-  if (riskAssessment.known_issues.length > 0) {
-    lines.push('### Known Issues in These Files');
-    for (const issue of riskAssessment.known_issues) {
-      lines.push(`- ${issue}`);
-    }
-    lines.push('');
-  }
-
-  lines.push('**Be extra careful** — these files have a history of failures. Consider smaller changes and more thorough testing.');
-  lines.push('</risk-context>');
-  return lines.join('\n') + '\n\n';
-}
 
 export interface AdvanceContext {
   run: RunManager;
@@ -301,25 +197,6 @@ export async function advance(ctx: AdvanceContext): Promise<AdvanceResponse> {
 // Phase handlers
 // ---------------------------------------------------------------------------
 
-// Auto-approve patterns are now served by the ToolRegistry.
-// Legacy arrays removed — use getRegistry().getAutoApprovePatterns() instead.
-
-function getScoutAutoApprove(): string[] {
-  return getRegistry().getAutoApprovePatterns({ phase: 'SCOUT', category: null });
-}
-
-function getExecuteAutoApprove(category: string | null): string[] {
-  return getRegistry().getAutoApprovePatterns({ phase: 'EXECUTE', category });
-}
-
-function getQaAutoApprove(): string[] {
-  return getRegistry().getAutoApprovePatterns({ phase: 'QA', category: null });
-}
-
-function getPrAutoApprove(): string[] {
-  return getRegistry().getAutoApprovePatterns({ phase: 'PR', category: null });
-}
-
 async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
   const { run, db } = ctx;
   const s = run.require();
@@ -407,17 +284,20 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
   }
 
   // Sector rotation: use core pickNextSector for full 9-tiebreaker sort
-  try {
-    const sectorsState = loadSectorsState(ctx.project.rootPath);
-    if (sectorsState) {
-      const picked = pickNextSectorCore(sectorsState, s.scout_cycles);
-      if (picked) {
-        s.scope = picked.scope;
-        s.selected_sector_path = picked.sector.path;
+  // Skip when a trajectory is active — trajectory scope takes priority
+  if (!s.active_trajectory) {
+    try {
+      const sectorsState = loadSectorsState(ctx.project.rootPath);
+      if (sectorsState) {
+        const picked = pickNextSectorCore(sectorsState, s.scout_cycles);
+        if (picked) {
+          s.scope = picked.scope;
+          s.selected_sector_path = picked.sector.path;
+        }
       }
+    } catch (err) {
+      run.appendEvent('SECTOR_ROTATION_FAILED', { error: err instanceof Error ? err.message : String(err) });
     }
-  } catch {
-    // Non-fatal — fall through to existing scope
   }
 
   // Build codebase index block — use cycles + retries so retries advance the chunk
@@ -441,8 +321,8 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
       sectorPercent = metrics.sectorPercent;
       sectorSummary = buildSectorSummaryCore(sectorsState, s.selected_sector_path ?? '');
     }
-  } catch {
-    // Non-fatal
+  } catch (err) {
+    console.warn(`[blockspool] Sector summary failed: ${err instanceof Error ? err.message : String(err)}`);
   }
   const coverageCtx = cov.sectors_total > 0
     ? { scannedSectors: cov.sectors_scanned, totalSectors: cov.sectors_total, percent: cov.percent, sectorPercent, sectorSummary }
@@ -466,8 +346,8 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
         }
       }
     }
-  } catch {
-    // Non-fatal
+  } catch (err) {
+    console.warn(`[blockspool] Trajectory load failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   const prompt = guidelinesBlock + metadataBlock + indexBlock + dedupBlock + trajectoryBlock + learningsBlock + escalationBlock + buildScoutPrompt(s.scope, s.categories, s.min_confidence,
@@ -494,6 +374,15 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
 async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> {
   const { run, db } = ctx;
   const s = run.require();
+
+  // Dry-run mode — stop after scouting, don't execute tickets
+  if (s.dry_run) {
+    run.setPhase('DONE');
+    return stopResponse(run, 'DONE', 'Dry-run mode — scout complete, no tickets executed.');
+  }
+
+  // Ensure learnings are loaded for scope policy derivation
+  run.ensureLearningsLoaded();
 
   // Check if we've hit PR limit (only when creating PRs)
   if (s.create_prs && s.prs_created >= s.max_prs) {
@@ -580,14 +469,18 @@ async function advanceNextTicket(ctx: AdvanceContext): Promise<AdvanceResponse> 
         const configData = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
         setupCommand = configData.setup;
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      console.warn(`[blockspool] Failed to read config.json: ${err instanceof Error ? err.message : String(err)}`);
+    }
     try {
       const baselinePath = path.join(ctx.project.rootPath, '.blockspool', 'qa-baseline.json');
       if (fs.existsSync(baselinePath)) {
         const data = JSON.parse(fs.readFileSync(baselinePath, 'utf-8'));
         baselineFailures = data.failures ?? [];
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      console.warn(`[blockspool] Failed to read qa-baseline.json: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     for (const pt of parallelTickets) {
       const ticket = readyTickets.find(t => t.id === pt.ticket_id)!;
@@ -865,11 +758,19 @@ async function advanceQa(ctx: AdvanceContext): Promise<AdvanceResponse> {
     return advance(ctx);
   }
 
-  const learningsBlock = buildLearningsBlock(run, [], ticket.verificationCommands ?? []);
+  // Merge session-level qa_commands with ticket verification commands
+  const ticketCommands = ticket.verificationCommands ?? [];
+  const sessionQaCommands = s.qa_commands ?? [];
+  const allCommands = [...new Set([...ticketCommands, ...sessionQaCommands])];
+  const qaTicket = allCommands.length !== ticketCommands.length
+    ? { ...ticket, verificationCommands: allCommands }
+    : ticket;
+
+  const learningsBlock = buildLearningsBlock(run, [], allCommands);
   const crossVerifyPreamble = s.cross_verify
     ? '## IMPORTANT — Independent Verification\n\nYou are verifying work as an INDEPENDENT verifier. Do NOT trust any prior claims of success. Run ALL commands yourself and report results honestly.\n\n'
     : '';
-  const prompt = crossVerifyPreamble + learningsBlock + buildQaPrompt(ticket);
+  const prompt = crossVerifyPreamble + learningsBlock + buildQaPrompt(qaTicket);
 
   return promptResponse(run, 'QA', prompt,
     `Running QA for: ${ticket.title} (attempt ${s.qa_retries + 1}/${MAX_QA_RETRIES})`, {
@@ -878,7 +779,7 @@ async function advanceQa(ctx: AdvanceContext): Promise<AdvanceResponse> {
       denied_patterns: [],
       max_files: 0,
       max_lines: 0,
-      required_commands: ticket.verificationCommands ?? [],
+      required_commands: allCommands,
       plan_required: false,
       auto_approve_patterns: getQaAutoApprove(),
     });
@@ -907,8 +808,21 @@ async function advancePr(ctx: AdvanceContext): Promise<AdvanceResponse> {
     });
 }
 
+/** Max session-level steps a worker can go without progress before timeout */
+const WORKER_STALL_THRESHOLD = 50;
+
 async function advanceParallelExecute(ctx: AdvanceContext): Promise<AdvanceResponse> {
   const { run } = ctx;
+  const s = run.require();
+
+  // Timeout check: fail workers that haven't made progress
+  for (const [id, w] of Object.entries(s.ticket_workers)) {
+    const stalledFor = s.step_count - (w.last_active_at_step ?? 0);
+    if (stalledFor >= WORKER_STALL_THRESHOLD) {
+      run.appendEvent('WORKER_TIMEOUT', { ticket_id: id, stalled_for: stalledFor });
+      run.failTicketWorker(id, `Worker timeout: no progress for ${stalledFor} steps`);
+    }
+  }
 
   // Check if all ticket workers are done
   if (run.allWorkersComplete()) {
@@ -916,8 +830,7 @@ async function advanceParallelExecute(ctx: AdvanceContext): Promise<AdvanceRespo
     return advance(ctx);
   }
 
-  // Workers still active — return status (shouldn't happen if plugin waits properly)
-  const s = run.require();
+  // Workers still active — return status
   const activeWorkers = Object.entries(s.ticket_workers).map(([id, w]) => ({
     ticket_id: id,
     phase: w.phase,
@@ -1011,534 +924,4 @@ function terminalReason(phase: Phase): string {
     case 'FAILED_SPINDLE': return 'Loop detected by spindle';
     default: return 'Terminal state';
   }
-}
-
-// ---------------------------------------------------------------------------
-// Prompt builders
-// ---------------------------------------------------------------------------
-
-function buildScoutEscalation(
-  retryCount: number,
-  explorationLog: string[],
-  scoutedDirs: string[],
-  codebaseIndex: import('./codebase-index.js').CodebaseIndex | null,
-): string {
-  const parts = [
-    '## Previous Attempts Found Nothing — Fresh Approach Required',
-    '',
-  ];
-
-  if (explorationLog.length > 0) {
-    parts.push('### What Was Already Tried');
-    for (const entry of explorationLog) {
-      parts.push(entry);
-    }
-    parts.push('');
-  }
-
-  // Suggest unexplored modules from codebase index
-  const exploredSet = new Set(scoutedDirs.map(d => d.replace(/\/$/, '')));
-  const unexplored: string[] = [];
-  if (codebaseIndex) {
-    for (const mod of codebaseIndex.modules) {
-      if (!exploredSet.has(mod.path) && !exploredSet.has(mod.path + '/')) {
-        unexplored.push(mod.path);
-      }
-    }
-  }
-
-  parts.push('### What to Do Differently');
-  parts.push('');
-  parts.push('Knowing everything from the attempts above, take a completely different angle:');
-  parts.push('- Do NOT re-read the directories listed above.');
-  if (unexplored.length > 0) {
-    parts.push(`- Try unexplored areas: ${unexplored.slice(0, 8).map(d => `\`${d}\``).join(', ')}`);
-  }
-  parts.push('- Switch categories: if you looked for bugs, look for tests. If tests, try security.');
-  parts.push('- Read at least 15 NEW source files.');
-  parts.push('- If genuinely nothing to improve, explain your analysis across all attempts.');
-
-  return parts.join('\n');
-}
-
-function buildScoutPrompt(
-  scope: string,
-  categories: string[],
-  minConfidence: number,
-  maxProposals: number,
-  dedupContext: string[],
-  formula: Formula | null,
-  hints: string[],
-  eco: boolean,
-  minImpactScore: number = 3,
-  scoutedDirs: string[] = [],
-  excludeDirs: string[] = [],
-  coverageContext?: { scannedSectors: number; totalSectors: number; percent: number; sectorPercent?: number; sectorSummary?: string },
-): string {
-  const parts = [
-    '# Scout Phase',
-    '',
-    'Identify improvements by reading source code. Return proposals in a `<proposals>` XML block containing a JSON array.',
-    '',
-    ...(!eco ? ['**IMPORTANT:** Do not use the Task or Explore tools. Read files directly using Read, Glob, and Grep. Do not delegate to subagents.', ''] : []),
-    '## How to Scout',
-    '',
-    'STEP 1 — Discover: Use Glob to list all files in scope. Group them by directory or module (e.g. `src/auth/`, `src/api/`, `lib/utils/`). Identify entry points, core logic, and test directories.',
-    '',
-    'STEP 2 — Pick a Partition: Choose one or two directories/modules to analyze deeply this cycle. Do NOT try to skim everything — go deep on a focused slice. On future cycles, different partitions will be explored.',
-    '',
-    'STEP 3 — Read & Analyze: Use Read to open 10-15 source files within your chosen partition(s). Read related files together (e.g. a module and its tests, a handler and its helpers). For each file, look for:',
-    '  - Bugs, incorrect logic, off-by-one errors',
-    '  - Missing error handling or edge cases',
-    '  - Missing or inadequate tests for the code you read',
-    '  - Security issues (injection, auth bypass, secrets in code)',
-    '  - Performance problems (N+1 queries, unnecessary re-renders, blocking I/O)',
-    '  - Dead code, unreachable branches',
-    '  - Meaningful refactoring opportunities (not cosmetic)',
-    '',
-    'STEP 4 — Propose: Only after reading source files, write proposals with specific file paths and line-level detail.',
-    '',
-    'DO NOT run lint or typecheck commands as a substitute for reading code.',
-    'DO NOT propose changes unless you have READ the files you are proposing to change.',
-    '',
-    `**Scope:** \`${scope}\``,
-    `**Categories:** ${categories.join(', ')}`,
-    `**Min confidence:** ${minConfidence}`,
-    `**Min impact score:** ${minImpactScore} (proposals below this will be rejected)`,
-    `**Max proposals:** ${maxProposals}`,
-    '',
-    '**DO NOT propose changes to these files** (read-only context): CLAUDE.md, .claude/**',
-    ...(excludeDirs.length > 0 ? [
-      `**Skip these directories when scouting** (build artifacts, vendor, generated): ${excludeDirs.map(d => `\`${d}\``).join(', ')}`,
-    ] : []),
-    '',
-    ...(coverageContext ? [
-      `## Coverage Context`,
-      '',
-      `Overall codebase coverage: ${coverageContext.scannedSectors}/${coverageContext.totalSectors} sectors scanned (${coverageContext.sectorPercent ?? coverageContext.percent}% of sectors, ${coverageContext.percent}% of files).`,
-      ...(coverageContext.percent < 50 ? ['Many sectors remain unscanned. Focus on high-impact issues rather than minor cleanups.'] : []),
-      ...(coverageContext.sectorSummary ? ['', coverageContext.sectorSummary] : []),
-      '',
-    ] : []),
-    '## Quality Bar',
-    '',
-    '- Proposals must have **real user or developer impact** — not just lint cleanup or style nits.',
-    '- Do NOT propose fixes for lint warnings, unused variables, or cosmetic issues unless they cause actual bugs or test failures.',
-    '- If project guidelines are provided above, **respect them**. Do NOT propose changes the guidelines explicitly discourage (e.g., "avoid over-engineering", "don\'t change code you didn\'t touch").',
-    '- Focus on: bugs, security issues, performance problems, correctness, and meaningful refactors.',
-    '',
-    '## Category Rules',
-    '',
-    '- Any proposal that creates new test files (.test.ts, .spec.ts) or adds test coverage MUST use category "test" — NEVER label test-writing as "fix", "refactor", or any other category.',
-    '- If "test" is not in the categories list above, do NOT propose writing new tests. Focus on the allowed categories only.',
-    '- If "test" IS allowed, you may generate test proposals freely.',
-    '',
-  ];
-
-  if (scoutedDirs.length > 0) {
-    parts.push('## Already Explored (prefer unexplored directories)');
-    parts.push('');
-    parts.push('These directories were analyzed in previous scout cycles. Prefer exploring different areas first:');
-    for (const dir of scoutedDirs) {
-      parts.push(`- \`${dir}\``);
-    }
-    parts.push('');
-  }
-
-  if (dedupContext.length > 0) {
-    parts.push('**Already completed (do not duplicate):**');
-    for (const title of dedupContext) {
-      parts.push(`- ${title}`);
-    }
-    parts.push('');
-  }
-
-  if (formula) {
-    parts.push(`**Formula:** ${formula.name} — ${formula.description}`);
-    if (formula.prompt) {
-      parts.push('');
-      parts.push('**Formula instructions:**');
-      parts.push(formula.prompt);
-    }
-    if (formula.risk_tolerance) {
-      parts.push(`**Risk tolerance:** ${formula.risk_tolerance}`);
-    }
-    parts.push('');
-  }
-
-  if (hints.length > 0) {
-    parts.push('**Hints from user:**');
-    for (const hint of hints) {
-      parts.push(`- ${hint}`);
-    }
-    parts.push('');
-  }
-
-  parts.push(
-    '## Required Fields',
-    '',
-    'Each proposal in the JSON array MUST include ALL of these fields:',
-    '- `category` (string): one of the categories listed above',
-    '- `title` (string): concise, unique title',
-    '- `description` (string): what needs to change and why',
-    '- `acceptance_criteria` (string[]): how to verify the change is correct',
-    '- `verification_commands` (string[]): commands to run (e.g. `npm test`)',
-    '- `allowed_paths` (string[]): file paths/globs this change may touch',
-    '- `files` (string[]): specific files to modify',
-    '- `confidence` (number 0-100): how confident you are this is correct',
-    '- `impact_score` (number 1-10): how much this matters',
-    '- `risk` (string): "low", "medium", or "high"',
-    '- `touched_files_estimate` (number): expected number of files changed',
-    '- `rollback_note` (string): how to revert if something goes wrong',
-    '',
-    '## Scoring',
-    '',
-    'Proposals are ranked by `impact_score × confidence`. Prefer low-risk proposals.',
-    '',
-    '## Output',
-    '',
-    'Wrap the JSON array in a `<proposals>` XML block:',
-    '```',
-    '<proposals>',
-    '[{ ... }, { ... }]',
-    '</proposals>',
-    '```',
-    '',
-    'Then call `blockspool_ingest_event` with type `SCOUT_OUTPUT` and payload:',
-    '`{ "proposals": [...], "explored_dirs": ["src/auth/", "src/api/"] }`',
-    '',
-    'The `explored_dirs` field should list the top-level directories you analyzed (e.g. `src/services/`, `lib/utils/`). This is used to rotate to unexplored areas in future cycles.',
-  );
-
-  if (coverageContext) {
-    parts.push('');
-    parts.push('If this sector appears misclassified (e.g., labeled as production but contains only tests/config/generated code, or vice versa), include in the SCOUT_OUTPUT payload:');
-    parts.push('`"sector_reclassification": { "production": true/false, "confidence": "medium"|"high" }`');
-  }
-
-  return parts.join('\n');
-}
-
-function buildPlanPrompt(ticket: { title: string; description: string | null; allowedPaths: string[]; verificationCommands: string[]; category?: string | null }): string {
-  const constraintNote = getRegistry().getConstraintNote({ phase: 'EXECUTE', category: ticket.category ?? null });
-  const toolRestrictionLines = constraintNote
-    ? ['', '## Tool Restrictions', '', constraintNote, '']
-    : [''];
-
-  return [
-    '# Commit Plan Required',
-    '',
-    `**Ticket:** ${ticket.title}`,
-    '',
-    ticket.description ?? '',
-    '',
-    'Before making changes, output a `<commit-plan>` XML block with:',
-    '```json',
-    '{',
-    `  "ticket_id": "<ticket-id>",`,
-    '  "files_to_touch": [{"path": "...", "action": "create|modify|delete", "reason": "..."}],',
-    '  "expected_tests": ["npm test -- --grep ..."],',
-    '  "estimated_lines": <number>,',
-    '  "risk_level": "low|medium|high"',
-    '}',
-    '```',
-    '',
-    `**Allowed paths:** ${ticket.allowedPaths.length > 0 ? ticket.allowedPaths.join(', ') : 'any'}`,
-    `**Verification commands:** ${ticket.verificationCommands.join(', ') || 'none specified'}`,
-    ...toolRestrictionLines,
-    'Then call `blockspool_ingest_event` with type `PLAN_SUBMITTED` and the plan as payload.',
-  ].join('\n');
-}
-
-function buildExecutePrompt(
-  ticket: { title: string; description: string | null; allowedPaths: string[]; verificationCommands: string[]; category?: string | null },
-  plan: unknown,
-): string {
-  const parts = [
-    `# Execute: ${ticket.title}`,
-    '',
-    ticket.description ?? '',
-    '',
-  ];
-
-  if (plan) {
-    parts.push('## Approved Commit Plan');
-    parts.push('```json');
-    parts.push(JSON.stringify(plan, null, 2));
-    parts.push('```');
-    parts.push('');
-    parts.push('Follow the plan above. Only touch the files listed.');
-    parts.push('');
-  }
-
-  parts.push(
-    '## Constraints',
-    `- Only modify files in: ${ticket.allowedPaths.length > 0 ? ticket.allowedPaths.join(', ') : 'any'}`,
-    '- Make minimal, focused changes',
-    '',
-  );
-
-  const constraintNote = getRegistry().getConstraintNote({ phase: 'EXECUTE', category: ticket.category ?? null });
-  if (constraintNote) {
-    parts.push('## Tool Restrictions', '', constraintNote, '');
-  }
-
-  parts.push(
-    '## When done',
-    'Output a `<ticket-result>` block with status, changed_files, summary, lines_added, lines_removed.',
-    'Then call `blockspool_ingest_event` with type `TICKET_RESULT` and the result as payload.',
-  );
-
-  return parts.join('\n');
-}
-
-function buildQaPrompt(ticket: { title: string; verificationCommands: string[] }): string {
-  return [
-    `# QA: ${ticket.title}`,
-    '',
-    'Run the following verification commands and report results:',
-    '',
-    ...ticket.verificationCommands.map(c => `\`\`\`bash\n${c}\n\`\`\``),
-    '',
-    'For each command, call `blockspool_ingest_event` with type `QA_COMMAND_RESULT` and:',
-    '`{ "command": "...", "success": true/false, "output": "stdout+stderr" }`',
-    '',
-    'After all commands, call `blockspool_ingest_event` with type `QA_PASSED` if all pass, or `QA_FAILED` with failure details.',
-  ].join('\n');
-}
-
-function buildPlanningPreamble(ticket: { metadata?: Record<string, unknown> | null }): string {
-  const meta = ticket.metadata as Record<string, unknown> | null | undefined;
-  const confidence = typeof meta?.scoutConfidence === 'number' ? meta.scoutConfidence : undefined;
-  const complexity = typeof meta?.estimatedComplexity === 'string' ? meta.estimatedComplexity : undefined;
-  if ((confidence !== undefined && confidence < 50) || complexity === 'moderate' || complexity === 'complex') {
-    return [
-      '## Approach — This is a complex change',
-      '',
-      `The automated analysis flagged this as uncertain (confidence: ${confidence ?? '?'}%). Before writing code:`,
-      '1. Read all relevant files to understand the full context',
-      '2. Identify all touch points and potential side effects',
-      '3. Write out your implementation plan before making changes',
-      '4. Implement incrementally, verifying at each step',
-      '',
-    ].join('\n') + '\n';
-  }
-  return '';
-}
-
-/** Escape a string for use inside double-quoted shell arguments */
-function shellEscape(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/`/g, '\\`');
-}
-
-function buildInlineTicketPrompt(
-  ticket: { id: string; title: string; description: string | null; allowedPaths: string[]; verificationCommands: string[]; metadata?: Record<string, unknown> | null; category?: string | null },
-  constraints: AdvanceConstraints,
-  guidelinesBlock: string,
-  metadataBlock: string,
-  createPrs: boolean,
-  draft: boolean,
-  direct: boolean,
-  setupCommand?: string,
-  baselineFailures: string[] = [],
-): string {
-  const slug = ticket.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
-  const branch = `blockspool/${ticket.id}/${slug}`;
-  const worktree = `.blockspool/worktrees/${ticket.id}`;
-
-  const verifyBlock = constraints.required_commands.length > 0
-    ? constraints.required_commands.map(c => `\`\`\`bash\n${c}\n\`\`\``).join('\n')
-    : '```bash\nnpm test\n```';
-
-  const planningPreamble = buildPlanningPreamble(ticket);
-
-  // Build tool restriction block from registry
-  const inlineConstraintNote = getRegistry().getConstraintNote({ phase: 'EXECUTE', category: ticket.category ?? null });
-  const toolRestrictionBlock = inlineConstraintNote
-    ? ['## Tool Restrictions', '', inlineConstraintNote, '']
-    : [];
-
-  // Direct mode: simpler flow, edit in place, no worktrees
-  if (direct) {
-    return [
-      `# BlockSpool Ticket: ${ticket.title}`,
-      '',
-      planningPreamble,
-      guidelinesBlock,
-      metadataBlock,
-      ticket.description ?? '',
-      '',
-      '## Constraints',
-      '',
-      `- **Allowed paths:** ${constraints.allowed_paths.length > 0 ? constraints.allowed_paths.join(', ') : 'any'}`,
-      `- **Denied paths:** ${constraints.denied_paths.length > 0 ? constraints.denied_paths.join(', ') : 'none'}`,
-      `- **Max files:** ${constraints.max_files || 'unlimited'}`,
-      `- **Max lines:** ${constraints.max_lines || 'unlimited'}`,
-      '',
-      ...toolRestrictionBlock,
-      '## Step 1 — Implement the change',
-      '',
-      '- Read the relevant files first to understand the current state.',
-      '- Make minimal, focused changes that match the ticket description.',
-      '- Only modify files within the allowed paths.',
-      '- Follow any project guidelines provided above.',
-      '',
-      '## Step 2 — Verify',
-      '',
-      verifyBlock,
-      '',
-      ...(baselineFailures.length > 0 ? [
-        `**Pre-existing failures (IGNORE these — they were failing before your changes):** ${baselineFailures.join(', ')}`,
-        '',
-        'Only fix failures that are NEW — caused by your changes. If a command was already failing, do not try to fix it.',
-      ] : [
-        'If tests fail due to your changes, fix the issues and re-run.',
-      ]),
-      '',
-      '## Step 3 — Commit',
-      '',
-      '```bash',
-      'git add -A',
-      `git commit -m "${shellEscape(ticket.title)}"`,
-      '```',
-      '',
-      '## Output',
-      '',
-      'When done, output a summary in this exact format:',
-      '',
-      '```',
-      `TICKET_ID: ${ticket.id}`,
-      'STATUS: success | failed',
-      'PR_URL: none',
-      'BRANCH: (current)',
-      'SUMMARY: <one line summary of what was done>',
-      '```',
-      '',
-      'If anything goes wrong and you cannot complete the ticket, output STATUS: failed with a reason.',
-    ].join('\n');
-  }
-
-  // Worktree mode: isolated branches for parallel execution or PR workflow
-  return [
-    `# BlockSpool Ticket: ${ticket.title}`,
-    '',
-    planningPreamble,
-    guidelinesBlock,
-    metadataBlock,
-    ticket.description ?? '',
-    '',
-    '## Constraints',
-    '',
-    `- **Allowed paths:** ${constraints.allowed_paths.length > 0 ? constraints.allowed_paths.join(', ') : 'any'}`,
-    `- **Denied paths:** ${constraints.denied_paths.length > 0 ? constraints.denied_paths.join(', ') : 'none'}`,
-    `- **Max files:** ${constraints.max_files || 'unlimited'}`,
-    `- **Max lines:** ${constraints.max_lines || 'unlimited'}`,
-    '',
-    ...toolRestrictionBlock,
-    '## Step 1 — Set up worktree',
-    '',
-    '```bash',
-    `git worktree add ${worktree} -b ${branch}`,
-    '```',
-    '',
-    `All work MUST happen inside \`${worktree}/\`. Do NOT modify files in the main working tree.`,
-    '',
-    ...(setupCommand ? [
-      '```bash',
-      `cd ${worktree}`,
-      setupCommand,
-      '```',
-      '',
-      'Wait for setup to complete before proceeding. If setup fails, try to continue anyway.',
-      '',
-    ] : []),
-    '## Step 2 — Implement the change',
-    '',
-    '- Read the relevant files first to understand the current state.',
-    '- Make minimal, focused changes that match the ticket description.',
-    '- Only modify files within the allowed paths.',
-    '- Follow any project guidelines provided above.',
-    '',
-    '## Step 3 — Verify',
-    '',
-    'Run verification commands inside the worktree:',
-    '',
-    '```bash',
-    `cd ${worktree}`,
-    '```',
-    '',
-    verifyBlock,
-    '',
-    ...(baselineFailures.length > 0 ? [
-      `**Pre-existing failures (IGNORE these — they were failing before your changes):** ${baselineFailures.join(', ')}`,
-      '',
-      'Only fix failures that are NEW — caused by your changes. If a command was already failing, do not try to fix it.',
-    ] : [
-      'If tests fail due to your changes, fix the issues and re-run.',
-    ]),
-    '',
-    '## Step 4 — Commit and push',
-    '',
-    '```bash',
-    `cd ${worktree}`,
-    'git add -A',
-    `git commit -m "${shellEscape(ticket.title)}"`,
-    ...(createPrs ? [`git push -u origin ${branch}`] : []),
-    '```',
-    '',
-    ...(createPrs ? [
-      '## Step 5 — Create PR',
-      '',
-      `Create a ${draft ? 'draft ' : ''}pull request:`,
-      '',
-      '```bash',
-      `cd ${worktree}`,
-      `gh pr create --title "${shellEscape(ticket.title)}"${draft ? ' --draft' : ''} --body "$(cat <<'BLOCKSPOOL_BODY_EOF'`,
-      ticket.description?.slice(0, 500) ?? ticket.title,
-      '',
-      'Generated by BlockSpool',
-      `BLOCKSPOOL_BODY_EOF`,
-      `)"`,
-      '```',
-      '',
-    ] : []),
-    '## Output',
-    '',
-    'When done, output a summary in this exact format:',
-    '',
-    '```',
-    `TICKET_ID: ${ticket.id}`,
-    'STATUS: success | failed',
-    `PR_URL: <url or "none">`,
-    `BRANCH: ${branch}`,
-    'SUMMARY: <one line summary of what was done>',
-    '```',
-    '',
-    'If anything goes wrong and you cannot complete the ticket, output STATUS: failed with a reason.',
-  ].join('\n');
-}
-
-function buildPrPrompt(
-  ticket: { title: string; description: string | null } | null,
-  draftPr: boolean,
-): string {
-  const title = ticket?.title ?? 'BlockSpool changes';
-  return [
-    '# Create PR',
-    '',
-    `Create a ${draftPr ? 'draft ' : ''}pull request for the changes.`,
-    '',
-    `**Title:** ${title}`,
-    ticket?.description ? `**Description:** ${ticket.description.slice(0, 200)}` : '',
-    '',
-    '## Dry-run first',
-    '',
-    '1. Stage changes: `git add <files>`',
-    '2. Create commit: `git commit -m "..."`',
-    '3. Verify the commit looks correct: `git diff HEAD~1 --stat`',
-    '4. Push to remote: `git push -u origin <branch>`',
-    `5. Create ${draftPr ? 'draft ' : ''}PR: \`gh pr create${draftPr ? ' --draft' : ''}\``,
-    '',
-    'Call `blockspool_ingest_event` with type `PR_CREATED` and `{ "url": "<pr-url>", "branch": "<branch-name>" }` as payload.',
-  ].join('\n');
 }
