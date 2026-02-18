@@ -18,6 +18,7 @@ import {
   consolidateLearnings as coreConsolidate,
   LEARNINGS_DEFAULTS,
 } from '@promptwheel/core/learnings/shared';
+import { withLearningsLock } from '@promptwheel/core/learnings/lock';
 
 // Re-export pure functions and types from core
 export type { Learning, StructuredKnowledge } from '@promptwheel/core/learnings/shared';
@@ -73,10 +74,13 @@ function writeLearnings(projectRoot: string, learnings: Learning[]): void {
  * Called once per session start.
  */
 export function loadLearnings(projectRoot: string, decayRate: number = LEARNINGS_DEFAULTS.DECAY_RATE): Learning[] {
-  const learnings = readLearnings(projectRoot);
-  const surviving = applyLearningsDecay(learnings, decayRate);
-  writeLearnings(projectRoot, surviving);
-  return surviving;
+  const fp = learningsPath(projectRoot);
+  return withLearningsLock(fp, () => {
+    const learnings = readLearnings(projectRoot);
+    const surviving = applyLearningsDecay(learnings, decayRate);
+    writeLearnings(projectRoot, surviving);
+    return surviving;
+  });
 }
 
 /**
@@ -92,35 +96,41 @@ export function addLearning(
     structured?: StructuredKnowledge;
   },
 ): Learning {
-  const learnings = readLearnings(projectRoot);
-  const now = new Date().toISOString();
-  const learning: Learning = {
-    id: crypto.randomBytes(4).toString('hex'),
-    text: input.text.slice(0, 200),
-    category: input.category,
-    source: input.source,
-    tags: input.tags ?? [],
-    weight: LEARNINGS_DEFAULTS.DEFAULT_WEIGHT,
-    created_at: now,
-    last_confirmed_at: now,
-    access_count: 0,
-    structured: input.structured,
-  };
-  learnings.push(learning);
-  writeLearnings(projectRoot, learnings);
-  return learning;
+  const fp = learningsPath(projectRoot);
+  return withLearningsLock(fp, () => {
+    const learnings = readLearnings(projectRoot);
+    const now = new Date().toISOString();
+    const learning: Learning = {
+      id: crypto.randomBytes(4).toString('hex'),
+      text: input.text.slice(0, 200),
+      category: input.category,
+      source: input.source,
+      tags: input.tags ?? [],
+      weight: LEARNINGS_DEFAULTS.DEFAULT_WEIGHT,
+      created_at: now,
+      last_confirmed_at: now,
+      access_count: 0,
+      structured: input.structured,
+    };
+    learnings.push(learning);
+    writeLearnings(projectRoot, learnings);
+    return learning;
+  });
 }
 
 /**
  * Confirm a learning: bump weight +10 and update last_confirmed_at.
  */
 export function confirmLearning(projectRoot: string, id: string): void {
-  const learnings = readLearnings(projectRoot);
-  const l = learnings.find(x => x.id === id);
-  if (!l) return;
-  l.weight = Math.min(LEARNINGS_DEFAULTS.MAX_WEIGHT, l.weight + 10);
-  l.last_confirmed_at = new Date().toISOString();
-  writeLearnings(projectRoot, learnings);
+  const fp = learningsPath(projectRoot);
+  withLearningsLock(fp, () => {
+    const learnings = readLearnings(projectRoot);
+    const l = learnings.find(x => x.id === id);
+    if (!l) return;
+    l.weight = Math.min(LEARNINGS_DEFAULTS.MAX_WEIGHT, l.weight + 10);
+    l.last_confirmed_at = new Date().toISOString();
+    writeLearnings(projectRoot, learnings);
+  });
 }
 
 /**
@@ -128,14 +138,17 @@ export function confirmLearning(projectRoot: string, id: string): void {
  */
 export function recordAccess(projectRoot: string, ids: string[]): void {
   if (ids.length === 0) return;
-  const learnings = readLearnings(projectRoot);
-  const idSet = new Set(ids);
-  for (const l of learnings) {
-    if (idSet.has(l.id)) {
-      l.access_count++;
+  const fp = learningsPath(projectRoot);
+  withLearningsLock(fp, () => {
+    const learnings = readLearnings(projectRoot);
+    const idSet = new Set(ids);
+    for (const l of learnings) {
+      if (idSet.has(l.id)) {
+        l.access_count++;
+      }
     }
-  }
-  writeLearnings(projectRoot, learnings);
+    writeLearnings(projectRoot, learnings);
+  });
 }
 
 /**
@@ -143,9 +156,12 @@ export function recordAccess(projectRoot: string, ids: string[]): void {
  * Keeps the higher weight entry, sums access counts.
  */
 export function consolidateLearnings(projectRoot: string): void {
-  const learnings = readLearnings(projectRoot);
-  const result = coreConsolidate(learnings);
-  if (result !== null) {
-    writeLearnings(projectRoot, result);
-  }
+  const fp = learningsPath(projectRoot);
+  withLearningsLock(fp, () => {
+    const learnings = readLearnings(projectRoot);
+    const result = coreConsolidate(learnings);
+    if (result !== null) {
+      writeLearnings(projectRoot, result);
+    }
+  });
 }

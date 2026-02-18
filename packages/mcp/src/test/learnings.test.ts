@@ -22,6 +22,7 @@ import {
   extractTags,
 } from '../learnings.js';
 import type { Learning } from '../learnings.js';
+import { buildLearningsBlock } from '../advance-helpers.js';
 
 let tmpDir: string;
 
@@ -523,5 +524,103 @@ describe('Decay across multiple loads', () => {
 
     // Note: actual value depends on accumulated rounding, just verify it survives
     expect(result[0].weight).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// learnings_budget plumbing
+// ---------------------------------------------------------------------------
+
+describe('learnings_budget', () => {
+  it('defaults to 2000 when not specified', () => {
+    const run = new RunManager(tmpDir);
+    run.create('proj-1', {
+      step_budget: 100,
+      categories: ['refactor'],
+      learnings: true,
+    });
+
+    const s = run.require();
+    expect(s.learnings_budget).toBe(2000);
+    run.end();
+  });
+
+  it('stores custom learnings_budget from config', () => {
+    const run = new RunManager(tmpDir);
+    run.create('proj-1', {
+      step_budget: 100,
+      categories: ['refactor'],
+      learnings: true,
+      learnings_budget: 500,
+    });
+
+    const s = run.require();
+    expect(s.learnings_budget).toBe(500);
+    run.end();
+  });
+
+  it('buildLearningsBlock respects custom learnings_budget', () => {
+    // Seed many learnings so the block would exceed 500 chars at default budget
+    const learnings: Learning[] = [];
+    for (let i = 0; i < 30; i++) {
+      learnings.push(makeLearning({
+        id: `budget-${i}`,
+        text: `Learning number ${i} about testing patterns and conventions in the project`,
+        weight: 90 - i,
+        tags: [],
+      }));
+    }
+    writeLearningsFile(learnings);
+
+    const run = new RunManager(tmpDir);
+    run.create('proj-1', {
+      step_budget: 100,
+      categories: ['refactor'],
+      learnings: true,
+      learnings_budget: 500,
+    });
+
+    // Load learnings into cache
+    const s = run.require();
+    s.cached_learnings = learnings;
+    s.learnings_loaded = true;
+
+    const block = buildLearningsBlock(run, [], []);
+    // Block should respect the 500 char budget (with trailing \n\n added by buildLearningsBlock)
+    expect(block.length).toBeLessThanOrEqual(500 + 2);
+    expect(block.length).toBeGreaterThan(0);
+    run.end();
+  });
+
+  it('buildLearningsBlock uses default budget when learnings_budget not set', () => {
+    // Seed enough learnings that would fill 2000 chars
+    const learnings: Learning[] = [];
+    for (let i = 0; i < 50; i++) {
+      learnings.push(makeLearning({
+        id: `default-${i}`,
+        text: `Learning number ${i} about testing patterns and conventions in the project`,
+        weight: 90 - i,
+        tags: [],
+      }));
+    }
+    writeLearningsFile(learnings);
+
+    const run = new RunManager(tmpDir);
+    run.create('proj-1', {
+      step_budget: 100,
+      categories: ['refactor'],
+      learnings: true,
+      // no learnings_budget — should default to 2000
+    });
+
+    const s = run.require();
+    s.cached_learnings = learnings;
+    s.learnings_loaded = true;
+
+    const block = buildLearningsBlock(run, [], []);
+    // With default 2000 budget, should include more learnings than the 500 budget test
+    expect(block.length).toBeGreaterThan(500);
+    expect(block.length).toBeLessThanOrEqual(2000 + 2);
+    run.end();
   });
 });

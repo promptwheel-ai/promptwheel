@@ -193,6 +193,7 @@ export class RunManager {
       scout_exploration_log: [],
 
       learnings_enabled: config.learnings !== false,
+      learnings_budget: config.learnings_budget ?? 2000,
       learnings_loaded: false,
       injected_learning_ids: [],
       cached_learnings: [],

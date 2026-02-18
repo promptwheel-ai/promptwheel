@@ -68,6 +68,10 @@
       "types": "./dist/learnings/shared.d.ts",
       "import": "./dist/learnings/shared.js"
     },
+    "./learnings/lock": {
+      "types": "./dist/learnings/lock.d.ts",
+      "import": "./dist/learnings/lock.js"
+    },
     "./formulas/shared": {
       "types": "./dist/formulas/shared.d.ts",
       "import": "./dist/formulas/shared.js"

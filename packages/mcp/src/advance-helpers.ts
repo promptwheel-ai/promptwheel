@@ -82,7 +82,7 @@ export function buildLearningsBlock(
   if (allLearnings.length === 0) return '';
 
   const relevant = selectRelevant(allLearnings, { paths: contextPaths, commands: contextCommands });
-  const budget = DEFAULT_LEARNINGS_BUDGET;
+  const budget = s.learnings_budget ?? DEFAULT_LEARNINGS_BUDGET;
   const block = formatLearningsForPrompt(relevant, budget);
   if (!block) return '';
 

@@ -173,6 +173,8 @@ export interface RunState {
 
   // Cross-run learnings
   learnings_enabled: boolean;
+  /** Max chars for learnings injected into prompts */
+  learnings_budget: number;
   /** True once learnings have been lazy-loaded from disk */
   learnings_loaded: boolean;
   injected_learning_ids: string[];
