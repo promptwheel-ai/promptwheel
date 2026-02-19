@@ -305,7 +305,7 @@ export async function filterProposals(
     }
     state.scoutRetries = 0;
     state.scoutedDirs = [];
-    if (state.runMode === 'wheel') {
+    if (state.runMode === 'spin') {
       await sleep(2000);
     }
     // Let shouldContinue() decide whether to loop or stop
@@ -316,7 +316,7 @@ export async function filterProposals(
   const prsRemaining = state.milestoneMode
     ? (state.batchSize! - state.milestoneTicketCount + (state.maxPrs - state.totalMilestonePrs - 1) * state.batchSize!)
     : (state.maxPrs - state.totalPrsCreated);
-  const defaultBatch = state.milestoneMode ? 10 : (state.runMode === 'wheel' ? 5 : 3);
+  const defaultBatch = state.milestoneMode ? 10 : (state.runMode === 'spin' ? 5 : 3);
   const cooledFiles = getCooledFiles(state.repoRoot);
   if (cooledFiles.size > 0) {
     approvedProposals.sort((a, b) => {
@@ -342,7 +342,7 @@ export async function filterProposals(
   state.scoutedDirs = [];
 
   // Display batch
-  if (state.runMode !== 'wheel' || state.cycleCount === 1) {
+  if (state.runMode !== 'spin' || state.cycleCount === 1) {
     state.displayAdapter.log(chalk.bold('Will process:'));
     for (const p of toProcess) {
       const confidenceStr = p.confidence ? `${p.confidence}%` : '?';

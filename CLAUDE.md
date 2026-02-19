@@ -10,7 +10,7 @@ PromptWheel is a coding tool that scouts your codebase for improvements, execute
 promptwheel init                               # Initialize SQLite database
 promptwheel                                     # Scout + fix + PR (single cycle)
 promptwheel --hours 8 --batch-size 30           # Long run with milestone PRs
-promptwheel --wheel                             # Wheel mode — run until stopped (Ctrl+C)
+promptwheel --spin                              # Spin mode — run until stopped (Ctrl+C)
 promptwheel nudge "focus on auth"               # Steer a running session
 ```
 
@@ -35,7 +35,7 @@ promptwheel nudge "focus on auth"               # Steer a running session
 - **Wave scheduling** — conflict-aware partitioning prevents merge conflicts
 - **Scope enforcement** — each ticket sandboxed to `allowed_paths` with auto-expansion
 - **Rebase-retry** — rebases ticket branch on merge conflict, retries before blocking
-- **Balanced wheel mode** — deep architectural scan every 5 cycles
+- **Balanced spin mode** — deep architectural scan every 5 cycles
 - **Live steering** (`nudge`) — add hints mid-run, consumed in next scout cycle
 - **Guidelines context** — loads CLAUDE.md (Claude) or AGENTS.md (Codex) into every prompt; auto-creates baseline if missing; re-reads every 10 cycles
 - **Scout diversification** — test proposals excluded by default (`--tests` to opt in); when enabled, hard-capped by `maxTestRatio` (default 0.4)
@@ -100,12 +100,12 @@ npm run lint
 
 | Term | Definition |
 |------|------------|
-| **Auto** | The main execution mode. Planning (default): scout → roadmap → approve → execute. Wheel (`--wheel`): scout, fix, repeat. |
+| **Auto** | The main execution mode. Planning (default): scout → roadmap → approve → execute. Spin (`--spin`): scout, fix, repeat. |
 | **Scout** | The discovery phase. Scans code to find improvement opportunities. |
 | **Ticket** | A unit of work. Created from a proposal, executed in isolation. |
 | **Proposal** | A candidate improvement found by scouting. Becomes a ticket when approved. |
 | **Formula** | A recipe for what to scout for. Built-ins: `security-audit`, `test-coverage`, `type-safety`, `cleanup`, `docs`, `deep`. User-defined formulas live in `.promptwheel/formulas/`. |
-| **Deep** | Built-in formula (`--deep`) for principal-engineer-style architectural review. Auto-staggered every 5th cycle in wheel mode. |
+| **Deep** | Built-in formula (`--deep`) for principal-engineer-style architectural review. Auto-staggered every 5th cycle in spin mode. |
 | **Impact Score** | 1-10 rating of how much a proposal matters. Proposals ranked by `impact x confidence`. |
 | **Spindle** | Loop detection system. Catches QA ping-pong, command failure loops, and file churn. |
 | **Worktree** | An isolated git checkout where a ticket executes. Enables parallel execution. |

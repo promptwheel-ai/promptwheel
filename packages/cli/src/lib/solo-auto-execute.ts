@@ -17,8 +17,10 @@ import { classifyFailure } from './failure-classifier.js';
 import { normalizeQaConfig } from './solo-utils.js';
 import { recordPrFiles } from './file-cooldown.js';
 import { recordDedupEntry } from './dedup-memory.js';
-import { recordFormulaTicketOutcome, pushRecentDiff, recordQualitySignal } from './run-state.js';
+import { recordFormulaTicketOutcome, pushRecentDiff, recordQualitySignal, recordCategoryOutcome } from './run-state.js';
 import { recordTicketOutcome } from './sectors.js';
+import { appendErrorLedger } from './error-ledger.js';
+import { appendPrOutcome } from './pr-outcomes.js';
 import {
   mergeTicketToMilestone,
   deleteTicketBranch,
@@ -38,6 +40,14 @@ export interface ProposalResult {
   noChanges?: boolean;
   wasRetried?: boolean;
   conflictBranch?: string;
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  phaseTiming?: {
+    executeMs?: number;
+    qaMs?: number;
+    gitMs?: number;
+  };
 }
 
 /**
@@ -93,6 +103,7 @@ export async function processOneProposal(
   while (retryCount <= maxScopeRetries) {
     try {
       state.displayAdapter.ticketProgress(currentTicket.id, `Executing: ${proposal.title}`);
+      const executeStart = Date.now();
       const result = await soloRunTicket({
         ticket: currentTicket,
         repoRoot: state.repoRoot,
@@ -129,6 +140,32 @@ export async function processOneProposal(
           skipPr: true,
         } : {}),
       });
+
+      // Extract cost and timing from trace analysis
+      const traceCost = result.traceAnalysis?.total_cost_usd;
+      const traceInput = result.traceAnalysis?.total_input_tokens;
+      const traceOutput = result.traceAnalysis?.total_output_tokens;
+      const executeDuration = Date.now() - executeStart;
+      // Map step names to phase timing from trace steps
+      let phaseTiming: { executeMs?: number; qaMs?: number; gitMs?: number } | undefined;
+      if (result.traceAnalysis?.steps) {
+        let qaMs = 0;
+        let gitMs = 0;
+        let execMs = 0;
+        for (const step of result.traceAnalysis.steps) {
+          const name = step.label?.toLowerCase() ?? '';
+          if (name.includes('qa') || name.includes('test') || name.includes('verify')) {
+            qaMs += step.duration_ms ?? 0;
+          } else if (name.includes('git') || name.includes('push') || name.includes('pr') || name.includes('commit')) {
+            gitMs += step.duration_ms ?? 0;
+          } else {
+            execMs += step.duration_ms ?? 0;
+          }
+        }
+        phaseTiming = { executeMs: execMs || executeDuration, qaMs, gitMs };
+      } else {
+        phaseTiming = { executeMs: executeDuration };
+      }
 
       // no_changes_needed
       if (result.success && result.completionOutcome === 'no_changes_needed') {
@@ -176,7 +213,7 @@ export async function processOneProposal(
             }
           }
           if (result.traceAnalysis) state.allTraceAnalyses.push(result.traceAnalysis);
-          return { success: true, wasRetried };
+          return { success: true, wasRetried, costUsd: traceCost, inputTokens: traceInput, outputTokens: traceOutput, phaseTiming };
         }
 
         await runs.markSuccess(state.adapter, currentRun.id, { prUrl: result.prUrl });
@@ -220,7 +257,7 @@ export async function processOneProposal(
           });
           if (result.traceAnalysis) state.allTraceAnalyses.push(result.traceAnalysis);
           state.displayAdapter.ticketDone(currentTicket.id, true, 'Committed to direct branch');
-          return { success: true, wasRetried };
+          return { success: true, wasRetried, costUsd: traceCost, inputTokens: traceInput, outputTokens: traceOutput, phaseTiming };
         }
 
         // Auto-merge
@@ -235,7 +272,7 @@ export async function processOneProposal(
           recordPrFiles(state.repoRoot, result.prUrl, proposal.files ?? proposal.allowed_paths ?? []);
         }
         if (result.traceAnalysis) state.allTraceAnalyses.push(result.traceAnalysis);
-        return { success: true, prUrl: result.prUrl, wasRetried };
+        return { success: true, prUrl: result.prUrl, wasRetried, costUsd: traceCost, inputTokens: traceInput, outputTokens: traceOutput, phaseTiming };
       } else if (result.scopeExpanded && retryCount < maxScopeRetries) {
         retryCount++;
         wasRetried = true;
@@ -296,6 +333,26 @@ export async function processOneProposal(
             ],
             structured,
           });
+          // Error ledger
+          try {
+            const phase = result.failureReason === 'qa_failed' ? 'qa' as const
+              : result.failureReason === 'git_error' ? 'git' as const
+              : result.failureReason === 'pr_error' ? 'pr' as const
+              : 'execute' as const;
+            appendErrorLedger(state.repoRoot, {
+              ts: Date.now(),
+              ticketId: currentTicket.id,
+              ticketTitle: currentTicket.title,
+              failureType: classified.failureType,
+              failedCommand: classified.failedCommand,
+              errorPattern: classified.errorPattern.slice(0, 100),
+              errorMessage: (result.error ?? '').slice(0, 500),
+              category: proposal.category,
+              phase,
+              sessionCycle: state.cycleCount,
+              formula: state.currentFormulaName,
+            });
+          } catch { /* non-fatal */ }
         }
         state.displayAdapter.ticketDone(currentTicket.id, false, `Failed: ${failReason}`);
         return { success: false };
@@ -304,6 +361,22 @@ export async function processOneProposal(
       const errorMsg = err instanceof Error ? err.message : String(err);
       await runs.markFailure(state.adapter, currentRun.id, errorMsg);
       await tickets.updateStatus(state.adapter, currentTicket.id, 'blocked');
+      // Error ledger for unexpected exceptions
+      try {
+        appendErrorLedger(state.repoRoot, {
+          ts: Date.now(),
+          ticketId: currentTicket.id,
+          ticketTitle: currentTicket.title,
+          failureType: 'unknown',
+          failedCommand: 'processOneProposal',
+          errorPattern: errorMsg.slice(0, 100),
+          errorMessage: errorMsg.slice(0, 500),
+          category: proposal.category,
+          phase: 'execute',
+          sessionCycle: state.cycleCount,
+          formula: state.currentFormulaName,
+        });
+      } catch { /* non-fatal */ }
       state.displayAdapter.ticketDone(currentTicket.id, false, `Error: ${errorMsg}`);
       return { success: false };
     }
@@ -320,7 +393,7 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
   }
 
   // User confirmation on first cycle (skip in planning mode — roadmap already got approval)
-  if (state.cycleCount === 1 && !state.options.yes && state.runMode !== 'wheel' && state.runMode !== 'planning' && !state.options.tui) {
+  if (state.cycleCount === 1 && !state.options.yes && state.runMode !== 'spin' && state.runMode !== 'planning' && !state.options.tui) {
     const readline = await import('readline');
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const confirmMsg = `Proceed with ${toProcess.length} improvement(s)? [Y/n] `;
@@ -365,11 +438,13 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
         };
       }
       const baselinePath = path.join(getPromptwheelDir(state.repoRoot), 'qa-baseline.json');
-      fs.writeFileSync(baselinePath, JSON.stringify({
+      const blTmp = baselinePath + '.tmp';
+      fs.writeFileSync(blTmp, JSON.stringify({
         failures: baselineFailures,
         details: baselineDetails,
         timestamp: Date.now(),
       }));
+      fs.renameSync(blTmp, baselinePath);
     } catch { /* non-fatal */ }
   }
 
@@ -413,9 +488,24 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
       recordDedupEntry(state.repoRoot, proposal.title, true, undefined, otherTitles);
       if (state.sectorState && state.currentSectorId) recordTicketOutcome(state.sectorState, state.currentSectorId, true, proposal.category);
       recordFormulaTicketOutcome(state.repoRoot, state.currentFormulaName, true);
+      recordCategoryOutcome(state.repoRoot, proposal.category, true);
       pushRecentDiff(state.repoRoot, { title: proposal.title, summary: `${(proposal.files ?? []).length} files`, files: proposal.files ?? proposal.allowed_paths ?? [], cycle: state.cycleCount });
       if (result.prUrl && state.currentSectorId) {
         state.prMetaMap.set(result.prUrl, { sectorId: state.currentSectorId, formula: state.currentFormulaName });
+      }
+      // PR outcomes tracking
+      if (result.prUrl) {
+        try {
+          appendPrOutcome(state.repoRoot, {
+            ts: Date.now(),
+            prUrl: result.prUrl,
+            createdAt: Date.now(),
+            outcome: 'open',
+            formula: state.currentFormulaName,
+            category: proposal.category,
+            ticketTitle: proposal.title,
+          });
+        } catch { /* non-fatal */ }
       }
       recordQualitySignal(state.repoRoot, result.wasRetried ? 'retried' : 'first_pass');
       if (state.autoConf.learningsEnabled) {
@@ -432,7 +522,11 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
           structured,
         });
       }
-      const outcome: TicketOutcome = { id: '', title: proposal.title, category: proposal.category, status: 'completed', prUrl: result.prUrl };
+      const outcome: TicketOutcome = {
+        id: '', title: proposal.title, category: proposal.category, status: 'completed', prUrl: result.prUrl,
+        costUsd: result.costUsd, inputTokens: result.inputTokens, outputTokens: result.outputTokens,
+        phaseTiming: result.phaseTiming,
+      };
       state.allTicketOutcomes.push(outcome);
       state.cycleOutcomes.push(outcome);
     } else {
@@ -440,6 +534,7 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
       recordDedupEntry(state.repoRoot, proposal.title, false, 'agent_error');
       if (state.sectorState && state.currentSectorId) recordTicketOutcome(state.sectorState, state.currentSectorId, false, proposal.category);
       recordFormulaTicketOutcome(state.repoRoot, state.currentFormulaName, false);
+      recordCategoryOutcome(state.repoRoot, proposal.category, false);
       const outcome: TicketOutcome = { id: '', title: proposal.title, category: proposal.category, status: 'failed' };
       state.allTicketOutcomes.push(outcome);
       state.cycleOutcomes.push(outcome);

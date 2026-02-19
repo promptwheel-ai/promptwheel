@@ -19,7 +19,7 @@ const SUN_COLORS = [
 ];
 
 
-export type SpinnerStyle = 'block' | 'spool' | 'cube' | 'stack' | 'sun';
+export type SpinnerStyle = 'block' | 'wheel' | 'cube' | 'stack' | 'sun';
 
 export interface BlockSpinner {
   /** Update the message text */

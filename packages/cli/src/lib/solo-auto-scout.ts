@@ -30,6 +30,7 @@ import { formatGoalContext } from './goals.js';
 import { sleep } from './dedup.js';
 import { buildBaselineHealthBlock } from './qa-stats.js';
 import { formatTrajectoryForPrompt } from '@promptwheel/core/trajectory/shared';
+import { appendErrorLedger } from './error-ledger.js';
 
 export interface ScoutResult {
   proposals: TicketProposal[];
@@ -40,6 +41,7 @@ export interface ScoutResult {
   isDocsAuditCycle: boolean;
   shouldRetry: boolean;
   shouldBreak: boolean;
+  scoutDurationMs?: number;
 }
 
 export async function runScoutPhase(state: AutoSessionState, preSelectedScope?: string): Promise<ScoutResult> {
@@ -87,17 +89,6 @@ export async function runScoutPhase(state: AutoSessionState, preSelectedScope?: 
   state.currentFormulaName = cycleFormula?.name ?? 'default';
   const { allow: allowCategories, block: blockCategories } = state.getCycleCategories(cycleFormula);
 
-  // When QA baselines are failing, always allow 'fix' category so scout can
-  // propose healing fixes regardless of which formula is active.
-  if (state.qaBaseline) {
-    const failingCount = [...state.qaBaseline.values()].filter(v => !v).length;
-    if (failingCount > 0 && !allowCategories.includes('fix')) {
-      allowCategories.push('fix');
-      const blockIdx = blockCategories.indexOf('fix');
-      if (blockIdx >= 0) blockCategories.splice(blockIdx, 1);
-    }
-  }
-
   // Trajectory step overrides: narrow scope and categories to current step
   if (state.currentTrajectoryStep) {
     if (state.currentTrajectoryStep.categories && state.currentTrajectoryStep.categories.length > 0) {
@@ -107,11 +98,22 @@ export async function runScoutPhase(state: AutoSessionState, preSelectedScope?: 
     }
   }
 
+  // Re-apply QA healing after trajectory override — 'fix' must always be available
+  // when baselines are failing, even if the trajectory step restricts categories
+  if (state.qaBaseline) {
+    const failingCount = [...state.qaBaseline.values()].filter(v => !v).length;
+    if (failingCount > 0 && !allowCategories.includes('fix')) {
+      allowCategories.push('fix');
+      const blockIdx = blockCategories.indexOf('fix');
+      if (blockIdx >= 0) blockCategories.splice(blockIdx, 1);
+    }
+  }
+
   const isDeepCycle = cycleFormula?.name === 'deep' && cycleFormula !== state.activeFormula;
   const isDocsAuditCycle = cycleFormula?.name === 'docs-audit' && cycleFormula !== state.activeFormula;
 
   const cycleSuffix = isDeepCycle ? ' 🔬 deep' : isDocsAuditCycle ? ' 📄 docs-audit' : '';
-  const cycleLabel = state.maxCycles > 1 || state.runMode === 'wheel'
+  const cycleLabel = state.maxCycles > 1 || state.runMode === 'spin'
     ? `[Cycle ${state.cycleCount}]${cycleSuffix} `
     : 'Step 1: ';
   state.displayAdapter.scoutStarted(scope, state.cycleCount);
@@ -185,6 +187,7 @@ export async function runScoutPhase(state: AutoSessionState, preSelectedScope?: 
     : undefined;
 
   let scoutResult;
+  const scoutStart = Date.now();
   try {
     scoutResult = await scoutRepo(state.deps, {
       path: scoutPath,
@@ -224,6 +227,22 @@ export async function runScoutPhase(state: AutoSessionState, preSelectedScope?: 
     });
   } catch (scoutErr) {
     state.displayAdapter.scoutFailed('Scout failed');
+    // Error ledger for scout failures
+    try {
+      const errMsg = scoutErr instanceof Error ? scoutErr.message : String(scoutErr);
+      appendErrorLedger(state.repoRoot, {
+        ts: Date.now(),
+        ticketId: '',
+        ticketTitle: '',
+        failureType: 'unknown',
+        failedCommand: 'scoutRepo',
+        errorPattern: errMsg.slice(0, 100),
+        errorMessage: errMsg.slice(0, 500),
+        phase: 'scout',
+        sessionCycle: state.cycleCount,
+        formula: state.currentFormulaName,
+      });
+    } catch { /* non-fatal */ }
     throw scoutErr;
   }
 
@@ -280,7 +299,7 @@ export async function runScoutPhase(state: AutoSessionState, preSelectedScope?: 
     }
     state.scoutRetries = 0;
     state.scoutedDirs = [];
-    if (state.runMode === 'wheel') {
+    if (state.runMode === 'spin') {
       await sleep(2000);
     }
     const covMsg = state.sectorState
@@ -292,5 +311,6 @@ export async function runScoutPhase(state: AutoSessionState, preSelectedScope?: 
   }
 
   state.displayAdapter.scoutCompleted(proposals.length);
-  return { proposals, scoutResult, scope, cycleFormula, isDeepCycle, isDocsAuditCycle, shouldRetry: false, shouldBreak: false };
+  const scoutDurationMs = Date.now() - scoutStart;
+  return { proposals, scoutResult, scope, cycleFormula, isDeepCycle, isDocsAuditCycle, shouldRetry: false, shouldBreak: false, scoutDurationMs };
 }

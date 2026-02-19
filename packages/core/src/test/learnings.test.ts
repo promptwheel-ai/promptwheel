@@ -148,6 +148,29 @@ describe('consolidateLearnings', () => {
     }
   });
 
+  it('merges applied_count and success_count during consolidation', () => {
+    const learnings: Learning[] = [];
+    for (let i = 0; i < 52; i++) {
+      learnings.push(makeLearning({
+        id: `l-${i}`,
+        text: i < 2 ? 'Fix the authentication bug in login flow' : `Unique learning number ${i}`,
+        weight: i === 0 ? 80 : 50,
+        applied_count: i < 2 ? 3 : 0,
+        success_count: i < 2 ? 2 : 0,
+      }));
+    }
+    learnings[1].text = 'Fix the authentication bug in the login flow';
+
+    const result = consolidateLearnings(learnings);
+    if (result !== null) {
+      // The merged entry should sum effectiveness counters
+      const merged = result.find(l => l.id === 'l-0');
+      expect(merged).toBeDefined();
+      expect(merged!.applied_count).toBe(6); // 3 + 3
+      expect(merged!.success_count).toBe(4); // 2 + 2
+    }
+  });
+
   it('does not mutate input array when returning null (too-aggressive guard)', () => {
     // Create many similar entries that will all merge, triggering the too-aggressive guard
     // We need result.length < ceil(50 * 0.4) = 20 to trigger null return

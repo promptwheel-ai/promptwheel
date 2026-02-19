@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import chalk from 'chalk';
 import { spawnSync } from 'node:child_process';
 import type { AutoSessionState } from './solo-auto-state.js';
-import { readRunState, writeRunState, recordCycle, recordDocsAudit, getQualityRate } from './run-state.js';
+import { readRunState, writeRunState, recordCycle, recordDocsAudit, getQualityRate, snapshotLearningROI } from './run-state.js';
 import { getSessionPhase } from './solo-auto-utils.js';
 import {
   checkPrStatuses,
@@ -22,6 +22,7 @@ import { normalizeQaConfig } from './solo-utils.js';
 import { getPromptwheelDir } from './solo-config.js';
 import { removePrEntries } from './file-cooldown.js';
 import { recordFormulaMergeOutcome } from './run-state.js';
+import { updatePrOutcome } from './pr-outcomes.js';
 import {
   recordMergeOutcome, saveSectors, refreshSectors,
   suggestScopeAdjustment,
@@ -109,7 +110,7 @@ export async function runPreCycleMaintenance(state: AutoSessionState): Promise<P
   }
 
   // Backpressure from open PRs (skip in direct mode)
-  if (state.runMode === 'wheel' && state.pendingPrUrls.length > 0 && state.deliveryMode !== 'direct') {
+  if (state.runMode === 'spin' && state.pendingPrUrls.length > 0 && state.deliveryMode !== 'direct') {
     const openRatio = state.pendingPrUrls.length / state.maxPrs;
     if (openRatio > 0.7) {
       console.log(chalk.yellow(`  Backpressure: ${state.pendingPrUrls.length}/${state.maxPrs} PRs open — waiting for reviews...`));
@@ -147,7 +148,7 @@ export async function runPreCycleMaintenance(state: AutoSessionState): Promise<P
   }
 
   // Periodic pull
-  if (state.pullInterval > 0 && state.runMode === 'wheel') {
+  if (state.pullInterval > 0 && state.runMode === 'spin') {
     state.cyclesSinceLastPull++;
     if (state.cyclesSinceLastPull >= state.pullInterval) {
       state.cyclesSinceLastPull = 0;
@@ -178,7 +179,7 @@ export async function runPreCycleMaintenance(state: AutoSessionState): Promise<P
               console.log();
               console.log(chalk.bold('Resolution:'));
               console.log(`  1. Resolve the divergence (rebase, merge, or reset)`);
-              console.log(`  2. Re-run: promptwheel --wheel`);
+              console.log(`  2. Re-run: promptwheel --spin`);
               console.log();
               console.log(chalk.gray(`  To keep going despite divergence, set pullPolicy: "warn" in config.`));
 
@@ -201,7 +202,7 @@ export async function runPreCycleMaintenance(state: AutoSessionState): Promise<P
   }
 
   // Periodic PR status poll (every 5 cycles)
-  if (state.runMode === 'wheel' && state.cycleCount > 1 && state.cycleCount % 5 === 0 && state.pendingPrUrls.length > 0) {
+  if (state.runMode === 'spin' && state.cycleCount > 1 && state.cycleCount % 5 === 0 && state.pendingPrUrls.length > 0) {
     try {
       const prStatuses = await checkPrStatuses(state.repoRoot, state.pendingPrUrls);
       for (const pr of prStatuses) {
@@ -212,6 +213,7 @@ export async function runPreCycleMaintenance(state: AutoSessionState): Promise<P
             if (state.sectorState) recordMergeOutcome(state.sectorState, prMeta.sectorId, true);
             recordFormulaMergeOutcome(state.repoRoot, prMeta.formula, true);
           }
+          try { updatePrOutcome(state.repoRoot, pr.url, 'merged', Date.now()); } catch { /* non-fatal */ }
           if (state.autoConf.learningsEnabled) {
             addLearning(state.repoRoot, {
               text: `PR merged: ${pr.url}`.slice(0, 200),
@@ -232,6 +234,7 @@ export async function runPreCycleMaintenance(state: AutoSessionState): Promise<P
             if (state.sectorState) recordMergeOutcome(state.sectorState, prMeta.sectorId, false);
             recordFormulaMergeOutcome(state.repoRoot, prMeta.formula, false);
           }
+          try { updatePrOutcome(state.repoRoot, pr.url, 'closed', Date.now()); } catch { /* non-fatal */ }
           if (state.autoConf.learningsEnabled) {
             addLearning(state.repoRoot, {
               text: `PR closed/rejected: ${pr.url}`.slice(0, 200),
@@ -357,16 +360,20 @@ export async function runPostCycleMaintenance(state: AutoSessionState, scope: st
                 const recheckResult = recheck.get(name);
                 if (recheckResult?.output) updatedDetails[name].output = recheckResult.output;
               }
-              fs.writeFileSync(blPath, JSON.stringify({
+              const blTmp = blPath + '.tmp';
+              fs.writeFileSync(blTmp, JSON.stringify({
                 failures: stillFailing,
                 details: updatedDetails,
                 timestamp: Date.now(),
               }));
+              fs.renameSync(blTmp, blPath);
             }
           }
         }
       }
-    } catch { /* non-fatal */ }
+    } catch (err) {
+      console.warn(chalk.gray(`  Baseline healing skipped: ${err instanceof Error ? err.message : String(err)}`));
+    }
   }
 
   // Meta-learning extraction (aggregate pattern detection)
@@ -400,7 +407,7 @@ export async function runPostCycleMaintenance(state: AutoSessionState, scope: st
     const confValue = state.effectiveMinConfidence;
     const insightsStr = metaInsightsAdded > 0 ? ` | insights +${metaInsightsAdded}` : '';
     const baselineStr = baselineFailing > 0 ? ` | baseline failing ${baselineFailing}` : '';
-    console.log(chalk.gray(`  Wheel: quality ${qualityPct}% | confidence ${confValue}${baselineStr}${insightsStr}`));
+    console.log(chalk.gray(`  Spin: quality ${qualityPct}% | confidence ${confValue}${baselineStr}${insightsStr}`));
   }
 
   // Convergence metrics
@@ -451,6 +458,14 @@ export async function runPostCycleMaintenance(state: AutoSessionState, scope: st
     }
   }
 
+  // Learning ROI snapshot (every 10 cycles)
+  if (state.cycleCount % 10 === 0 && state.autoConf.learningsEnabled) {
+    try {
+      const { getLearningEffectiveness } = await import('./learnings.js');
+      snapshotLearningROI(state.repoRoot, getLearningEffectiveness);
+    } catch { /* non-fatal */ }
+  }
+
   // Periodic learnings consolidation
   try {
     if (state.cycleCount % 5 === 0 && state.autoConf.learningsEnabled) {
@@ -465,8 +480,9 @@ export async function runPostCycleMaintenance(state: AutoSessionState, scope: st
         state.allLearnings = loadLearnings(state.repoRoot, 0);
       }
     }
-  } catch {
+  } catch (err) {
     // Non-fatal — learnings persist from previous cycle
+    console.warn(chalk.gray(`  Learnings consolidation skipped: ${err instanceof Error ? err.message : String(err)}`));
   }
 
   // Refresh codebase index
@@ -492,7 +508,7 @@ export async function runPostCycleMaintenance(state: AutoSessionState, scope: st
   }
 
   // Reload dedup memory
-  if (state.runMode === 'wheel') {
+  if (state.runMode === 'spin') {
     state.dedupMemory = loadDedupMemory(state.repoRoot);
   }
 
@@ -563,25 +579,43 @@ export async function runPostCycleMaintenance(state: AutoSessionState, scope: st
       // Run step verification commands
       let allPassed = true;
       if (step.verification_commands.length > 0) {
-        allPassed = step.verification_commands.every(cmd => {
-          const result = spawnSync('sh', ['-c', cmd], { cwd: state.repoRoot, timeout: 30000 });
-          return result.status === 0;
-        });
+        for (const cmd of step.verification_commands) {
+          const result = spawnSync('sh', ['-c', cmd], {
+            cwd: state.repoRoot,
+            timeout: 30000,
+            encoding: 'utf-8',
+          });
+          if (result.status !== 0) {
+            allPassed = false;
+            const stderr = (result.stderr || '').trim().slice(0, 500);
+            const stdout = (result.stdout || '').trim().slice(0, 200);
+            console.log(chalk.yellow(`    ✗ ${cmd} (exit ${result.status})`));
+            if (stderr) console.log(chalk.gray(`      ${stderr.split('\n')[0]}`));
+            else if (stdout) console.log(chalk.gray(`      ${stdout.split('\n')[0]}`));
+          }
+        }
       }
 
       // Optional measurement check
       let measureMet = true;
       if (step.measure) {
-        const { value } = runMeasurement(step.measure.cmd, state.repoRoot);
+        const { value, error } = runMeasurement(step.measure.cmd, state.repoRoot);
         if (value !== null) {
+          const arrow = step.measure.direction === 'up' ? '>=' : '<=';
           measureMet = step.measure.direction === 'up'
             ? value >= step.measure.target
             : value <= step.measure.target;
           stepState.measurement = { value, timestamp: Date.now() };
+          if (!measureMet) {
+            console.log(chalk.yellow(`    measure: ${value} (target: ${arrow} ${step.measure.target})`));
+          }
+        } else {
+          measureMet = false;
+          console.log(chalk.yellow(`    measure failed${error ? `: ${error}` : ''}`));
         }
       }
 
-      if (allPassed && measureMet && step.verification_commands.length > 0) {
+      if (allPassed && measureMet) {
         // Step completed — advance
         stepState.status = 'completed';
         stepState.completedAt = Date.now();
@@ -601,14 +635,21 @@ export async function runPostCycleMaintenance(state: AutoSessionState, scope: st
           state.activeTrajectory = null;
           state.activeTrajectoryState = null;
           state.currentTrajectoryStep = null;
+        } else {
+          // No next step available but trajectory isn't complete — blocked by failed dependencies
+          console.log(chalk.yellow(`  Trajectory "${state.activeTrajectory.name}" stalled (remaining steps blocked by dependencies)`));
+          saveTrajectoryState(state.repoRoot, state.activeTrajectoryState);
+          state.activeTrajectory = null;
+          state.activeTrajectoryState = null;
+          state.currentTrajectoryStep = null;
         }
       } else {
         // Step not yet complete — increment attempt counter
         stepState.cyclesAttempted++;
         stepState.lastAttemptedCycle = state.cycleCount;
 
-        // Check for stuck
-        const stuckId = trajectoryStuck(state.activeTrajectoryState.stepStates);
+        // Check for stuck (use per-step max_retries if set)
+        const stuckId = trajectoryStuck(state.activeTrajectoryState.stepStates, step.max_retries);
         if (stuckId) {
           console.log(chalk.yellow(`  Trajectory step "${step.title}" stuck after ${stepState.cyclesAttempted} cycles`));
           stepState.status = 'failed';
@@ -621,6 +662,13 @@ export async function runPostCycleMaintenance(state: AutoSessionState, scope: st
             state.activeTrajectoryState.currentStepId = next.id;
             state.activeTrajectoryState.stepStates[next.id].status = 'active';
             console.log(chalk.cyan(`  -> Skipping to next step: ${next.title}`));
+          } else {
+            // No more steps — trajectory is done (all remaining steps failed or completed)
+            console.log(chalk.yellow(`  Trajectory "${state.activeTrajectory.name}" ended (no remaining steps)`));
+            saveTrajectoryState(state.repoRoot, state.activeTrajectoryState);
+            state.activeTrajectory = null;
+            state.activeTrajectoryState = null;
+            state.currentTrajectoryStep = null;
           }
         }
       }
@@ -632,7 +680,7 @@ export async function runPostCycleMaintenance(state: AutoSessionState, scope: st
   }
 
   // Pause between cycles
-  if (state.runMode === 'wheel' && !state.shutdownRequested) {
+  if (state.runMode === 'spin' && !state.shutdownRequested) {
     console.log(chalk.gray('Pausing before next cycle...'));
     await sleep(5000);
   }

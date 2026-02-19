@@ -12,6 +12,7 @@ import {
   parseTrajectoryYaml,
   createInitialStepStates,
   getNextStep,
+  detectCycle,
 } from '@promptwheel/core/trajectory/shared';
 
 // ---------------------------------------------------------------------------
@@ -46,8 +47,8 @@ export function loadTrajectories(repoRoot: string): Trajectory[] {
       if (trajectory.name && trajectory.steps.length > 0) {
         trajectories.push(trajectory);
       }
-    } catch {
-      // Skip malformed trajectory files
+    } catch (err) {
+      console.warn(`Warning: failed to load trajectory ${file}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -84,7 +85,9 @@ export function saveTrajectoryState(repoRoot: string, state: TrajectoryState): v
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(p, JSON.stringify(state, null, 2));
+  const tmp = p + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.renameSync(tmp, p);
 }
 
 /** Clear trajectory state (deactivate). */
@@ -103,6 +106,13 @@ export function clearTrajectoryState(repoRoot: string): void {
 export function activateTrajectory(repoRoot: string, name: string): TrajectoryState | null {
   const trajectory = loadTrajectory(repoRoot, name);
   if (!trajectory) return null;
+
+  // Reject trajectories with circular dependencies
+  const cycle = detectCycle(trajectory.steps);
+  if (cycle) {
+    console.warn(`Cannot activate trajectory "${name}": circular dependency detected: ${cycle.join(' → ')}`);
+    return null;
+  }
 
   const stepStates = createInitialStepStates(trajectory);
   const firstStep = getNextStep(trajectory, stepStates);

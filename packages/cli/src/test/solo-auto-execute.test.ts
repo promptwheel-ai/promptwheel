@@ -30,8 +30,17 @@ vi.mock('../lib/solo-ticket.js', () => ({
 vi.mock('../lib/run-state.js', () => ({
   recordQualitySignal: vi.fn().mockResolvedValue(undefined),
   recordFormulaTicketOutcome: vi.fn().mockResolvedValue(undefined),
+  recordCategoryOutcome: vi.fn().mockResolvedValue(undefined),
   pushRecentDiff: vi.fn().mockResolvedValue(undefined),
   readRunState: vi.fn().mockReturnValue({ totalCycles: 5, formulaStats: {} }),
+}));
+
+vi.mock('../lib/error-ledger.js', () => ({
+  appendErrorLedger: vi.fn(),
+}));
+
+vi.mock('../lib/pr-outcomes.js', () => ({
+  appendPrOutcome: vi.fn(),
 }));
 
 vi.mock('../lib/qa-stats.js', () => ({}));

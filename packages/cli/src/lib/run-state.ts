@@ -35,6 +35,23 @@ export interface FormulaStats {
   closedCount?: number;
 }
 
+export interface CategorySuccessStats {
+  proposals: number;
+  success: number;
+  failure: number;
+  successRate: number;
+  confidenceAdjustment: number;
+  lastUpdatedCycle: number;
+}
+
+export interface LearningSnapshot {
+  ts: number;
+  total: number;
+  applied: number;
+  successRate: number;
+  lowPerformers: string[];
+}
+
 export interface RunState {
   /** Total scout cycles completed (persists across sessions) */
   totalCycles: number;
@@ -58,6 +75,10 @@ export interface RunState {
     qaPassed: number;
     qaFailed: number;
   };
+  /** Per-category success/failure stats for confidence calibration */
+  categoryStats?: Record<string, CategorySuccessStats>;
+  /** Learning ROI snapshots (ring buffer, max 20) */
+  learningSnapshots?: LearningSnapshot[];
 }
 
 const RUN_STATE_FILE = 'run-state.json';
@@ -111,6 +132,8 @@ export function readRunState(repoRoot: string): RunState {
       recentCycles: Array.isArray(parsed.recentCycles) ? parsed.recentCycles : [],
       recentDiffs: Array.isArray(parsed.recentDiffs) ? parsed.recentDiffs : [],
       qualitySignals: parsed.qualitySignals ?? undefined,
+      categoryStats: parsed.categoryStats ?? undefined,
+      learningSnapshots: Array.isArray(parsed.learningSnapshots) ? parsed.learningSnapshots : undefined,
       formulaStats: (() => {
         const statsRaw = parsed.formulaStats ?? {};
         for (const key of Object.keys(statsRaw)) {
@@ -377,4 +400,81 @@ export function getQualityRate(projectRoot: string): number {
   const qs = state.qualitySignals;
   if (!qs || qs.totalTickets === 0) return 1;
   return qs.firstPassSuccess / qs.totalTickets;
+}
+
+/**
+ * Record a category outcome and update confidence adjustment.
+ *
+ * Uses the enterprise algorithm: round((actualRate - 0.70) / 0.10) * 5, clamped [-20, +20].
+ */
+export function recordCategoryOutcome(repoRoot: string, category: string, success: boolean): Promise<void> {
+  return withRunStateLock(() => {
+    const state = readRunState(repoRoot);
+    const stats = state.categoryStats ??= {};
+    const entry = stats[category] ??= {
+      proposals: 0,
+      success: 0,
+      failure: 0,
+      successRate: 0,
+      confidenceAdjustment: 0,
+      lastUpdatedCycle: 0,
+    };
+
+    entry.proposals++;
+    if (success) {
+      entry.success++;
+    } else {
+      entry.failure++;
+    }
+    entry.successRate = entry.proposals > 0 ? entry.success / entry.proposals : 0;
+    entry.confidenceAdjustment = Math.round(
+      Math.max(-20, Math.min(20, Math.round((entry.successRate - 0.70) / 0.10) * 5))
+    );
+    entry.lastUpdatedCycle = state.totalCycles;
+    writeRunState(repoRoot, state);
+  });
+}
+
+/** Max learning snapshots to keep (ring buffer) */
+const MAX_LEARNING_SNAPSHOTS = 20;
+
+/**
+ * Snapshot learning ROI: calls getLearningEffectiveness and appends to ring buffer.
+ */
+export function snapshotLearningROI(repoRoot: string, getLearningEffectiveness: (root: string) => {
+  total: number;
+  applied: number;
+  successRate: number;
+  topPerformers: Array<{ id: string; text: string; effectiveness: number }>;
+}): Promise<void> {
+  return withRunStateLock(() => {
+    const state = readRunState(repoRoot);
+    const effectiveness = getLearningEffectiveness(repoRoot);
+
+    const lowPerformers = effectiveness.topPerformers
+      .filter(p => p.effectiveness < 0.3)
+      .map(p => p.text.slice(0, 80));
+
+    const snapshots = state.learningSnapshots ??= [];
+    snapshots.push({
+      ts: Date.now(),
+      total: effectiveness.total,
+      applied: effectiveness.applied,
+      successRate: effectiveness.successRate,
+      lowPerformers,
+    });
+    if (snapshots.length > MAX_LEARNING_SNAPSHOTS) {
+      snapshots.splice(0, snapshots.length - MAX_LEARNING_SNAPSHOTS);
+    }
+    state.learningSnapshots = snapshots;
+    writeRunState(repoRoot, state);
+  });
+}
+
+/**
+ * Get confidence adjustment for a category. Returns 0 if no data.
+ */
+export function getCategoryConfidenceAdjustment(repoRoot: string, category: string): number {
+  const state = readRunState(repoRoot);
+  return state.categoryStats?.[category]?.confidenceAdjustment ?? 0;
 }

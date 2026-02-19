@@ -30,7 +30,7 @@ export async function handleQaCommandResult(ctx: EventContext, payload: Record<s
     recordCommandFailure(s.spindle, command, output);
   }
 
-  // Record QA command stats for wheel tracking
+  // Record QA command stats for spin tracking
   recordQaCommandResult(ctx.run.rootPath, command, {
     passed: success,
     durationMs,
@@ -67,7 +67,7 @@ export async function handleQaPassed(ctx: EventContext, payload: Record<string, 
     s.injected_learning_ids = [];
   }
 
-  // Record quality signal for wheel tracking
+  // Record quality signal for spin tracking
   recordQualitySignal(ctx.run.rootPath, 'qa_pass');
 
   // Record success learning with cochange data from the plan
@@ -141,7 +141,7 @@ export async function handleQaFailed(ctx: EventContext, payload: Record<string, 
     return { processed: true, phase_changed: false, message: 'QA failed outside QA phase' };
   }
 
-  // Record quality signal for wheel tracking
+  // Record quality signal for spin tracking
   recordQualitySignal(ctx.run.rootPath, 'qa_fail');
 
   // Record QA failure in spindle (for stall detection — no progress)

@@ -108,9 +108,14 @@ export function registerTrajectoryTools(server: McpServer, getState: () => Sessi
             acceptance_criteria: step.acceptance_criteria,
             verification_commands: step.verification_commands,
             depends_on: step.depends_on,
+            max_retries: step.max_retries,
             measure: step.measure,
             status: stepState?.status ?? 'pending',
             cyclesAttempted: stepState?.cyclesAttempted ?? 0,
+            lastAttemptedCycle: stepState?.lastAttemptedCycle ?? 0,
+            failureReason: stepState?.failureReason,
+            measurement: stepState?.measurement,
+            completedAt: stepState?.completedAt,
           };
         });
 
@@ -149,12 +154,24 @@ export function registerTrajectoryTools(server: McpServer, getState: () => Sessi
     async (params) => {
       const state = getState();
       try {
+        // Check existence first to distinguish not-found from cycle
+        const existingTraj = loadTrajectory(state.projectPath, params.name);
+        if (!existingTraj) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ error: `Trajectory "${params.name}" not found` }),
+            }],
+            isError: true,
+          };
+        }
+
         const trajState = activateTrajectory(state.projectPath, params.name);
         if (!trajState) {
           return {
             content: [{
               type: 'text' as const,
-              text: JSON.stringify({ error: `Trajectory "${params.name}" not found` }),
+              text: JSON.stringify({ error: `Cannot activate trajectory "${params.name}": circular dependency detected in steps` }),
             }],
             isError: true,
           };
@@ -347,6 +364,7 @@ export function registerTrajectoryTools(server: McpServer, getState: () => Sessi
 
         // Mark as skipped
         stepState.status = 'skipped';
+        stepState.completedAt = Date.now();
 
         // Find the next step
         const trajectory = loadTrajectory(state.projectPath, trajState.trajectoryName);

@@ -55,7 +55,7 @@ Start an improvement session. Scouts the codebase, creates tickets, executes cha
 
 ```
 /promptwheel:run                                  Single cycle
-/promptwheel:run wheel hours=4                    Wheel mode (unattended)
+/promptwheel:run spin hours=4                     Spin mode (unattended)
 /promptwheel:run hours=4 batch_size=20            4-hour run with milestone PRs
 /promptwheel:run formula=security-audit           Focus on vulnerabilities
 /promptwheel:run deep=true                        Architectural review

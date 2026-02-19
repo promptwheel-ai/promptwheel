@@ -18,6 +18,7 @@ import {
   gitExecFile,
 } from './solo-git.js';
 import { recordMergeOutcome, saveSectors } from './sectors.js';
+import { updatePrOutcome } from './pr-outcomes.js';
 import { displayConvergenceSummary, displayWheelHealth, recordSessionHistory, displayFinalSummary, type SessionSummaryContext } from './solo-session-summary.js';
 import { generateSessionReport, writeSessionReport } from './session-report.js';
 import { writeDaemonWakeMetrics, type DaemonWakeMetrics } from './daemon.js';
@@ -108,6 +109,7 @@ async function finalizeSafe(state: AutoSessionState): Promise<number> {
             if (state.sectorState) recordMergeOutcome(state.sectorState, prMeta.sectorId, true);
             recordFormulaMergeOutcome(state.repoRoot, prMeta.formula, true);
           }
+          try { updatePrOutcome(state.repoRoot, pr.url, 'merged', Date.now()); } catch { /* non-fatal */ }
           if (state.autoConf.learningsEnabled) {
             addLearning(state.repoRoot, {
               text: `PR merged: ${pr.url}`.slice(0, 200),
@@ -128,6 +130,7 @@ async function finalizeSafe(state: AutoSessionState): Promise<number> {
             if (state.sectorState) recordMergeOutcome(state.sectorState, prMeta.sectorId, false);
             recordFormulaMergeOutcome(state.repoRoot, prMeta.formula, false);
           }
+          try { updatePrOutcome(state.repoRoot, pr.url, 'closed', Date.now()); } catch { /* non-fatal */ }
           if (state.autoConf.learningsEnabled) {
             addLearning(state.repoRoot, {
               text: `PR closed/rejected: ${pr.url}`.slice(0, 200),
@@ -170,7 +173,7 @@ async function finalizeSafe(state: AutoSessionState): Promise<number> {
       totalClosedPrs: state.totalClosedPrs,
       totalMilestonePrs: state.totalMilestonePrs,
       milestoneMode: state.milestoneMode,
-      isContinuous: state.runMode === 'wheel',
+      isContinuous: state.runMode === 'spin',
       shutdownRequested: state.shutdownRequested,
       maxPrs: state.maxPrs,
       endTime: state.endTime,
@@ -203,7 +206,7 @@ async function finalizeSafe(state: AutoSessionState): Promise<number> {
     totalClosedPrs: state.totalClosedPrs,
     totalMilestonePrs: state.totalMilestonePrs,
     milestoneMode: state.milestoneMode,
-    isContinuous: state.runMode === 'wheel',
+    isContinuous: state.runMode === 'spin',
     shutdownRequested: state.shutdownRequested,
     maxPrs: state.maxPrs,
     endTime: state.endTime,

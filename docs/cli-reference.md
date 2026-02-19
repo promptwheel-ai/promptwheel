@@ -257,7 +257,7 @@ Runs all configured QA commands (typecheck, lint, test) and reports results.
 
 ### `promptwheel solo auto`
 
-Run in auto mode (planning by default, `--wheel` for continuous).
+Run in auto mode (planning by default, `--spin` for continuous).
 
 ```bash
 promptwheel solo auto [mode]

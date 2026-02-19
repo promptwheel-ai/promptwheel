@@ -41,11 +41,11 @@ PromptWheel configuration is stored in `.promptwheel/config.json`. All settings 
 |-------|---------|-------------|
 | `defaultScope` | `"**"` | Glob scope for scanning. CLI also searches `src`, `lib`, `app`, `packages`, etc. |
 | `maxTestRatio` | `0.4` | Max fraction of test proposals per batch. Prevents test-heavy batches; remaining slots go to refactors/perf. |
-| `maxPrs` | `3` | Max PRs per run (unlimited in wheel mode) |
+| `maxPrs` | `3` | Max PRs per run (unlimited in spin mode) |
 | `draftPrs` | `true` | Create draft PRs |
 | `docsAudit` | `true` | Set `false` to disable auto docs-audit |
 | `docsAuditInterval` | `3` | Auto docs-audit every N cycles |
-| `pullEveryNCycles` | `5` | Pull from origin every N cycles in wheel mode (0 = disabled) |
+| `pullEveryNCycles` | `5` | Pull from origin every N cycles in spin mode (0 = disabled) |
 | `pullPolicy` | `"halt"` | On pull divergence: `"halt"` stops the session, `"warn"` logs and continues |
 | `guidelinesRefreshCycles` | `10` | Re-read guidelines file every N cycles during long runs (0 = disabled) |
 | `autoCreateGuidelines` | `true` | Auto-create baseline AGENTS.md/CLAUDE.md if none exists (set `false` to disable) |
@@ -54,7 +54,7 @@ PromptWheel configuration is stored in `.promptwheel/config.json`. All settings 
 | `pluginParallel` | `2` | Number of parallel tickets in plugin mode (max: 5). Set to 1 for sequential. |
 | `batchTokenBudget` | auto | Token budget per scout batch. Default: 20k (Codex), 10k (Claude). Higher = fewer batches, faster scouting. |
 | `scoutTimeoutMs` | auto | Timeout per scout batch in ms. Default: 300000 (Codex), 120000 (Claude). |
-| `maxFilesPerCycle` | `60` | Maximum files scanned per scout cycle. Increase for large repos with `--wheel`. |
+| `maxFilesPerCycle` | `60` | Maximum files scanned per scout cycle. Increase for large repos with `--spin`. |
 | `learningsEnabled` | `true` | Enable cross-run learning from failures |
 | `learningsBudget` | `2000` | Character budget for learnings in prompts |
 
@@ -69,7 +69,7 @@ PromptWheel accumulates state over time (run folders, history, artifacts). The r
 | `maxRuns` | `50` | Keep last N run folders |
 | `maxHistoryEntries` | `100` | Keep last N lines in history.ndjson |
 | `maxArtifactsPerRun` | `20` | Keep newest N artifact files per run |
-| `maxSpoolArchives` | `5` | Keep last N archived spool files |
+| `maxBufferArchives` | `5` | Keep last N archived buffer files |
 | `maxDeferredProposals` | `20` | Max deferred proposals in run-state |
 | `maxCompletedTickets` | `200` | Hard-delete oldest completed tickets beyond cap |
 | `maxSpindleFileEditKeys` | `50` | Cap file_edit_counts keys in spindle state |
@@ -77,7 +77,7 @@ PromptWheel accumulates state over time (run folders, history, artifacts). The r
 
 ### Auto-prune
 
-On every `promptwheel` session start, stale items are pruned automatically: run folders, history, artifacts, spool archives, deferred proposals, completed tickets, and orphaned worktrees.
+On every `promptwheel` session start, stale items are pruned automatically: run folders, history, artifacts, buffer archives, deferred proposals, completed tickets, and orphaned worktrees.
 
 ### Manual prune
 

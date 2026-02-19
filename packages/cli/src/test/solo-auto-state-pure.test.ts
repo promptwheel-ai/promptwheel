@@ -186,19 +186,19 @@ describe('shouldContinue', () => {
     });
   });
 
-  // ── Wheel mode ignores cycle limit ─────────────────────────────────────
-  describe('wheel mode ignores cycle limit', () => {
+  // ── Spin mode ignores cycle limit ──────────────────────────────────────
+  describe('spin mode ignores cycle limit', () => {
     it('returns true even when cycleCount exceeds maxCycles', () => {
       expect(shouldContinue(makeState({
-        runMode: 'wheel',
+        runMode: 'spin',
         cycleCount: 999,
         maxCycles: 3,
       }))).toBe(true);
     });
 
-    it('returns true at exactly maxCycles in wheel mode', () => {
+    it('returns true at exactly maxCycles in spin mode', () => {
       expect(shouldContinue(makeState({
-        runMode: 'wheel',
+        runMode: 'spin',
         cycleCount: 3,
         maxCycles: 3,
       }))).toBe(true);

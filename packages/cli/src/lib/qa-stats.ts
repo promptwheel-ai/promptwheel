@@ -379,7 +379,9 @@ export function buildBaselineHealthBlock(projectRoot: string, currentScope?: str
     lines.push(`### ${name}`);
     if (detail?.cmd) lines.push(`Command: \`${detail.cmd}\``);
     if (detail?.output) {
-      let outputLines = detail.output.split('\n');
+      // Cap raw output before split to prevent large allocations
+      const capped = detail.output.length > 10000 ? detail.output.slice(0, 10000) : detail.output;
+      let outputLines = capped.split('\n');
       // If scoped, filter to lines mentioning files in this sector
       if (scopePrefix && scopePrefix !== '.') {
         const scoped = outputLines.filter((l: string) => l.includes(scopePrefix));

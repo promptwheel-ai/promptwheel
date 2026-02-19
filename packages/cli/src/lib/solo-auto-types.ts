@@ -30,7 +30,7 @@ import type { InteractiveConsole } from './solo-stdin.js';
 // ── Foundational types ──────────────────────────────────────────────────────
 // Defined here (not in solo-auto-state.ts) to avoid circular imports.
 
-export type RunMode = 'planning' | 'wheel';
+export type RunMode = 'planning' | 'spin';
 
 export interface AutoModeOptions {
   // Primary options
@@ -40,7 +40,7 @@ export interface AutoModeOptions {
   formula?: string;
   dryRun?: boolean;
   verbose?: boolean;
-  wheel?: boolean;
+  spin?: boolean;
 
   // Secondary options (hidden but functional)
   codex?: boolean;

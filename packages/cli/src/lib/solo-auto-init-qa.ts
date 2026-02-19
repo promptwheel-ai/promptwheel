@@ -192,11 +192,13 @@ Read the error output above, then fix the source code. Minimal, targeted changes
       };
     }
     const baselinePath = path.join(getPromptwheelDir(repoRoot), 'qa-baseline.json');
-    fs.writeFileSync(baselinePath, JSON.stringify({
+    const blTmp = baselinePath + '.tmp';
+    fs.writeFileSync(blTmp, JSON.stringify({
       failures: baselineFailures,
       details: baselineDetails,
       timestamp: Date.now(),
     }));
+    fs.renameSync(blTmp, baselinePath);
   } catch { /* non-fatal */ }
 
   // Cache baseline for reuse in the first execute cycle

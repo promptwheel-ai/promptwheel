@@ -21,6 +21,7 @@ import {
   parseTrajectoryYaml,
   serializeTrajectoryToYaml,
   createInitialStepStates,
+  detectCycle,
   type Trajectory,
   type TrajectoryStep,
   type StepState,
@@ -36,6 +37,7 @@ function makeStep(partial: Partial<TrajectoryStep> & Pick<TrajectoryStep, 'id'>)
     acceptance_criteria: partial.acceptance_criteria ?? [],
     verification_commands: partial.verification_commands ?? [],
     depends_on: partial.depends_on ?? [],
+    max_retries: partial.max_retries,
     measure: partial.measure,
   };
 }
@@ -71,12 +73,12 @@ describe('stepReady', () => {
     expect(stepReady(step, states)).toBe(false);
   });
 
-  it('treats skipped dependencies as not ready (only completed satisfies deps)', () => {
+  it('treats skipped dependencies as ready (skipping unblocks dependents)', () => {
     const states: Record<string, StepState> = {
       a: { stepId: 'a', status: 'skipped', cyclesAttempted: 0, lastAttemptedCycle: 0 },
     };
     const step = makeStep({ id: 'b', depends_on: ['a'] });
-    expect(stepReady(step, states)).toBe(false);
+    expect(stepReady(step, states)).toBe(true);
   });
 
   it('returns true when all dependencies are completed', () => {
@@ -84,6 +86,33 @@ describe('stepReady', () => {
       a: { stepId: 'a', status: 'completed', cyclesAttempted: 1, lastAttemptedCycle: 1, completedAt: Date.now() },
     };
     const step = makeStep({ id: 'b', depends_on: ['a'] });
+    expect(stepReady(step, states)).toBe(true);
+  });
+
+  it('requires all multi-dependencies to be satisfied (mixed skipped + pending)', () => {
+    const states: Record<string, StepState> = {
+      a: { stepId: 'a', status: 'skipped', cyclesAttempted: 0, lastAttemptedCycle: 0 },
+      b: { stepId: 'b', status: 'pending', cyclesAttempted: 0, lastAttemptedCycle: 0 },
+    };
+    const step = makeStep({ id: 'c', depends_on: ['a', 'b'] });
+    expect(stepReady(step, states)).toBe(false);
+  });
+
+  it('returns true when all multi-dependencies are skipped', () => {
+    const states: Record<string, StepState> = {
+      a: { stepId: 'a', status: 'skipped', cyclesAttempted: 0, lastAttemptedCycle: 0 },
+      b: { stepId: 'b', status: 'skipped', cyclesAttempted: 0, lastAttemptedCycle: 0 },
+    };
+    const step = makeStep({ id: 'c', depends_on: ['a', 'b'] });
+    expect(stepReady(step, states)).toBe(true);
+  });
+
+  it('returns true with mixed completed + skipped dependencies', () => {
+    const states: Record<string, StepState> = {
+      a: { stepId: 'a', status: 'completed', cyclesAttempted: 1, lastAttemptedCycle: 1, completedAt: Date.now() },
+      b: { stepId: 'b', status: 'skipped', cyclesAttempted: 0, lastAttemptedCycle: 0 },
+    };
+    const step = makeStep({ id: 'c', depends_on: ['a', 'b'] });
     expect(stepReady(step, states)).toBe(true);
   });
 });
@@ -157,6 +186,20 @@ describe('getNextStep', () => {
     const next = getNextStep(trajectory, states);
     expect(next).toBeNull();
   });
+
+  it('picks up dependent step after dependency is skipped', () => {
+    const trajectory = makeTrajectory([
+      makeStep({ id: 'a' }),
+      makeStep({ id: 'b', depends_on: ['a'] }),
+      makeStep({ id: 'c', depends_on: ['b'] }),
+    ]);
+    const states = createInitialStepStates(trajectory);
+    states.a.status = 'completed';
+    states.b.status = 'skipped';
+
+    const next = getNextStep(trajectory, states);
+    expect(next?.id).toBe('c');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -191,6 +234,22 @@ describe('trajectoryComplete', () => {
   it('returns false when a step state is missing', () => {
     const trajectory = makeTrajectory([makeStep({ id: 'a' })]);
     expect(trajectoryComplete(trajectory, {})).toBe(false);
+  });
+
+  it('returns true when all steps are skipped (none completed)', () => {
+    const trajectory = makeTrajectory([makeStep({ id: 'a' }), makeStep({ id: 'b' })]);
+    const states = createInitialStepStates(trajectory);
+    states.a.status = 'skipped';
+    states.b.status = 'skipped';
+    expect(trajectoryComplete(trajectory, states)).toBe(true);
+  });
+
+  it('returns false when one step is failed and others are completed', () => {
+    const trajectory = makeTrajectory([makeStep({ id: 'a' }), makeStep({ id: 'b' })]);
+    const states = createInitialStepStates(trajectory);
+    states.a.status = 'completed';
+    states.b.status = 'failed';
+    expect(trajectoryComplete(trajectory, states)).toBe(false);
   });
 });
 
@@ -277,7 +336,7 @@ describe('formatTrajectoryForPrompt', () => {
     expect(formatted).toContain('**Scope:** `packages/core/**`');
     expect(formatted).toContain('**Categories:** type-safety, cleanup');
     expect(formatted).toContain('**Measure:** target >= 10');
-    expect(formatted).toContain('**Attempts:** 2 cycle(s) so far');
+    expect(formatted).toContain('**Attempts:** 2/3 cycle(s)');
 
     // Upcoming steps include dependency hints by id
     expect(formatted).toContain('### Upcoming Steps');
@@ -295,6 +354,22 @@ describe('formatTrajectoryForPrompt', () => {
 
     const formatted = formatTrajectoryForPrompt(trajectory, states, step);
     expect(formatted).not.toContain('### Completed Steps');
+  });
+
+  it('shows attempts with per-step max_retries in prompt', () => {
+    const step = makeStep({
+      id: 'a',
+      title: 'Test',
+      description: 'Test step.',
+      depends_on: [],
+      max_retries: 5,
+    });
+    const trajectory = makeTrajectory([step]);
+    const states = createInitialStepStates(trajectory);
+    states['a'].cyclesAttempted = 2;
+
+    const formatted = formatTrajectoryForPrompt(trajectory, states, step);
+    expect(formatted).toContain('**Attempts:** 2/5 cycle(s)');
   });
 
   it('renders a down-direction measure using <=', () => {
@@ -454,6 +529,119 @@ steps:
     expect(result.steps).toHaveLength(1);
     expect(result.steps[0]!.acceptance_criteria).toEqual([]);
     expect(result.steps[0]!.verification_commands).toEqual([]);
+  });
+
+  it('parses max_retries field', () => {
+    const yaml = `name: t
+description: d
+steps:
+  - id: a
+    title: A
+    description: d
+    max_retries: 5
+  - id: b
+    title: B
+    description: d
+`;
+    const result = parseTrajectoryYaml(yaml);
+    expect(result.steps).toHaveLength(2);
+    expect(result.steps[0]!.max_retries).toBe(5);
+    expect(result.steps[1]!.max_retries).toBeUndefined();
+  });
+
+  it('ignores invalid max_retries values', () => {
+    const yaml = `name: t
+description: d
+steps:
+  - id: a
+    title: A
+    description: d
+    max_retries: -1
+  - id: b
+    title: B
+    description: d
+    max_retries: abc
+`;
+    const result = parseTrajectoryYaml(yaml);
+    expect(result.steps[0]!.max_retries).toBeUndefined();
+    expect(result.steps[1]!.max_retries).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// detectCycle
+// ---------------------------------------------------------------------------
+
+describe('detectCycle', () => {
+  it('returns null when there are no cycles', () => {
+    const steps = [
+      makeStep({ id: 'a' }),
+      makeStep({ id: 'b', depends_on: ['a'] }),
+      makeStep({ id: 'c', depends_on: ['b'] }),
+    ];
+    expect(detectCycle(steps)).toBeNull();
+  });
+
+  it('detects a simple A↔B cycle', () => {
+    const steps = [
+      makeStep({ id: 'a', depends_on: ['b'] }),
+      makeStep({ id: 'b', depends_on: ['a'] }),
+    ];
+    const result = detectCycle(steps);
+    expect(result).not.toBeNull();
+    expect(result).toContain('a');
+    expect(result).toContain('b');
+  });
+
+  it('detects a longer chain cycle (A→B→C→A)', () => {
+    const steps = [
+      makeStep({ id: 'a', depends_on: ['c'] }),
+      makeStep({ id: 'b', depends_on: ['a'] }),
+      makeStep({ id: 'c', depends_on: ['b'] }),
+    ];
+    const result = detectCycle(steps);
+    expect(result).not.toBeNull();
+    expect(result).toHaveLength(3);
+  });
+
+  it('detects a single node self-dependency', () => {
+    const steps = [
+      makeStep({ id: 'a', depends_on: ['a'] }),
+    ];
+    const result = detectCycle(steps);
+    expect(result).not.toBeNull();
+    expect(result).toContain('a');
+  });
+
+  it('returns null for an empty step list', () => {
+    expect(detectCycle([])).toBeNull();
+  });
+
+  it('returns null for independent steps (no deps)', () => {
+    const steps = [
+      makeStep({ id: 'a' }),
+      makeStep({ id: 'b' }),
+      makeStep({ id: 'c' }),
+    ];
+    expect(detectCycle(steps)).toBeNull();
+  });
+
+  it('handles disconnected DAG components (no false positive)', () => {
+    const steps = [
+      makeStep({ id: 'a', depends_on: ['b'] }),
+      makeStep({ id: 'b' }),
+      makeStep({ id: 'c', depends_on: ['d'] }),
+      makeStep({ id: 'd' }),
+    ];
+    expect(detectCycle(steps)).toBeNull();
+  });
+
+  it('ignores depends_on referencing non-existent step (not a cycle)', () => {
+    const steps = [
+      makeStep({ id: 'a', depends_on: ['missing'] }),
+      makeStep({ id: 'b' }),
+    ];
+    expect(detectCycle(steps)).toBeNull();
   });
 });
 

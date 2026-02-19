@@ -27,8 +27,8 @@ export interface RetentionConfig {
   maxHistoryEntries: number;
   /** Keep newest N artifact files per run folder (default 20) */
   maxArtifactsPerRun: number;
-  /** Keep last N archived spool files (default 5) */
-  maxSpoolArchives: number;
+  /** Keep last N archived buffer files (default 5) */
+  maxBufferArchives: number;
   /** Max deferred proposals in run-state.json (default 20) */
   maxDeferredProposals: number;
   /** Hard-delete oldest completed tickets beyond this cap (default 200) */
@@ -54,7 +54,7 @@ export const DEFAULT_RETENTION_CONFIG: RetentionConfig = {
   maxRuns: 50,
   maxHistoryEntries: 100,
   maxArtifactsPerRun: 20,
-  maxSpoolArchives: 5,
+  maxBufferArchives: 5,
   maxDeferredProposals: 20,
   maxCompletedTickets: 200,
   maxSpindleFileEditKeys: 200,
@@ -131,7 +131,7 @@ export interface AutoConfig {
 }
 
 /**
- * Default auto config — permissive wheel settings.
+ * Default auto config — permissive spin settings.
  * Let the scout and dedup do their jobs; don't gate artificially.
  */
 export const DEFAULT_AUTO_CONFIG: AutoConfig = {

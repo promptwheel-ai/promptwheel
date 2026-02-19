@@ -24,14 +24,14 @@ Auto-detects backend from environment:
 
 Examples:
   promptwheel                    # Scout all, approve roadmap, execute
-  promptwheel --wheel            # Wheel mode (run until Ctrl+C)
-  promptwheel --wheel --hours 4  # Timed wheel
+  promptwheel --spin             # Spin mode (run until Ctrl+C)
+  promptwheel --spin --hours 4   # Timed spin
   promptwheel --pr               # Create PRs instead of direct commits
   promptwheel --formula deep     # Architectural review
   promptwheel ci                 # Fix CI failures
 `)
     // Primary options (visible in help)
-    .option('--wheel', 'Wheel mode — scout, fix, repeat (run until Ctrl+C or --hours expires)')
+    .option('--spin', 'Spin mode — scout, fix, repeat (run until Ctrl+C or --hours expires)')
     .option('--hours <n>', 'Run for N hours (accepts decimals: 0.5 = 30min)')
     .option('--pr', 'Create pull requests instead of direct commits')
     .option('--scope <path>', 'Directory to focus on')
@@ -82,7 +82,7 @@ Examples:
     .addOption(new Option('--qa-fix').default(true).hideHelp())
     .addOption(new Option('--no-qa-fix').hideHelp())
     .action(async (mode: string | undefined, options: {
-      wheel?: boolean;
+      spin?: boolean;
       dryRun?: boolean;
       scope?: string;
       maxPrs?: string;
@@ -162,7 +162,7 @@ Examples:
       if (effectiveMode === 'auto') {
         await runAutoMode({
           ...options,
-          wheel: options.wheel,
+          spin: options.spin,
           pr: options.pr,
           formula: options.formula,
           tui: options.tui,

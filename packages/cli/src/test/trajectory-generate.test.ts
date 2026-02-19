@@ -217,6 +217,32 @@ describe('validateAndBuild', () => {
     expect(result.steps[0].measure?.direction).toBe('up');
   });
 
+  it('throws on circular dependencies (simple A↔B)', () => {
+    const raw = {
+      name: 'cycle',
+      description: 'Circular deps',
+      steps: [
+        { id: 'a', title: 'A', description: 'First', depends_on: ['b'] },
+        { id: 'b', title: 'B', description: 'Second', depends_on: ['a'] },
+      ],
+    };
+    expect(() => validateAndBuild(raw)).toThrow('Circular dependency detected');
+  });
+
+  it('throws on longer circular dependency chain (A→B→C→D→A)', () => {
+    const raw = {
+      name: 'long-cycle',
+      description: 'Long cycle',
+      steps: [
+        { id: 'a', title: 'A', description: 'First', depends_on: ['d'] },
+        { id: 'b', title: 'B', description: 'Second', depends_on: ['a'] },
+        { id: 'c', title: 'C', description: 'Third', depends_on: ['b'] },
+        { id: 'd', title: 'D', description: 'Fourth', depends_on: ['c'] },
+      ],
+    };
+    expect(() => validateAndBuild(raw)).toThrow('Circular dependency detected');
+  });
+
   it('coerces non-string fields to strings', () => {
     const raw = {
       name: 'coerce',

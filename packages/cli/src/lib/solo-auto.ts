@@ -1,5 +1,5 @@
 /**
- * Solo mode wheel execution
+ * Solo mode spin execution
  */
 
 import chalk from 'chalk';
@@ -318,7 +318,7 @@ export async function runAutoWorkMode(options: {
  * Run auto mode - the full "just run it" experience.
  *
  * Defaults to planning mode: scout all → roadmap → approve → execute → done.
- * With --wheel (or --hours): wheel loop — scout, fix, repeat.
+ * With --spin (or --hours): spin loop — scout, fix, repeat.
  *
  * In daemon mode, returns the exit code instead of calling process.exit().
  */
@@ -348,7 +348,7 @@ export async function runAutoMode(options: AutoModeOptions): Promise<number> {
 }
 
 /**
- * Wheel mode — scout, fix, repeat until stopped.
+ * Spin mode — scout, fix, repeat until stopped.
  * Runs until Ctrl+C, --hours expires, or cycle/PR limits are hit.
  */
 async function runWheelMode(state: import('./solo-auto-state.js').AutoSessionState): Promise<void> {

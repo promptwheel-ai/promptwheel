@@ -206,7 +206,7 @@ Or use config:
 
 ### Set Time Budgets
 
-Always use `--hours` in CI. Without it, PromptWheel runs a single cycle and exits (which is fine), but `--wheel` without `--hours` would run forever.
+Always use `--hours` in CI. Without it, PromptWheel runs a single cycle and exits (which is fine), but `--spin` without `--hours` would run forever.
 
 ```bash
 # Single cycle (quick, exits when done)
@@ -215,8 +215,8 @@ promptwheel --pr --safe --yes --no-tui
 # Timed run (2 hours, multiple cycles)
 promptwheel --hours 2 --pr --safe --yes --no-tui
 
-# Wheel mode with budget (runs until time expires)
-promptwheel --wheel --hours 2 --pr --safe --yes --no-tui
+# Spin mode with budget (runs until time expires)
+promptwheel --spin --hours 2 --pr --safe --yes --no-tui
 ```
 
 ### Set Minimum Impact Score

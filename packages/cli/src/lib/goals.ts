@@ -1,5 +1,5 @@
 /**
- * Goals — measurable targets that drive wheel formula selection.
+ * Goals — measurable targets that drive spin formula selection.
  *
  * A goal is a formula with a `measure` field. The system measures current
  * state, picks the goal with the biggest gap from target, and works toward it.

@@ -280,7 +280,7 @@ export async function startDaemon(repoRoot: string, config: DaemonConfig): Promi
 
     try {
       const exitCode = await runAutoMode({
-        wheel: true,
+        spin: true,
         cycles: String(config.cyclesPerWake),
         formula: config.formula,
         scope: config.scope,

@@ -319,7 +319,7 @@ describe('runPreCycleMaintenance', () => {
   // -----------------------------------------------------------------------
   it('returns shouldSkipCycle true when backpressure exceeds 0.7', async () => {
     const state = makeState({
-      runMode: 'wheel' as const,
+      runMode: 'spin' as const,
       pendingPrUrls: ['pr1', 'pr2', 'pr3', 'pr4', 'pr5', 'pr6', 'pr7', 'pr8'],
       maxPrs: 10,
       deliveryMode: 'pr',
@@ -334,7 +334,7 @@ describe('runPreCycleMaintenance', () => {
 
   it('does not skip when backpressure is at 0.7 exactly', async () => {
     const state = makeState({
-      runMode: 'wheel' as const,
+      runMode: 'spin' as const,
       pendingPrUrls: ['pr1', 'pr2', 'pr3', 'pr4', 'pr5', 'pr6', 'pr7'],
       maxPrs: 10,
       deliveryMode: 'pr',
@@ -348,7 +348,7 @@ describe('runPreCycleMaintenance', () => {
 
   it('does not apply backpressure in direct delivery mode', async () => {
     const state = makeState({
-      runMode: 'wheel' as const,
+      runMode: 'spin' as const,
       pendingPrUrls: ['pr1', 'pr2', 'pr3', 'pr4', 'pr5', 'pr6', 'pr7', 'pr8'],
       maxPrs: 10,
       deliveryMode: 'direct',
@@ -545,9 +545,9 @@ describe('runPostCycleMaintenance', () => {
   });
 
   // -----------------------------------------------------------------------
-  // 9. Wheel one-liner is printed when cycleCount >= 2
+  // 9. Spin one-liner is printed when cycleCount >= 2
   // -----------------------------------------------------------------------
-  it('prints wheel one-liner when cycleCount >= 2', async () => {
+  it('prints spin one-liner when cycleCount >= 2', async () => {
     writeRunStateRaw({ totalCycles: 1 });
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -560,16 +560,16 @@ describe('runPostCycleMaintenance', () => {
 
     await runPostCycleMaintenance(state, '**', false);
 
-    // Find the wheel one-liner in console output
-    const wheelCall = consoleSpy.mock.calls.find(
-      (args) => typeof args[0] === 'string' && args[0].includes('Wheel:'),
+    // Find the spin one-liner in console output
+    const spinCall = consoleSpy.mock.calls.find(
+      (args) => typeof args[0] === 'string' && args[0].includes('Spin:'),
     );
-    expect(wheelCall).toBeDefined();
+    expect(spinCall).toBeDefined();
 
     consoleSpy.mockRestore();
   });
 
-  it('does not print wheel one-liner when cycleCount < 2', async () => {
+  it('does not print spin one-liner when cycleCount < 2', async () => {
     writeRunStateRaw({ totalCycles: 0 });
 
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -581,10 +581,10 @@ describe('runPostCycleMaintenance', () => {
 
     await runPostCycleMaintenance(state, '**', false);
 
-    const wheelCall = consoleSpy.mock.calls.find(
-      (args) => typeof args[0] === 'string' && args[0].includes('Wheel:'),
+    const spinCall = consoleSpy.mock.calls.find(
+      (args) => typeof args[0] === 'string' && args[0].includes('Spin:'),
     );
-    expect(wheelCall).toBeUndefined();
+    expect(spinCall).toBeUndefined();
 
     consoleSpy.mockRestore();
   });

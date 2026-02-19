@@ -32,7 +32,7 @@ promptwheel --deep                      # Architectural review (shortcut for --f
 
 The `docs-audit` formula cross-references your markdown files (README, CONTRIBUTING, docs/) against the actual codebase to find stale, inaccurate, or outdated documentation.
 
-**Automatic docs-audit:** PromptWheel automatically runs a docs-audit every 3 cycles, tracked across sessions in `.promptwheel/run-state.json`. Whether you run one cycle at a time or in wheel mode, the counter persists — so your 1st, 2nd runs are normal, and the 3rd triggers a docs check.
+**Automatic docs-audit:** PromptWheel automatically runs a docs-audit every 3 cycles, tracked across sessions in `.promptwheel/run-state.json`. Whether you run one cycle at a time or in spin mode, the counter persists — so your 1st, 2nd runs are normal, and the 3rd triggers a docs check.
 
 ```bash
 # Change the interval (default: 3)

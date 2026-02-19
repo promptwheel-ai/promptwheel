@@ -63,7 +63,7 @@ import {
   loadTrajectory,
 } from './trajectory.js';
 import type { Trajectory, TrajectoryState, TrajectoryStep } from '@promptwheel/core/trajectory/shared';
-import { getNextStep as getTrajectoryNextStep } from '@promptwheel/core/trajectory/shared';
+import { getNextStep as getTrajectoryNextStep, trajectoryComplete } from '@promptwheel/core/trajectory/shared';
 import type { DisplayAdapter } from './display-adapter.js';
 import { SpinnerDisplayAdapter } from './display-adapter-spinner.js';
 import { LogDisplayAdapter } from './display-adapter-log.js';
@@ -139,12 +139,12 @@ async function resolveOptions(options: AutoModeOptions): Promise<ResolvedOptions
   const totalMinutes = (hoursValue * 60 + minutesValue) || undefined;
 
   const maxCycles = options.cycles ? parseInt(options.cycles, 10) : 999;
-  const explicitWheel = options.wheel || options.continuous;
-  const impliedWheel = totalMinutes !== undefined || (options.cycles && maxCycles > 1);
-  const runMode: RunMode = (explicitWheel || impliedWheel) ? 'wheel' : 'planning';
+  const explicitSpin = options.spin || options.continuous;
+  const impliedSpin = totalMinutes !== undefined || (options.cycles && maxCycles > 1);
+  const runMode: RunMode = (explicitSpin || impliedSpin) ? 'spin' : 'planning';
   const endTime = totalMinutes ? Date.now() + (totalMinutes * 60 * 1000) : undefined;
 
-  const defaultMaxPrs = runMode === 'wheel' ? 999 : 3;
+  const defaultMaxPrs = runMode === 'spin' ? 999 : 3;
   const maxPrs = parseInt(options.maxPrs || String(activeFormula?.maxPrs ?? defaultMaxPrs), 10);
   const minConfidence = parseInt(options.minConfidence || String(activeFormula?.minConfidence ?? DEFAULT_AUTO_CONFIG.minConfidence), 10);
   const useDraft = options.draft !== false;
@@ -269,7 +269,7 @@ async function initEnvironment(
   }
 
   // Check working tree
-  const statusResult = spawnSync('git', ['status', '--porcelain'], { cwd: repoRoot });
+  const statusResult = spawnSync('git', ['status', '--porcelain'], { cwd: repoRoot, timeout: 15000 });
   const statusLines = statusResult.stdout?.toString().trim().split('\n').filter(Boolean) || [];
   const modifiedFiles = statusLines.filter(line => !line.startsWith('??'));
   if (modifiedFiles.length > 0 && !options.dryRun) {
@@ -279,8 +279,8 @@ async function initEnvironment(
       const giPath = path.join(repoRoot, '.gitignore');
       const content = fs.readFileSync(giPath, 'utf-8');
       if (content.includes('.promptwheel')) {
-        spawnSync('git', ['add', '.gitignore'], { cwd: repoRoot });
-        spawnSync('git', ['commit', '-m', 'chore: add .promptwheel to .gitignore'], { cwd: repoRoot });
+        spawnSync('git', ['add', '.gitignore'], { cwd: repoRoot, timeout: 15000 });
+        spawnSync('git', ['commit', '-m', 'chore: add .promptwheel to .gitignore'], { cwd: repoRoot, timeout: 15000 });
         console.log(chalk.gray('  Auto-committed .gitignore update'));
       }
     } else {
@@ -354,7 +354,7 @@ async function loadSessionData(
   let docsAuditFormula: import('./formulas.js').Formula | null = null;
   if (!resolved.activeFormula) {
     const { loadFormula: loadF } = await import('./formulas.js');
-    if (resolved.runMode === 'wheel') {
+    if (resolved.runMode === 'spin') {
       deepFormula = loadF('deep');
     }
     if (options.docsAudit !== false) {
@@ -514,8 +514,15 @@ async function loadSessionData(
           activeTrajectoryState.currentStepId = nextStep.id;
           const completed = traj.steps.filter(s => trajState.stepStates[s.id]?.status === 'completed').length;
           console.log(chalk.cyan(`📐 Trajectory: ${traj.name} — step ${completed + 1}/${traj.steps.length}: ${nextStep.title}`));
-        } else {
+        } else if (trajectoryComplete(traj, trajState.stepStates)) {
           console.log(chalk.green(`  ✓ Trajectory "${traj.name}" — all steps complete`));
+          activeTrajectory = null;
+          activeTrajectoryState = null;
+        } else {
+          // Steps remain but are blocked (failed deps, cycles, etc.)
+          const failed = traj.steps.filter(s => trajState.stepStates[s.id]?.status === 'failed').length;
+          console.log(chalk.yellow(`  ⚠ Trajectory "${traj.name}" — stalled (${failed} failed, remaining steps blocked)`));
+          console.log(chalk.gray(`    Use 'promptwheel trajectory show ${traj.name}' to inspect, or 'trajectory skip <step>' to unblock`));
           activeTrajectory = null;
           activeTrajectoryState = null;
         }
@@ -677,8 +684,8 @@ function printSessionHeader(
   {
     console.log(chalk.blue(`🧵 PromptWheel Auto v${CLI_VERSION}`));
     console.log();
-    if (runMode === 'wheel') {
-      console.log(chalk.gray('  Mode: Wheel (Ctrl+C to stop gracefully)'));
+    if (runMode === 'spin') {
+      console.log(chalk.gray('  Mode: Spin (Ctrl+C to stop gracefully)'));
       if (totalMinutes) {
         const endDate = new Date(endTime!);
         const budgetLabel = totalMinutes < 60
@@ -695,7 +702,7 @@ function printSessionHeader(
       console.log(chalk.gray('  Mode: Planning (scout all → roadmap → approve → execute)'));
     }
   }
-  console.log(chalk.gray(`  Scope: ${userScope || (runMode === 'wheel' ? 'rotating' : 'all sectors')}`));
+  console.log(chalk.gray(`  Scope: ${userScope || (runMode === 'spin' ? 'rotating' : 'all sectors')}`));
 
   const catDisplay = initialCategories.allow.join(', ');
   const baselineFailCount = cachedQaBaseline
@@ -740,7 +747,7 @@ function patchStateClosures(
     sessionPhase: state.sessionPhase,
     deepFormula: state.deepFormula,
     docsAuditFormula: state.docsAuditFormula,
-    isContinuous: state.runMode === 'wheel',
+    isContinuous: state.runMode === 'spin',
     repoRoot: state.repoRoot,
     options: state.options,
     config: state.config,
@@ -792,9 +799,9 @@ function patchStateClosures(
   };
 }
 
-/** Start the interactive console (wheel mode only, not in daemon mode). */
+/** Start the interactive console (spin mode only, not in daemon mode). */
 function initInteractiveConsole(state: AutoSessionState) {
-  if (state.runMode !== 'wheel' || state.options.daemon) return;
+  if (state.runMode !== 'spin' || state.options.daemon) return;
 
   state.interactiveConsole = startInteractiveConsole({
     repoRoot: state.repoRoot,
@@ -870,7 +877,7 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     sessionPhase,
     deepFormula: sessionData.deepFormula,
     docsAuditFormula: sessionData.docsAuditFormula,
-    isContinuous: resolved.runMode === 'wheel',
+    isContinuous: resolved.runMode === 'spin',
     repoRoot,
     options,
     config,
@@ -1051,7 +1058,7 @@ export function shouldContinue(state: AutoSessionState): boolean {
   // Direct mode: no PR limit, just time/cycles
 
   if (state.endTime && Date.now() >= state.endTime) return false;
-  if (state.cycleCount >= state.maxCycles && state.runMode !== 'wheel') return false;
+  if (state.cycleCount >= state.maxCycles && state.runMode !== 'spin') return false;
   return true;
 }
 

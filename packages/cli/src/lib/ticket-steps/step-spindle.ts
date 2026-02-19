@@ -16,6 +16,7 @@ import { gitExec, cleanupWorktree } from '../solo-git.js';
 import { generateSpindleRecommendations } from '../solo-ci.js';
 import type { RunTicketResult, SpindleAbortDetails } from '../solo-ticket-types.js';
 import type { TicketContext, StepResult } from './types.js';
+import { appendSpindleIncident } from '../spindle-incidents.js';
 
 export async function run(ctx: TicketContext): Promise<StepResult> {
   const { ticket, repoRoot, worktreePath, baseDir, opts, startTime, onProgress } = ctx;
@@ -90,6 +91,19 @@ export async function run(ctx: TicketContext): Promise<StepResult> {
       data: spindleArtifactData,
     });
     ctx.artifactPaths.spindle = spindleArtifactPath;
+
+    // Record spindle incident for analytics
+    try {
+      appendSpindleIncident(repoRoot, {
+        ts: Date.now(),
+        ticketId: ticket.id,
+        ticketTitle: ticket.title,
+        trigger: trigger,
+        confidence: spindleCheck.confidence,
+        iteration: spindleState.outputs.length,
+        diagnosticsSummary: formatSpindleResult(spindleCheck).slice(0, 500),
+      });
+    } catch { /* non-fatal */ }
 
     const spindleDetails: SpindleAbortDetails = {
       trigger,

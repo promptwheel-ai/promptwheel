@@ -72,7 +72,7 @@ export class SpinnerDisplayAdapter implements DisplayAdapter {
   }
 
   ticketAdded(id: string, _title: string, _slotLabel: string): void {
-    const spinner = createSpinner('Setting up...', 'spool');
+    const spinner = createSpinner('Setting up...', 'wheel');
     this.ticketSpinners.set(id, spinner);
   }
 

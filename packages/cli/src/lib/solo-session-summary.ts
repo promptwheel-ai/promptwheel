@@ -62,7 +62,7 @@ export function displayConvergenceSummary(ctx: SessionSummaryContext): void {
 }
 
 /**
- * Display wheel health summary at end of session.
+ * Display spin health summary at end of session.
  * Uses progressive disclosure: compact by default, shows details only when relevant.
  */
 export function displayWheelHealth(ctx: SessionSummaryContext, verbose = false): void {
@@ -146,6 +146,32 @@ export async function recordSessionHistory(ctx: SessionSummaryContext): Promise<
       : ctx.totalPrsCreated >= ctx.maxPrs ? 'pr_limit'
       : (ctx.endTime && Date.now() >= ctx.endTime) ? 'time_limit'
       : 'completed';
+    // Aggregate phase timing from ticket outcomes
+    let totalScoutMs = 0;
+    let totalExecuteMs = 0;
+    let totalQaMs = 0;
+    let totalGitMs = 0;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalCostUsd = 0;
+    let hasTimingData = false;
+    let hasCostData = false;
+    for (const t of ctx.allTicketOutcomes) {
+      if (t.phaseTiming) {
+        hasTimingData = true;
+        totalScoutMs += t.phaseTiming.scoutMs ?? 0;
+        totalExecuteMs += t.phaseTiming.executeMs ?? 0;
+        totalQaMs += t.phaseTiming.qaMs ?? 0;
+        totalGitMs += t.phaseTiming.gitMs ?? 0;
+      }
+      if ((t.costUsd !== undefined && t.costUsd !== null) || (t.inputTokens !== undefined && t.inputTokens !== null)) {
+        hasCostData = true;
+        totalCostUsd += t.costUsd ?? 0;
+        totalInputTokens += t.inputTokens ?? 0;
+        totalOutputTokens += t.outputTokens ?? 0;
+      }
+    }
+
     appendRunHistory({
       timestamp: new Date().toISOString(),
       mode: 'auto',
@@ -161,6 +187,12 @@ export async function recordSessionHistory(ctx: SessionSummaryContext): Promise<
       parallel: ctx.parallelExplicit ? parseInt(ctx.parallelOption!, 10) : -1,
       stoppedReason,
       tickets: ctx.allTicketOutcomes,
+      ...(hasTimingData ? {
+        phaseTiming: { totalScoutMs, totalExecuteMs, totalQaMs, totalGitMs },
+      } : {}),
+      ...(hasCostData ? {
+        tokenUsage: { totalInputTokens, totalOutputTokens, totalCostUsd },
+      } : {}),
     }, ctx.repoRoot || undefined);
   } catch {
     // Non-fatal

@@ -243,4 +243,28 @@ steps:
     // Persisted to disk.
     expect(loadTrajectoryState(tmpDir)).toEqual(state);
   });
+
+  it('returns null for trajectory with circular dependencies', () => {
+    fs.mkdirSync(trajectoriesDir(), { recursive: true });
+    fs.writeFileSync(
+      path.join(trajectoriesDir(), 'cycle.yaml'),
+      `name: cycle-traj
+description: has cycle
+steps:
+  - id: a
+    title: A
+    description: d
+    depends_on: [b]
+  - id: b
+    title: B
+    description: d
+    depends_on: [a]
+`,
+      'utf-8',
+    );
+
+    const state = activateTrajectory(tmpDir, 'cycle-traj');
+    expect(state).toBeNull();
+    expect(fs.existsSync(trajectoryStateFile())).toBe(false);
+  });
 });

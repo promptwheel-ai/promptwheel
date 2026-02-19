@@ -64,7 +64,9 @@ function writeLearnings(projectRoot: string, learnings: Learning[]): void {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(fp, JSON.stringify(learnings, null, 2) + '\n', 'utf8');
+  const tmp = fp + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(learnings, null, 2) + '\n', 'utf8');
+  fs.renameSync(tmp, fp);
 }
 
 // ---------------------------------------------------------------------------

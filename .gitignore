@@ -112,7 +112,6 @@ gitleaks-report.json
 
 # PromptWheel
 .promptwheel/
-.commandlayer/
 *.tgz
 cloud/.next.bak/
 .vercel

@@ -6,8 +6,13 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { createGitService } from '../lib/git.js';
 import { analyzeMetrics, readMetrics, type MetricsSummary } from '../lib/metrics.js';
-import { readRunHistory } from '../lib/run-history.js';
+import { readRunHistory, type RunHistoryEntry } from '../lib/run-history.js';
 import { getLearningEffectiveness } from '../lib/learnings.js';
+import { analyzeErrorLedger } from '../lib/error-ledger.js';
+import { analyzePrOutcomes } from '../lib/pr-outcomes.js';
+import { analyzeSpindleIncidents } from '../lib/spindle-incidents.js';
+import { readRunState } from '../lib/run-state.js';
+import { loadTrajectoryState, loadTrajectories } from '../lib/trajectory.js';
 
 export function registerAnalyticsCommands(solo: Command): void {
   solo
@@ -50,7 +55,7 @@ export function registerAnalyticsCommands(solo: Command): void {
       if (options.verbose) {
         displayVerboseAnalytics(summary, learningStats);
       } else {
-        displayCompactAnalytics(summary, history, learningStats);
+        displayCompactAnalytics(summary, history, learningStats, repoRoot);
       }
     });
 }
@@ -67,8 +72,9 @@ interface LearningStats {
  */
 function displayCompactAnalytics(
   summary: MetricsSummary,
-  history: Array<{ ticketsCompleted: number; ticketsFailed: number; durationMs: number }>,
+  history: RunHistoryEntry[],
   learningStats: LearningStats,
+  repoRoot: string,
 ): void {
   const duration = summary.timeRange.end - summary.timeRange.start;
   const hours = Math.round(duration / 3600000 * 10) / 10;
@@ -171,6 +177,139 @@ function displayCompactAnalytics(
       recommendations.push('Review failed tickets for patterns');
     }
   }
+
+  // --- New observability sections ---
+
+  // Performance Breakdown (phase timing)
+  const timingHistory = history.filter((h): h is RunHistoryEntry & { phaseTiming: NonNullable<RunHistoryEntry['phaseTiming']> } => h.phaseTiming !== undefined && h.phaseTiming !== null);
+  if (timingHistory.length > 0) {
+    let tScout = 0, tExec = 0, tQa = 0, tGit = 0;
+    for (const h of timingHistory) {
+      tScout += h.phaseTiming.totalScoutMs;
+      tExec += h.phaseTiming.totalExecuteMs;
+      tQa += h.phaseTiming.totalQaMs;
+      tGit += h.phaseTiming.totalGitMs;
+    }
+    const total = tScout + tExec + tQa + tGit;
+    if (total > 0) {
+      const fmtPhase = (ms: number) => {
+        const pct = Math.round(ms / total * 100);
+        const mins = (ms / 60000).toFixed(1);
+        return `${mins}m (${pct}%)`;
+      };
+      working.push(`Timing: Scout ${fmtPhase(tScout)} | Exec ${fmtPhase(tExec)} | QA ${fmtPhase(tQa)} | Git ${fmtPhase(tGit)}`);
+    }
+  }
+
+  // Category Performance
+  try {
+    const rs = readRunState(repoRoot);
+    if (rs.categoryStats && Object.keys(rs.categoryStats).length > 0) {
+      const catLines: string[] = [];
+      for (const [cat, stats] of Object.entries(rs.categoryStats).sort((a, b) => b[1].successRate - a[1].successRate)) {
+        if (stats.proposals === 0) continue;
+        const pct = Math.round(stats.successRate * 100);
+        const confStr = stats.confidenceAdjustment > 0 ? `+${stats.confidenceAdjustment}` : `${stats.confidenceAdjustment}`;
+        catLines.push(`${cat} ${pct}% (${stats.success}/${stats.proposals}) conf:${confStr}`);
+      }
+      if (catLines.length > 0) {
+        working.push(`Categories: ${catLines.slice(0, 4).join(' | ')}`);
+      }
+    }
+  } catch { /* non-fatal */ }
+
+  // PR Outcomes
+  try {
+    const prSummary = analyzePrOutcomes(repoRoot);
+    if (prSummary.total > 0) {
+      const mergeRatePct = Math.round(prSummary.mergeRate * 100);
+      let prStr = `PRs: ${prSummary.total} total | ${prSummary.merged} merged (${mergeRatePct}%) | ${prSummary.closed} closed | ${prSummary.open} open`;
+      if (prSummary.avgTimeToMergeMs !== null) {
+        const hours = (prSummary.avgTimeToMergeMs / 3600000).toFixed(1);
+        prStr += ` | avg merge: ${hours}h`;
+      }
+      working.push(prStr);
+    }
+  } catch { /* non-fatal */ }
+
+  // Error Patterns
+  try {
+    const errorPatterns = analyzeErrorLedger(repoRoot);
+    if (errorPatterns.length > 0) {
+      const topPatterns = errorPatterns.slice(0, 3).map(p =>
+        `${p.failureType}: ${p.count} (cmd: ${p.failedCommand})`
+      ).join(' | ');
+      attention.push(`Error patterns: ${topPatterns}`);
+    }
+  } catch { /* non-fatal */ }
+
+  // Cost (last 7 days)
+  const costHistory = history.filter((h): h is RunHistoryEntry & { tokenUsage: NonNullable<RunHistoryEntry['tokenUsage']> } => h.tokenUsage !== undefined && h.tokenUsage !== null);
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const recentCostHistory = costHistory.filter(h => new Date(h.timestamp).getTime() > sevenDaysAgo);
+  if (recentCostHistory.length > 0) {
+    let totalCost = 0;
+    let ticketCount = 0;
+    for (const h of recentCostHistory) {
+      totalCost += h.tokenUsage.totalCostUsd;
+      ticketCount += h.ticketsCompleted + h.ticketsFailed;
+    }
+    const perTicket = ticketCount > 0 ? (totalCost / ticketCount).toFixed(2) : '?';
+    working.push(`Cost (7d): $${totalCost.toFixed(2)} across ${recentCostHistory.length} sessions | $${perTicket}/ticket`);
+  }
+
+  // Learning ROI
+  try {
+    const rs = readRunState(repoRoot);
+    const snapshots = rs.learningSnapshots ?? [];
+    if (snapshots.length > 0) {
+      const latest = snapshots[snapshots.length - 1];
+      const effPct = Math.round(latest.successRate * 100);
+      const lowStr = latest.lowPerformers.length > 0 ? ` | ${latest.lowPerformers.length} low performers` : '';
+      working.push(`Learning ROI: ${effPct}% effective${lowStr}`);
+    }
+  } catch { /* non-fatal */ }
+
+  // Spindle Incidents
+  try {
+    const incidents = analyzeSpindleIncidents(repoRoot);
+    if (incidents.length > 0) {
+      const totalIncidents = incidents.reduce((s, i) => s + i.count, 0);
+      const breakdown = incidents.slice(0, 3).map(i => `${i.trigger} (${i.count})`).join(', ');
+      if (totalIncidents > 3) {
+        attention.push(`Spindle: ${totalIncidents} incidents | ${breakdown}`);
+      } else {
+        working.push(`Spindle incidents: ${totalIncidents} | ${breakdown}`);
+      }
+    }
+  } catch { /* non-fatal */ }
+
+  // Trajectory Progress
+  try {
+    const trajState = loadTrajectoryState(repoRoot);
+    if (trajState) {
+      const trajectories = loadTrajectories(repoRoot);
+      const traj = trajectories.find(t => t.name === trajState.trajectoryName);
+      const totalSteps = Object.keys(trajState.stepStates).length;
+      const completed = Object.values(trajState.stepStates).filter(s => s.status === 'completed').length;
+      const failed = Object.values(trajState.stepStates).filter(s => s.status === 'failed').length;
+      const active = Object.values(trajState.stepStates).find(s => s.status === 'active');
+      const activeTitle = active && traj
+        ? traj.steps.find(s => s.id === active.stepId)?.title ?? active.stepId
+        : active?.stepId ?? null;
+      const paused = trajState.paused ? ' (paused)' : '';
+
+      if (completed === totalSteps) {
+        working.push(`Trajectory "${trajState.trajectoryName}": complete (${totalSteps}/${totalSteps} steps)`);
+      } else if (activeTitle) {
+        working.push(`Trajectory "${trajState.trajectoryName}": ${completed}/${totalSteps} steps${paused} | current: ${activeTitle}`);
+      } else {
+        const statusParts = [`${completed}/${totalSteps} steps`];
+        if (failed > 0) statusParts.push(`${failed} failed`);
+        attention.push(`Trajectory "${trajState.trajectoryName}": ${statusParts.join(', ')}${paused} | stalled`);
+      }
+    }
+  } catch { /* non-fatal */ }
 
   // Display sections
   if (working.length > 0) {

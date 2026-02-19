@@ -156,7 +156,7 @@ Each ticket runs in an isolated git worktree.
 
 ### Auto-Prune
 
-On every session start, stale items are cleaned up automatically: run folders, history, artifacts, spool archives, deferred proposals, completed tickets, and orphaned worktrees. See [Configuration](configuration.md) for retention settings.
+On every session start, stale items are cleaned up automatically: run folders, history, artifacts, buffer archives, deferred proposals, completed tickets, and orphaned worktrees. See [Configuration](configuration.md) for retention settings.
 
 ### Guidelines Context
 

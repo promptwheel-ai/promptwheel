@@ -11,6 +11,7 @@ import { detectProjectMetadata, formatMetadataForPrompt } from './project-metada
 import {
   serializeTrajectoryToYaml,
   parseTrajectoryYaml,
+  detectCycle,
   type Trajectory,
   type TrajectoryStep,
 } from '@promptwheel/core/trajectory/shared';
@@ -161,6 +162,7 @@ interface RawStep {
   verification_commands?: string[];
   depends_on?: string[];
   measure?: { cmd?: string; target?: number; direction?: string };
+  max_retries?: number;
 }
 
 export function validateAndBuild(raw: { name: string; description: string; steps: unknown[] }): Trajectory {
@@ -173,6 +175,7 @@ export function validateAndBuild(raw: { name: string; description: string; steps
     acceptance_criteria: Array.isArray(s.acceptance_criteria) ? s.acceptance_criteria.map(String) : [],
     verification_commands: Array.isArray(s.verification_commands) ? s.verification_commands.map(String) : [],
     depends_on: Array.isArray(s.depends_on) ? s.depends_on.map(String) : [],
+    max_retries: typeof s.max_retries === 'number' && s.max_retries > 0 ? s.max_retries : undefined,
     measure: s.measure?.cmd !== undefined && s.measure?.target !== undefined && s.measure?.direction
       ? {
           cmd: String(s.measure.cmd),
@@ -196,6 +199,10 @@ export function validateAndBuild(raw: { name: string; description: string; steps
       if (!ids.has(dep)) throw new Error(`Step "${step.id}" depends on unknown step "${dep}"`);
     }
   }
+
+  // Validate: no circular dependencies
+  const cycle = detectCycle(steps);
+  if (cycle) throw new Error(`Circular dependency detected: ${cycle.join(' → ')}`);
 
   return {
     name: String(raw.name || ''),

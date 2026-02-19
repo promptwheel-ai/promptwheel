@@ -108,7 +108,7 @@ if (hookType === 'stop') {
       'FAILED_VALIDATION', 'FAILED_SPINDLE',
     ]);
 
-    if (terminalPhases.has(loopState.phase)) {
+    if (!loopState.phase || terminalPhases.has(loopState.phase)) {
       // Session is done — clean up and allow exit
       try { unlinkSync(loopStatePath); } catch { /* ignore */ }
       process.exit(0);

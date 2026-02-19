@@ -26,7 +26,7 @@ export interface PruneReport {
   runFoldersRemoved: number;
   historyLinesRemoved: number;
   artifactsRemoved: number;
-  spoolArchivesRemoved: number;
+  bufferArchivesRemoved: number;
   deferredProposalsRemoved: number;
   completedTicketsRemoved: number;
   mergedBranchesRemoved: number;
@@ -43,7 +43,7 @@ function emptyReport(): PruneReport {
     runFoldersRemoved: 0,
     historyLinesRemoved: 0,
     artifactsRemoved: 0,
-    spoolArchivesRemoved: 0,
+    bufferArchivesRemoved: 0,
     deferredProposalsRemoved: 0,
     completedTicketsRemoved: 0,
     mergedBranchesRemoved: 0,
@@ -167,22 +167,22 @@ export function pruneArtifacts(
 }
 
 /**
- * Delete oldest *.archived.ndjson in spool/ beyond cap.
+ * Delete oldest *.archived.ndjson in buffer/ beyond cap.
  */
-export function pruneSpoolArchives(
+export function pruneBufferArchives(
   repoRoot: string,
   maxArchives: number,
   dryRun = false,
 ): number {
-  const spoolDir = path.join(getPromptwheelDir(repoRoot), 'spool');
-  if (!fs.existsSync(spoolDir)) return 0;
+  const bufferDir = path.join(getPromptwheelDir(repoRoot), 'buffer');
+  if (!fs.existsSync(bufferDir)) return 0;
 
-  const archives = fs.readdirSync(spoolDir)
+  const archives = fs.readdirSync(bufferDir)
     .filter(f => f.endsWith('.archived.ndjson'))
     .map(f => ({
       name: f,
-      path: path.join(spoolDir, f),
-      mtime: fs.statSync(path.join(spoolDir, f)).mtimeMs,
+      path: path.join(bufferDir, f),
+      mtime: fs.statSync(path.join(bufferDir, f)).mtimeMs,
     }))
     .sort((a, b) => b.mtime - a.mtime);
 
@@ -790,7 +790,7 @@ export function pruneAll(
   report.runFoldersRemoved = pruneRunFolders(repoRoot, config.maxRuns, dryRun);
   report.historyLinesRemoved = pruneHistory(repoRoot, config.maxHistoryEntries, dryRun);
   report.artifactsRemoved = pruneArtifacts(repoRoot, config.maxArtifactsPerRun, dryRun);
-  report.spoolArchivesRemoved = pruneSpoolArchives(repoRoot, config.maxSpoolArchives, dryRun);
+  report.bufferArchivesRemoved = pruneBufferArchives(repoRoot, config.maxBufferArchives, dryRun);
   report.deferredProposalsRemoved = pruneDeferredProposals(repoRoot, config.maxDeferredProposals, dryRun);
   report.staleWorktreesRemoved = pruneStaleWorktrees(repoRoot, dryRun);
   // Branch pruning is NOT run here — only via explicit `promptwheel prune`
@@ -807,7 +807,7 @@ export function pruneAll(
     report.runFoldersRemoved +
     report.historyLinesRemoved +
     report.artifactsRemoved +
-    report.spoolArchivesRemoved +
+    report.bufferArchivesRemoved +
     report.deferredProposalsRemoved +
     report.staleWorktreesRemoved +
     report.logsRotated +
@@ -852,8 +852,8 @@ export function formatPruneReport(report: PruneReport, dryRun = false): string {
   if (report.artifactsRemoved > 0) {
     lines.push(`  ${prefix} ${report.artifactsRemoved} artifact file(s)`);
   }
-  if (report.spoolArchivesRemoved > 0) {
-    lines.push(`  ${prefix} ${report.spoolArchivesRemoved} spool archive(s)`);
+  if (report.bufferArchivesRemoved > 0) {
+    lines.push(`  ${prefix} ${report.bufferArchivesRemoved} buffer archive(s)`);
   }
   if (report.deferredProposalsRemoved > 0) {
     lines.push(`  ${prefix} ${report.deferredProposalsRemoved} deferred proposal(s)`);

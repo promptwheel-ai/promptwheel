@@ -163,8 +163,8 @@ PromptWheel will:
 For hands-off operation, use auto:
 
 ```bash
-# Run in wheel mode, fixing issues as they're found
-promptwheel --wheel
+# Run in spin mode, fixing issues as they're found
+promptwheel --spin
 
 # Just fix CI failures
 promptwheel solo auto ci

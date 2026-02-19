@@ -1,18 +1,18 @@
 ---
 name: run
-description: Run PromptWheel — interactive codebase improvement. Scouts, presents a roadmap, executes approved changes. Use `wheel` for unattended wheel execution.
-argument-hint: "[wheel] [hours=N] [formula=name] [cycles=N] [deep] [parallel=N]"
+description: Run PromptWheel — interactive codebase improvement. Scouts, presents a roadmap, executes approved changes. Use `spin` for unattended spin execution.
+argument-hint: "[spin] [hours=N] [formula=name] [cycles=N] [deep] [parallel=N]"
 ---
 
 Start a PromptWheel session. Default mode is **orchestration**: scout → present roadmap → user approves → execute sequentially → done.
-Pass `wheel` for unattended wheel mode with parallel subagents and stop-hook loop.
+Pass `spin` for unattended spin mode with parallel subagents and stop-hook loop.
 
 ## Arguments
 
 Parse from `$ARGUMENTS` (all optional, key=value format):
 
 **Common:**
-- **wheel** — Enable wheel mode (parallel subagents, stop hook, no human approval)
+- **spin** — Enable spin mode (parallel subagents, stop hook, no human approval)
 - **formula** — Formula to use (e.g. `security-audit`, `test-coverage`, `cleanup`)
 - **hours** — Time budget for multi-cycle runs (e.g. `hours=4`)
 - **scope** — Directory to scan (auto-detected)
@@ -20,15 +20,15 @@ Parse from `$ARGUMENTS` (all optional, key=value format):
 
 **Advanced (rarely needed):**
 - **cycles** — Number of scout→execute cycles (default: 1)
-- **parallel** — Concurrent tickets in wheel mode (default 2, max 5). Ignored in orchestration mode.
+- **parallel** — Concurrent tickets in spin mode (default 2, max 5). Ignored in orchestration mode.
 - **batch_size** — Milestone batching (merge N tickets into one PR)
 - **min_impact_score** — Filter proposals (1-10, default 3)
 - **direct** — Edit in place without worktrees (default: true). Auto-disabled when using PRs or parallel>1.
 
 ## Mode Detection
 
-Check `$ARGUMENTS` for the word `wheel`:
-- If **present** → jump to **Wheel Mode**
+Check `$ARGUMENTS` for the word `spin`:
+- If **present** → jump to **Spin Mode**
 - If **absent** → follow **Orchestration Mode** (default)
 
 ---
@@ -92,9 +92,9 @@ Which proposals should I implement? (all / 1,3,5 / none)
 
 ---
 
-## Wheel Mode
+## Spin Mode
 
-Activated by passing `wheel` in `$ARGUMENTS`. Unattended parallel execution with stop-hook loop. Matches the CLI's `--wheel` flag.
+Activated by passing `spin` in `$ARGUMENTS`. Unattended parallel execution with stop-hook loop. Matches the CLI's `--spin` flag.
 
 ### Setup
 
@@ -205,7 +205,7 @@ When `parallel` is 1 (or only 1 ticket is ready), advance returns `"PROMPT"` ins
 
 - Always follow the constraints returned by advance (allowed_paths, denied_paths, max_lines).
 - Always output structured XML blocks when requested (`<proposals>`, `<commit-plan>`, `<ticket-result>`).
-- In wheel mode, the Stop hook will block premature exit while the session is active.
+- In spin mode, the Stop hook will block premature exit while the session is active.
 - In orchestration mode, no `.promptwheel/loop-state.json` exists — the Stop hook is a no-op and the user can exit freely.
-- When the session ends in wheel mode, delete `.promptwheel/loop-state.json`.
+- When the session ends in spin mode, delete `.promptwheel/loop-state.json`.
 - **Trajectory awareness:** If a trajectory is active, the session follows its steps. The advance loop automatically injects trajectory context into scout prompts. You can check trajectory status with `/promptwheel:trajectory list` or `/promptwheel:status`.

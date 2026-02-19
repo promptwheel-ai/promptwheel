@@ -15,7 +15,7 @@ import {
   loadTrajectory,
 } from '../lib/trajectory.js';
 import type { StepStatus } from '@promptwheel/core/trajectory/shared';
-import { getNextStep } from '@promptwheel/core/trajectory/shared';
+import { getNextStep, trajectoryComplete } from '@promptwheel/core/trajectory/shared';
 
 async function getRepoRoot(): Promise<string> {
   const git = createGitService();
@@ -119,6 +119,9 @@ export function registerTrajectoryCommands(solo: Command): void {
         if (step.scope) {
           console.log(chalk.gray(`       scope: ${step.scope}`));
         }
+        if (step.max_retries) {
+          console.log(chalk.gray(`       max retries: ${step.max_retries}`));
+        }
         if (stepState?.cyclesAttempted) {
           console.log(chalk.gray(`       attempts: ${stepState.cyclesAttempted}`));
         }
@@ -140,14 +143,23 @@ export function registerTrajectoryCommands(solo: Command): void {
         console.log(chalk.yellow(`Deactivating current trajectory: ${existing.trajectoryName}`));
       }
 
-      const state = activateTrajectory(repoRoot, name);
-      if (!state) {
+      // Check if trajectory exists before activation (to distinguish not-found from cycle)
+      const trajectory = loadTrajectory(repoRoot, name);
+      if (!trajectory) {
         console.error(chalk.red(`Trajectory not found: ${name}`));
         console.log(chalk.gray('Available trajectories:'));
         const all = loadTrajectories(repoRoot);
         for (const t of all) {
           console.log(chalk.gray(`  - ${t.name}`));
         }
+        process.exit(1);
+      }
+
+      const state = activateTrajectory(repoRoot, name);
+      if (!state) {
+        // Trajectory exists but activation failed — circular dependency
+        console.error(chalk.red(`Cannot activate trajectory "${name}": circular dependency detected`));
+        console.log(chalk.gray('  Fix the depends_on fields in your trajectory YAML to remove the cycle.'));
         process.exit(1);
       }
 
@@ -213,8 +225,8 @@ export function registerTrajectoryCommands(solo: Command): void {
         console.error(chalk.red(`Step not found: ${stepId}`));
         process.exit(1);
       }
-      if (stepState.status === 'completed') {
-        console.log(chalk.gray(`Step "${stepId}" is already completed.`));
+      if (stepState.status === 'completed' || stepState.status === 'skipped') {
+        console.log(chalk.gray(`Step "${stepId}" is already ${stepState.status}.`));
         return;
       }
 
@@ -235,6 +247,11 @@ export function registerTrajectoryCommands(solo: Command): void {
       console.log(chalk.yellow(`Step "${stepId}" skipped.`));
       if (state.currentStepId) {
         console.log(chalk.cyan(`  Next step: ${state.currentStepId}`));
+      } else if (trajectory && trajectoryComplete(trajectory, state.stepStates)) {
+        console.log(chalk.green(`  All steps complete!`));
+      } else {
+        console.log(chalk.yellow(`  No remaining executable steps (blocked by failed dependencies).`));
+        console.log(chalk.gray(`  Use 'promptwheel trajectory show ${state.trajectoryName}' to inspect.`));
       }
     });
 

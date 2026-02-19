@@ -163,6 +163,13 @@ export function consolidateLearnings(learnings: Learning[]): Learning[] | null {
           entries[i].text = entries[j].text;
         }
         entries[i].access_count += entries[j].access_count;
+        // Merge effectiveness tracking counters
+        if (entries[i].applied_count !== undefined || entries[j].applied_count !== undefined) {
+          entries[i].applied_count = (entries[i].applied_count ?? 0) + (entries[j].applied_count ?? 0);
+        }
+        if (entries[i].success_count !== undefined || entries[j].success_count !== undefined) {
+          entries[i].success_count = (entries[i].success_count ?? 0) + (entries[j].success_count ?? 0);
+        }
         // Merge tags
         const tagSet = new Set([...entries[i].tags, ...entries[j].tags]);
         entries[i].tags = [...tagSet];

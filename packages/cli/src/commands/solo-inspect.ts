@@ -337,7 +337,7 @@ export function registerInspectCommands(solo: Command): void {
             });
           }
 
-          // Add wheel data to JSON output
+          // Add spin data to JSON output
           try {
             const { readRunState: readRS, getQualityRate: getQR } = await import('../lib/run-state.js');
             const { loadQaStats: loadQS } = await import('../lib/qa-stats.js');
@@ -345,7 +345,10 @@ export function registerInspectCommands(solo: Command): void {
             const rs = readRS(repoRoot);
             const qaS = loadQS(repoRoot);
             const allL = loadL(repoRoot, 0);
-            (output as any).wheel = {
+            const { analyzeErrorLedger: analyzeEL } = await import('../lib/error-ledger.js');
+            const { analyzePrOutcomes: analyzePR } = await import('../lib/pr-outcomes.js');
+            const { analyzeSpindleIncidents: analyzeSI } = await import('../lib/spindle-incidents.js');
+            (output as any).spin = {
               qualityRate: getQR(repoRoot),
               qualitySignals: rs.qualitySignals ?? null,
               disabledCommands: qaS.disabledCommands,
@@ -357,6 +360,11 @@ export function registerInspectCommands(solo: Command): void {
                   totalRuns: v.totalRuns,
                 }]),
               ),
+              categoryStats: rs.categoryStats ?? null,
+              learningSnapshots: rs.learningSnapshots ?? null,
+              errorPatterns: analyzeEL(repoRoot),
+              prOutcomes: analyzePR(repoRoot),
+              spindleIncidents: analyzeSI(repoRoot),
             };
           } catch {
             // Non-fatal
@@ -512,7 +520,7 @@ export function registerInspectCommands(solo: Command): void {
             ? (rs as any).effectiveMinConfidence - originalConf : 0;
 
           console.log();
-          console.log(`  ${chalk.cyan('Wheel:')}`);
+          console.log(`  ${chalk.cyan('Spin:')}`);
           if (qs && qs.totalTickets > 0) {
             const qaStr = (qs.qaPassed + qs.qaFailed) > 0
               ? `${qs.qaPassed}/${qs.qaPassed + qs.qaFailed}`
@@ -543,10 +551,10 @@ export function registerInspectCommands(solo: Command): void {
           }
 
           if (options.json) {
-            // Wheel section for JSON mode is handled via output.wheel below
+            // Spin section for JSON mode is handled via output.spin below
           }
         } catch {
-          // Non-fatal — wheel data may not exist yet
+          // Non-fatal — spin data may not exist yet
         }
 
       } finally {

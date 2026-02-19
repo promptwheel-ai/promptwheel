@@ -29,6 +29,17 @@ export interface RunHistoryEntry {
   errors?: string[];
   /** Individual ticket outcomes */
   tickets?: TicketOutcome[];
+  phaseTiming?: {
+    totalScoutMs: number;
+    totalExecuteMs: number;
+    totalQaMs: number;
+    totalGitMs: number;
+  };
+  tokenUsage?: {
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalCostUsd: number;
+  };
 }
 
 export interface TicketOutcome {
@@ -39,6 +50,15 @@ export interface TicketOutcome {
   prUrl?: string;
   durationMs?: number;
   error?: string;
+  phaseTiming?: {
+    scoutMs?: number;
+    executeMs?: number;
+    qaMs?: number;
+    gitMs?: number;
+  };
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 // =============================================================================

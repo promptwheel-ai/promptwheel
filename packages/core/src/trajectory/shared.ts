@@ -21,6 +21,7 @@ export interface TrajectoryStep {
   acceptance_criteria: string[];
   verification_commands: string[];
   depends_on: string[];           // step IDs that must complete first
+  max_retries?: number;            // override default retry limit for this step
   measure?: {
     cmd: string;
     target: number;
@@ -64,7 +65,7 @@ const DEFAULT_MAX_RETRIES = 3;
 export function stepReady(step: TrajectoryStep, states: Record<string, StepState>): boolean {
   for (const depId of step.depends_on) {
     const dep = states[depId];
-    if (!dep || dep.status !== 'completed') return false;
+    if (!dep || (dep.status !== 'completed' && dep.status !== 'skipped')) return false;
   }
   return true;
 }
@@ -148,7 +149,8 @@ export function formatTrajectoryForPrompt(
 
   const stepState = states[currentStep.id];
   if (stepState && stepState.cyclesAttempted > 0) {
-    lines.push(`**Attempts:** ${stepState.cyclesAttempted} cycle(s) so far`);
+    const limit = currentStep.max_retries ?? DEFAULT_MAX_RETRIES;
+    lines.push(`**Attempts:** ${stepState.cyclesAttempted}/${limit} cycle(s)`);
   }
   lines.push('');
 
@@ -222,6 +224,7 @@ export function parseTrajectoryYaml(content: string): Trajectory {
         acceptance_criteria: currentStep.acceptance_criteria ?? [],
         verification_commands: currentStep.verification_commands ?? [],
         depends_on: currentStep.depends_on ?? [],
+        max_retries: currentStep.max_retries,
         measure: currentStep.measure,
       });
     }
@@ -324,6 +327,11 @@ export function parseTrajectoryYaml(content: string): Trajectory {
           case 'depends_on':
             currentStep.depends_on = parseSimpleList(val);
             break;
+          case 'max_retries': {
+            const n = parseInt(val, 10);
+            if (!isNaN(n) && n > 0) currentStep.max_retries = n;
+            break;
+          }
           case 'measure':
             inMeasure = true;
             measureObj = {};
@@ -345,6 +353,40 @@ export function parseTrajectoryYaml(content: string): Trajectory {
 function parseSimpleList(value: string): string[] {
   const stripped = value.replace(/^\[/, '').replace(/\]$/, '');
   return stripped.split(',').map(s => s.trim()).filter(s => s.length > 0);
+}
+
+/** Detect cycles in step dependency graph. Returns cycle node IDs or null. */
+export function detectCycle(steps: TrajectoryStep[]): string[] | null {
+  const inDegree = new Map<string, number>();
+  const adj = new Map<string, string[]>();
+  for (const step of steps) {
+    inDegree.set(step.id, 0);
+    adj.set(step.id, []);
+  }
+  for (const step of steps) {
+    for (const dep of step.depends_on) {
+      if (adj.has(dep)) {
+        adj.get(dep)!.push(step.id);
+        inDegree.set(step.id, (inDegree.get(step.id) ?? 0) + 1);
+      }
+    }
+  }
+  const queue: string[] = [];
+  for (const [id, deg] of inDegree) {
+    if (deg === 0) queue.push(id);
+  }
+  let sorted = 0;
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    sorted++;
+    for (const neighbor of adj.get(node) ?? []) {
+      const newDeg = (inDegree.get(neighbor) ?? 1) - 1;
+      inDegree.set(neighbor, newDeg);
+      if (newDeg === 0) queue.push(neighbor);
+    }
+  }
+  if (sorted === steps.length) return null;
+  return steps.filter(s => (inDegree.get(s.id) ?? 0) > 0).map(s => s.id);
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +437,9 @@ export function serializeTrajectoryToYaml(trajectory: Trajectory): string {
       lines.push(`      - ${vc}`);
     }
     lines.push(`    depends_on: [${step.depends_on.join(', ')}]`);
+    if (step.max_retries !== undefined) {
+      lines.push(`    max_retries: ${step.max_retries}`);
+    }
     if (step.measure) {
       lines.push('    measure:');
       lines.push(`      cmd: "${step.measure.cmd}"`);

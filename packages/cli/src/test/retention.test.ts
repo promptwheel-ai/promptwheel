@@ -6,7 +6,7 @@ import {
   pruneRunFolders,
   pruneHistory,
   pruneArtifacts,
-  pruneSpoolArchives,
+  pruneBufferArchives,
   pruneMetrics,
   pruneArtifactsByAge,
   pruneDeferredProposals,
@@ -60,7 +60,7 @@ function emptyReport(): PruneReport {
     runFoldersRemoved: 0,
     historyLinesRemoved: 0,
     artifactsRemoved: 0,
-    spoolArchivesRemoved: 0,
+    bufferArchivesRemoved: 0,
     deferredProposalsRemoved: 0,
     completedTicketsRemoved: 0,
     mergedBranchesRemoved: 0,
@@ -222,48 +222,48 @@ describe('pruneArtifacts', () => {
 });
 
 // ---------------------------------------------------------------------------
-// pruneSpoolArchives
+// pruneBufferArchives
 // ---------------------------------------------------------------------------
 
-describe('pruneSpoolArchives', () => {
-  it('returns 0 when spool dir does not exist', () => {
-    expect(pruneSpoolArchives(tmpDir, 5)).toBe(0);
+describe('pruneBufferArchives', () => {
+  it('returns 0 when buffer dir does not exist', () => {
+    expect(pruneBufferArchives(tmpDir, 5)).toBe(0);
   });
 
   it('returns 0 when under the cap', () => {
-    const spoolDir = mkBsSubdir('spool');
-    touchFile(path.join(spoolDir, 'a.archived.ndjson'));
-    expect(pruneSpoolArchives(tmpDir, 5)).toBe(0);
+    const bufferDir = mkBsSubdir('buffer');
+    touchFile(path.join(bufferDir, 'a.archived.ndjson'));
+    expect(pruneBufferArchives(tmpDir, 5)).toBe(0);
   });
 
   it('removes oldest archives beyond cap', () => {
-    const spoolDir = mkBsSubdir('spool');
+    const bufferDir = mkBsSubdir('buffer');
     for (let i = 0; i < 5; i++) {
-      touchFile(path.join(spoolDir, `arc_${i}.archived.ndjson`), (5 - i) * 10_000);
+      touchFile(path.join(bufferDir, `arc_${i}.archived.ndjson`), (5 - i) * 10_000);
     }
 
-    const removed = pruneSpoolArchives(tmpDir, 2);
+    const removed = pruneBufferArchives(tmpDir, 2);
     expect(removed).toBe(3);
-    const remaining = fs.readdirSync(spoolDir).filter(f => f.endsWith('.archived.ndjson'));
+    const remaining = fs.readdirSync(bufferDir).filter(f => f.endsWith('.archived.ndjson'));
     expect(remaining).toHaveLength(2);
   });
 
   it('ignores non-archived files', () => {
-    const spoolDir = mkBsSubdir('spool');
-    touchFile(path.join(spoolDir, 'active.ndjson'));
-    touchFile(path.join(spoolDir, 'a.archived.ndjson'));
-    expect(pruneSpoolArchives(tmpDir, 5)).toBe(0);
+    const bufferDir = mkBsSubdir('buffer');
+    touchFile(path.join(bufferDir, 'active.ndjson'));
+    touchFile(path.join(bufferDir, 'a.archived.ndjson'));
+    expect(pruneBufferArchives(tmpDir, 5)).toBe(0);
   });
 
   it('dryRun does not delete', () => {
-    const spoolDir = mkBsSubdir('spool');
+    const bufferDir = mkBsSubdir('buffer');
     for (let i = 0; i < 5; i++) {
-      touchFile(path.join(spoolDir, `arc_${i}.archived.ndjson`), (5 - i) * 10_000);
+      touchFile(path.join(bufferDir, `arc_${i}.archived.ndjson`), (5 - i) * 10_000);
     }
 
-    const removed = pruneSpoolArchives(tmpDir, 2, true);
+    const removed = pruneBufferArchives(tmpDir, 2, true);
     expect(removed).toBe(3);
-    expect(fs.readdirSync(spoolDir).filter(f => f.endsWith('.archived.ndjson'))).toHaveLength(5);
+    expect(fs.readdirSync(bufferDir).filter(f => f.endsWith('.archived.ndjson'))).toHaveLength(5);
   });
 });
 
@@ -525,7 +525,7 @@ describe('formatPruneReport', () => {
       runFoldersRemoved: 1,
       historyLinesRemoved: 2,
       artifactsRemoved: 3,
-      spoolArchivesRemoved: 4,
+      bufferArchivesRemoved: 4,
       deferredProposalsRemoved: 5,
       completedTicketsRemoved: 6,
       mergedBranchesRemoved: 7,
@@ -541,7 +541,7 @@ describe('formatPruneReport', () => {
     expect(output).toContain('run folder(s)');
     expect(output).toContain('history line(s)');
     expect(output).toContain('artifact file(s)');
-    expect(output).toContain('spool archive(s)');
+    expect(output).toContain('buffer archive(s)');
     expect(output).toContain('deferred proposal(s)');
     expect(output).toContain('completed ticket(s)');
     expect(output).toContain('merged branch(es)');
@@ -558,7 +558,7 @@ describe('formatPruneReport', () => {
     const output = formatPruneReport(report);
     expect(output).not.toContain('history');
     expect(output).not.toContain('artifact');
-    expect(output).not.toContain('spool');
+    expect(output).not.toContain('buffer');
   });
 });
 
@@ -592,7 +592,7 @@ describe('getRetentionConfig', () => {
     expect(result.maxHistoryEntries).toBe(25);
     // Non-overridden fields stay at defaults
     expect(result.maxArtifactsPerRun).toBe(DEFAULT_RETENTION_CONFIG.maxArtifactsPerRun);
-    expect(result.maxSpoolArchives).toBe(DEFAULT_RETENTION_CONFIG.maxSpoolArchives);
+    expect(result.maxBufferArchives).toBe(DEFAULT_RETENTION_CONFIG.maxBufferArchives);
     expect(result.maxDeferredProposals).toBe(DEFAULT_RETENTION_CONFIG.maxDeferredProposals);
   });
 
