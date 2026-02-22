@@ -265,7 +265,7 @@ function makeState(overrides: Partial<AutoSessionState> = {}): AutoSessionState 
     scoutConcurrency: 1,
     scoutTimeoutMs: 60_000,
     maxScoutFiles: 100,
-    activeBackendName: 'claude',
+    activeBackendName: 'codex',
 
     scoutBackend: undefined,
     executionBackend: undefined,

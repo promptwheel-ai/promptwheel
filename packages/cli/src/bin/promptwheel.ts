@@ -6,7 +6,7 @@
  * All solo subcommands are available at the top level:
  *
  *   promptwheel                     # auto mode (scout → fix → PR)
- *   promptwheel --codex             # Full Codex (no Anthropic key)
+ *   promptwheel --claude             # Use Claude (needs ANTHROPIC_API_KEY)
  *   promptwheel ci                  # Fix CI failures
  *   promptwheel scout .             # Scan for improvements
  *   promptwheel status              # Show local state

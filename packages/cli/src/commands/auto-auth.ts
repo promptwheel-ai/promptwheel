@@ -63,8 +63,8 @@ export async function resolveBackends(options: AuthOptions): Promise<{
     console.log(chalk.yellow('⚠ Local provider has no sandbox — worktree isolation + QA gating provides safety'));
   }
 
-  const scoutBackendName = options.scoutBackend ?? 'claude';
-  const executeBackendName = options.executeBackend ?? 'claude';
+  const scoutBackendName = options.scoutBackend ?? 'codex';
+  const executeBackendName = options.executeBackend ?? 'codex';
 
   // Validate backend names
   for (const [flag, value] of [['--scout-backend', scoutBackendName], ['--execute-backend', executeBackendName]] as const) {

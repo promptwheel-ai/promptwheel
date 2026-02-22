@@ -17,13 +17,11 @@ export function registerAutoCommands(solo: Command): void {
     .command('auto [mode]')
     .description('Scout, fix, and commit improvements automatically')
     .addHelpText('after', `
-Auto-detects backend from environment:
-  ANTHROPIC_API_KEY  → Claude
-  OPENAI_API_KEY     → Codex
-  codex login        → Codex CLI
+Default backend: Codex (OpenAI). Use --claude for Claude (Anthropic).
 
 Examples:
-  promptwheel                    # Spin mode with drill (default)
+  promptwheel                    # Spin mode with drill (Codex default)
+  promptwheel --claude           # Use Claude backend (needs ANTHROPIC_API_KEY)
   promptwheel --hours 4          # Timed spin
   promptwheel --no-drill         # Spin without auto-trajectory generation
   promptwheel --plan             # Scout all, approve roadmap, execute
@@ -42,7 +40,7 @@ Examples:
     .option('-v, --verbose', 'Detailed output')
     .option('--no-tui', 'Disable live terminal UI (use spinner output instead)')
     // Backend and execution options
-    .option('--codex', 'Use Codex (OpenAI) backend')
+    .addOption(new Option('--codex', 'Use Codex (OpenAI) backend').hideHelp())
     .option('--kimi', 'Use Kimi backend')
     .option('--local', 'Use local LLM server (Ollama, vLLM, etc.)')
     .addOption(new Option('--local-model <model>', 'Local model name').implies({ local: true }))
@@ -51,8 +49,8 @@ Examples:
     .option('--safe', 'Safe categories only (no tests, no risky changes)')
     .option('--tests', 'Include test-writing proposals')
     .option('--deep', 'Architectural review mode')
+    .option('--claude', 'Use Claude (Anthropic) backend — requires ANTHROPIC_API_KEY')
     // Power-user options (hidden)
-    .addOption(new Option('--claude', 'Force Claude').hideHelp())
     .addOption(new Option('--yes', 'Skip prompts').hideHelp())
     .addOption(new Option('--parallel <n>', 'Parallel tickets').default('3').hideHelp())
     .addOption(new Option('--eco', 'Faster model').hideHelp())

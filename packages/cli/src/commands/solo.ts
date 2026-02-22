@@ -28,7 +28,7 @@ Running 'promptwheel solo' without a subcommand starts auto mode.
 Examples:
   promptwheel solo                 Spin mode with drill (default)
   promptwheel solo --plan          Planning mode (scout → approve → execute)
-  promptwheel solo --codex         Full Codex mode (no Anthropic key needed)
+  promptwheel --claude             Use Claude backend (needs ANTHROPIC_API_KEY)
   promptwheel solo init            Initialize local state in current repo
   promptwheel solo doctor          Check prerequisites and environment health
   promptwheel solo ci              Fix CI failures automatically

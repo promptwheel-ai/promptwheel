@@ -368,7 +368,7 @@ async function loadSessionData(
 
   // Guidelines
   const guidelinesBackend: GuidelinesBackend =
-    [options.scoutBackend, options.executeBackend].find(b => b && b !== 'claude') ?? 'claude';
+    options.scoutBackend ?? options.executeBackend ?? 'codex';
   const guidelinesOpts = {
     backend: guidelinesBackend,
     autoCreate: config?.auto?.autoCreateGuidelines !== false,
@@ -403,7 +403,7 @@ async function loadSessionData(
   }
 
   // Backend settings
-  const activeBackendName = options.scoutBackend ?? 'claude';
+  const activeBackendName = options.scoutBackend ?? 'codex';
   const backendConf = activeBackendName === 'codex' ? autoConf.codex : autoConf.claude;
   const { getProvider: getProviderDefaults } = await import('./providers/index.js');
   const activeProviderDefaults = getProviderDefaults(activeBackendName);
@@ -569,8 +569,8 @@ async function initDependencies(
   let scoutBackend: ScoutBackend | undefined;
   let executionBackend: ExecutionBackend | undefined;
 
-  const scoutBackendName = options.scoutBackend ?? 'claude';
-  const execBackendName = options.executeBackend ?? 'claude';
+  const scoutBackendName = options.scoutBackend ?? 'codex';
+  const execBackendName = options.executeBackend ?? 'codex';
 
   const modelForBackend = (name: string): string | undefined => {
     if (name === 'codex') return options.codexModel;
