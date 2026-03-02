@@ -165,10 +165,11 @@ describe('handleScoutOutput', () => {
     expect(s.phase).toBe('SCOUT');
   });
 
-  it('transitions to DONE on empty proposals when retries exhausted', async () => {
+  it('transitions to DONE on empty proposals when retries exhausted and no cycles remain', async () => {
     startRun();
     const s = run.require();
     s.scout_retries = 3; // MAX_SCOUT_RETRIES is 3
+    s.scout_cycles = s.max_cycles; // no cycles left
 
     const result = await processEvent(run, db, 'SCOUT_OUTPUT', {
       proposals: [],
@@ -178,6 +179,78 @@ describe('handleScoutOutput', () => {
     expect(result.phase_changed).toBe(true);
     expect(result.new_phase).toBe('DONE');
     expect(result.message).toContain('after all retries');
+  });
+
+  it('moves to next cycle on empty proposals when retries exhausted but cycles remain', async () => {
+    startRun();
+    const s = run.require();
+    s.scout_retries = 3; // MAX_SCOUT_RETRIES is 3
+    s.max_cycles = 10;
+    s.scout_cycles = 5; // cycles remain
+
+    const result = await processEvent(run, db, 'SCOUT_OUTPUT', {
+      proposals: [],
+    });
+
+    expect(result.processed).toBe(true);
+    expect(result.phase_changed).toBe(false);
+    expect(s.scout_retries).toBe(0); // reset for next cycle
+    expect(s.scout_exploration_log).toEqual([]); // reset
+    expect(s.phase).toBe('SCOUT');
+    expect(result.message).toContain('Moving to next cycle');
+  });
+
+  it('skips retries for polished sectors and moves to next cycle', async () => {
+    startRun();
+    const s = run.require();
+    s.scout_retries = 0;
+    s.selected_sector_polished = true;
+    s.max_cycles = 10;
+    s.scout_cycles = 2;
+
+    const result = await processEvent(run, db, 'SCOUT_OUTPUT', {
+      proposals: [],
+    });
+
+    expect(result.processed).toBe(true);
+    expect(result.phase_changed).toBe(false);
+    // Should NOT have retried — goes straight to next cycle
+    expect(s.scout_retries).toBe(0);
+    expect(result.message).toContain('Moving to next cycle');
+    expect(s.phase).toBe('SCOUT');
+  });
+
+  it('skips retries for polished sectors and transitions to DONE when no cycles remain', async () => {
+    startRun();
+    const s = run.require();
+    s.scout_retries = 0;
+    s.selected_sector_polished = true;
+    s.scout_cycles = s.max_cycles; // no cycles left
+
+    const result = await processEvent(run, db, 'SCOUT_OUTPUT', {
+      proposals: [],
+    });
+
+    expect(result.processed).toBe(true);
+    expect(result.phase_changed).toBe(true);
+    expect(result.new_phase).toBe('DONE');
+  });
+
+  it('preserves retries for non-polished sectors', async () => {
+    startRun();
+    const s = run.require();
+    s.scout_retries = 0;
+    s.selected_sector_polished = false;
+
+    const result = await processEvent(run, db, 'SCOUT_OUTPUT', {
+      proposals: [],
+    });
+
+    expect(result.processed).toBe(true);
+    expect(result.phase_changed).toBe(false);
+    expect(result.message).toContain('Retrying');
+    expect(s.scout_retries).toBe(1);
+    expect(s.phase).toBe('SCOUT');
   });
 
   it('ignores SCOUT_OUTPUT outside SCOUT phase', async () => {

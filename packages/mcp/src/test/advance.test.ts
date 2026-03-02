@@ -718,6 +718,108 @@ describe('advance — sector rotation respects config_scope', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Sector rotation: cycle sync across sessions
+// ---------------------------------------------------------------------------
+
+describe('advance — sector rotation cycle sync', () => {
+  it('syncs scout_cycles with max persisted lastScannedCycle and offsets max_cycles', async () => {
+    startRun({ max_cycles: 2 });
+    const s = run.require();
+
+    expect(s.scout_cycles).toBe(0);
+    expect(s.max_cycles).toBe(2);
+
+    // Write a sectors.json with sectors that have high lastScannedCycle values
+    // (simulating prior sessions)
+    const pwDir = path.join(tmpDir, '.promptwheel');
+    fs.mkdirSync(pwDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pwDir, 'sectors.json'),
+      JSON.stringify({
+        version: 2,
+        builtAt: new Date().toISOString(),
+        sectors: [
+          {
+            path: 'src/core',
+            purpose: 'core logic',
+            production: true,
+            fileCount: 10,
+            productionFileCount: 10,
+            classificationConfidence: 'high',
+            lastScannedAt: Date.now() - 86400000,
+            lastScannedCycle: 155,
+            scanCount: 20,
+            proposalYield: 1.2,
+            successCount: 10,
+            failureCount: 2,
+          },
+          {
+            path: 'src/api',
+            purpose: 'api routes',
+            production: true,
+            fileCount: 8,
+            productionFileCount: 8,
+            classificationConfidence: 'high',
+            lastScannedAt: Date.now() - 86400000,
+            lastScannedCycle: 86,
+            scanCount: 10,
+            proposalYield: 0.8,
+            successCount: 5,
+            failureCount: 1,
+          },
+        ],
+      }),
+    );
+
+    // Advance in SCOUT phase — should trigger sector rotation and cycle sync
+    const resp = await advance(ctx());
+
+    // scout_cycles should have synced to 155 (max lastScannedCycle)
+    expect(s.scout_cycles).toBeGreaterThanOrEqual(155);
+    // max_cycles should be offset by the same amount so remaining cycles is still 2
+    expect(s.max_cycles - s.scout_cycles).toBeLessThanOrEqual(2);
+    expect(s.max_cycles).toBeGreaterThanOrEqual(157);
+  });
+
+  it('does not sync when scout_cycles is already > 0', async () => {
+    startRun({ max_cycles: 5 });
+    const s = run.require();
+    s.scout_cycles = 3; // Already advanced
+
+    const pwDir = path.join(tmpDir, '.promptwheel');
+    fs.mkdirSync(pwDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pwDir, 'sectors.json'),
+      JSON.stringify({
+        version: 2,
+        builtAt: new Date().toISOString(),
+        sectors: [
+          {
+            path: 'src/core',
+            purpose: 'core',
+            production: true,
+            fileCount: 10,
+            productionFileCount: 10,
+            classificationConfidence: 'high',
+            lastScannedAt: Date.now(),
+            lastScannedCycle: 200,
+            scanCount: 5,
+            proposalYield: 1.0,
+            successCount: 3,
+            failureCount: 0,
+          },
+        ],
+      }),
+    );
+
+    await advance(ctx());
+
+    // Should NOT have synced — scout_cycles was already > 0
+    expect(s.max_cycles).toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // qa_commands session-level
 // ---------------------------------------------------------------------------
 

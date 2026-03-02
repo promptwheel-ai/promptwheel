@@ -126,10 +126,14 @@
     }
   },
   "peerDependencies": {
-    "@ast-grep/napi": ">=0.25.0"
+    "@ast-grep/napi": ">=0.25.0",
+    "@anthropic-ai/sdk": ">=0.30.0"
   },
   "peerDependenciesMeta": {
     "@ast-grep/napi": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
       "optional": true
     }
   },

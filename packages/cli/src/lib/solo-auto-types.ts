@@ -101,6 +101,8 @@ export interface AutoModeOptions {
   issues?: boolean | string;
   /** Comma-separated list of repository directories for multi-repo sessions */
   repos?: string;
+  /** Use Anthropic Batch API for scouts (50% cost, async processing) */
+  batch?: boolean;
 }
 
 // ── SessionOptions ──────────────────────────────────────────────────────────

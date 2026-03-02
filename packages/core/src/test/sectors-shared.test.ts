@@ -132,6 +132,47 @@ describe('pickNextSector deterministic priority order', () => {
   });
 });
 
+describe('polished detection ignores success rate', () => {
+  it('marks sector as polished when yield is low despite high success rate', () => {
+    // Dashboard-like sector: 25 scans, yield 0.09, 19 successes, 0 failures
+    const exhausted = makeSector({
+      path: 'cloud/app/(dashboard)',
+      scanCount: 25,
+      proposalYield: 0.09,
+      successCount: 19,
+      failureCount: 0,
+    });
+    const fresh = makeSector({
+      path: 'src/api',
+      scanCount: 2,
+      proposalYield: 1.5,
+      successCount: 1,
+      failureCount: 0,
+    });
+
+    const state = makeState([exhausted, fresh]);
+    const order = pickPathsInOrder(state);
+
+    // Fresh sector should come first; exhausted sector should be polished and sort last
+    expect(order).toEqual(['src/api', 'cloud/app/(dashboard)']);
+    expect(exhausted.polishedAt).toBe(FIXED_NOW);
+  });
+
+  it('does not mark sector as polished when yield is above threshold', () => {
+    const active = makeSector({
+      path: 'src/active',
+      scanCount: 10,
+      proposalYield: 0.5, // at threshold, not below
+      successCount: 8,
+      failureCount: 0,
+    });
+
+    const state = makeState([active]);
+    pickNextSector(state, FIXED_CYCLE, FIXED_NOW);
+    expect(active.polishedAt).toBeFalsy();
+  });
+});
+
 describe('recordScanResult deterministic updates', () => {
   it('applies EMA and scan metadata with explicit timestamp/cycle', () => {
     const state = makeState([

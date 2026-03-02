@@ -303,10 +303,23 @@ async function advanceScout(ctx: AdvanceContext): Promise<AdvanceResponse> {
       try {
         const sectorsState = loadSectorsState(ctx.project.rootPath);
         if (sectorsState) {
+          // Sync scout_cycles with persisted sector state so cycle numbers
+          // are monotonically increasing across sessions. Without this,
+          // sectors scanned early in a new session get lastScannedCycle=0
+          // while unseen sectors retain high values from prior sessions.
+          if (s.scout_cycles === 0) {
+            const maxCycle = Math.max(0, ...sectorsState.sectors.map(sec => sec.lastScannedCycle));
+            if (maxCycle > 0) {
+              s.max_cycles += maxCycle;
+              s.scout_cycles = maxCycle;
+            }
+          }
+
           const picked = pickNextSectorCore(sectorsState, s.scout_cycles);
           if (picked) {
             s.scope = picked.scope;
             s.selected_sector_path = picked.sector.path;
+            s.selected_sector_polished = (picked.sector.polishedAt ?? 0) > 0;
           }
         }
       } catch (err) {

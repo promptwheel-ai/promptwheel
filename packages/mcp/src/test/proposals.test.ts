@@ -347,10 +347,11 @@ describe('processEvent SCOUT_OUTPUT', () => {
     expect(result.message).toContain('Retrying');
   });
 
-  it('transitions to DONE when no proposals and retries exhausted', async () => {
+  it('transitions to DONE when no proposals and retries exhausted and no cycles remain', async () => {
     const s = run.require();
     s.phase = 'SCOUT';
     s.scout_retries = 3;
+    s.scout_cycles = s.max_cycles; // no cycles left
 
     const result = await processEvent(run, db, 'SCOUT_OUTPUT', {
       proposals: [],
@@ -358,6 +359,40 @@ describe('processEvent SCOUT_OUTPUT', () => {
 
     expect(result.phase_changed).toBe(true);
     expect(result.new_phase).toBe('DONE');
+  });
+
+  it('moves to next cycle when no proposals and retries exhausted but cycles remain', async () => {
+    const s = run.require();
+    s.phase = 'SCOUT';
+    s.scout_retries = 3;
+    s.max_cycles = 10;
+    s.scout_cycles = 2;
+
+    const result = await processEvent(run, db, 'SCOUT_OUTPUT', {
+      proposals: [],
+    });
+
+    expect(result.phase_changed).toBe(false);
+    expect(s.scout_retries).toBe(0);
+    expect(s.phase).toBe('SCOUT');
+    expect(result.message).toContain('Moving to next cycle');
+  });
+
+  it('skips retries for polished sectors', async () => {
+    const s = run.require();
+    s.phase = 'SCOUT';
+    s.scout_retries = 0;
+    s.selected_sector_polished = true;
+    s.max_cycles = 10;
+    s.scout_cycles = 1;
+
+    const result = await processEvent(run, db, 'SCOUT_OUTPUT', {
+      proposals: [],
+    });
+
+    expect(result.phase_changed).toBe(false);
+    expect(s.scout_retries).toBe(0); // no retry happened
+    expect(result.message).toContain('Moving to next cycle');
   });
 
   it('retries scout when all proposals rejected after review and retries remaining', async () => {

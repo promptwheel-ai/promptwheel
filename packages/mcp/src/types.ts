@@ -185,6 +185,8 @@ export interface RunState {
 
   // Sector rotation
   selected_sector_path?: string;
+  /** Whether the currently selected sector is polished (exhausted, low yield) */
+  selected_sector_polished?: boolean;
   current_sector_path?: string;
 
   // Trajectory planning

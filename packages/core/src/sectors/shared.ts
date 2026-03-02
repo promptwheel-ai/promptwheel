@@ -311,11 +311,9 @@ export function pickNextSector(
 
   if (candidates.length === 0) return null;
 
-  // Detect polished sectors: scanned many times with low yield and low success
+  // Detect polished sectors: scanned many times with consistently low yield
   for (const s of candidates) {
-    const total = s.successCount + s.failureCount;
-    const successRate = total > 0 ? s.successCount / total : 0;
-    if (s.scanCount >= POLISHED_MIN_SCANS && s.proposalYield < POLISHED_YIELD_THRESHOLD && (total < 2 || successRate < POLISHED_YIELD_THRESHOLD)) {
+    if (s.scanCount >= POLISHED_MIN_SCANS && s.proposalYield < POLISHED_YIELD_THRESHOLD) {
       if (!s.polishedAt) s.polishedAt = timestamp;
     } else if (s.polishedAt) {
       s.polishedAt = 0;

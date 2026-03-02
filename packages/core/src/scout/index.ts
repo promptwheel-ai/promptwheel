@@ -21,6 +21,7 @@ export { buildScoutPrompt, buildCategoryPrompt } from './prompt.js';
 export { runClaude, parseClaudeOutput, ClaudeScoutBackend, CodexScoutBackend, CodexMcpScoutBackend, type ScoutBackend } from './runner.js';
 export { KimiScoutBackend } from './kimi-runner.js';
 export { OpenAILocalScoutBackend } from './openai-local-runner.js';
+export { AnthropicBatchScoutBackend } from './anthropic-batch-runner.js';
 export { McpBatchServer } from './mcp-batch-server.js';
 export { scanFiles, batchFiles, batchFilesByTokens, batchFilesByModule, estimateTokens, type ScannedFile, type ModuleGroup } from './scanner.js';
 

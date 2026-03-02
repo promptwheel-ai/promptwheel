@@ -57,6 +57,7 @@ Examples:
     .option('--tests', 'Include test-writing proposals')
     .option('--deep', 'Architectural review mode')
     .option('--claude', 'Use Claude (Anthropic) backend — requires ANTHROPIC_API_KEY')
+    .option('--batch', 'Use Anthropic Batch API for scouts (50% cost, async processing)')
     // Power-user options (hidden)
     .addOption(new Option('--yes', 'Skip prompts').hideHelp())
     .addOption(new Option('--parallel <n>', 'Parallel tickets').default('3').hideHelp())
@@ -141,6 +142,7 @@ Examples:
       drill?: boolean;
       issues?: boolean | string;
       repos?: string;
+      batch?: boolean;
     }) => {
       if (options.deep && !options.formula) {
         options.formula = 'deep';

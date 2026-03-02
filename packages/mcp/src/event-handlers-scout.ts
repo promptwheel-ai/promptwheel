@@ -128,19 +128,38 @@ export async function handleScoutOutput(ctx: EventContext, payload: Record<strin
     }
     s.current_sector_path = s.selected_sector_path;
     s.selected_sector_path = undefined;
+    s.selected_sector_polished = false;
   }
 
   if (rawProposals.length === 0) {
-    if (s.scout_retries < MAX_SCOUT_RETRIES) {
+    // Polished sectors don't get retries — they've been scanned 5+ times
+    // with consistently low yield; retrying wastes LLM calls
+    const effectiveMaxRetries = s.selected_sector_polished ? 0 : MAX_SCOUT_RETRIES;
+
+    if (s.scout_retries < effectiveMaxRetries) {
       s.scout_retries++;
       // Stay in SCOUT phase — advance() will return an escalated prompt
       return {
         processed: true,
         phase_changed: false,
-        message: `No proposals found (attempt ${s.scout_retries}/${MAX_SCOUT_RETRIES + 1}). Retrying with deeper analysis.`,
+        message: `No proposals found (attempt ${s.scout_retries}/${effectiveMaxRetries + 1}). Retrying with deeper analysis.`,
       };
     }
-    // Exhausted retries — genuinely no work
+
+    // Retries exhausted — try next cycle if budget allows
+    if (s.scout_cycles < s.max_cycles) {
+      const attempts = s.scout_retries + 1;
+      s.scout_retries = 0;
+      s.scout_exploration_log = [];
+      // Stay in SCOUT — advance() will pick a new sector for the next cycle
+      return {
+        processed: true,
+        phase_changed: false,
+        message: `No proposals after ${attempts} attempt(s). Moving to next cycle.`,
+      };
+    }
+
+    // No cycles remaining — genuinely done
     ctx.run.setPhase('DONE');
     return {
       processed: true,

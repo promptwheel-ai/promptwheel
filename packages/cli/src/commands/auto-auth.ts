@@ -20,6 +20,7 @@ export interface AuthOptions {
   codexModel?: string;
   kimiModel?: string;
   codexUnsafeFullAccess?: boolean;
+  batch?: boolean;
 }
 
 /**
@@ -84,6 +85,21 @@ export async function resolveBackends(options: AuthOptions): Promise<{
     options.scoutBackend = options.scoutBackend ?? 'openai-local';
     options.executeBackend = options.executeBackend ?? 'openai-local';
     console.log(chalk.yellow('⚠ Local provider has no sandbox — worktree isolation + QA gating provides safety'));
+  }
+
+  // --batch overrides scout backend to anthropic-batch (execution stays as-is)
+  if (options.batch) {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      exitCommandError({
+        message: 'ANTHROPIC_API_KEY not set',
+        humanDetails: [
+          chalk.gray('  Required for --batch (Anthropic Batch API). Set the env var:'),
+          chalk.gray('    export ANTHROPIC_API_KEY=sk-ant-...'),
+        ],
+      });
+    }
+    options.scoutBackend = 'anthropic-batch';
+    console.log(chalk.cyan('  Scout: Anthropic Batch API (50% cost reduction)'));
   }
 
   const scoutBackendName = options.scoutBackend ?? 'codex';

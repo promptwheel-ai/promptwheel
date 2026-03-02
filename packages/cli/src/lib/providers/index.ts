@@ -12,6 +12,7 @@ import { claude } from './claude.js';
 import { codex } from './codex.js';
 import { kimi } from './kimi.js';
 import { openaiLocal } from './openai-local.js';
+import { anthropicBatch } from './anthropic-batch.js';
 
 const providers = new Map<string, ProviderConfig>();
 
@@ -19,6 +20,7 @@ providers.set('claude', claude);
 providers.set('codex', codex);
 providers.set('kimi', kimi);
 providers.set('openai-local', openaiLocal);
+providers.set('anthropic-batch', anthropicBatch);
 
 /**
  * Get a provider config by name.
