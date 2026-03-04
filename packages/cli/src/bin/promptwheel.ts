@@ -7,7 +7,6 @@
  *
  *   promptwheel                     # auto mode (scout → fix → PR)
  *   promptwheel --claude             # Use Claude (needs ANTHROPIC_API_KEY)
- *   promptwheel ci                  # Fix CI failures
  *   promptwheel scout .             # Scan for improvements
  *   promptwheel status              # Show local state
  *   promptwheel update              # Self-update to latest version
@@ -23,7 +22,7 @@ import {
   runSelfUpdate,
 } from '../lib/update-check.js';
 
-const CURRENT_VERSION = '0.7.35';
+const CURRENT_VERSION = '0.7.36';
 
 const program = new Command();
 program.exitOverride();
