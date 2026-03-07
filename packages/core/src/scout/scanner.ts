@@ -162,6 +162,13 @@ export function detectScope(cwd: string): string {
     'app',        // Rails, Next.js, some monorepos
     'apps',       // turborepo/nx monorepos
     'packages',   // monorepos (changesets, effect, zod, trpc)
+    'frontend',   // infisical, full-stack apps
+    'backend',    // infisical, full-stack apps
+    'dashboard',  // OpenCopilot, admin panels
+    'server',     // many full-stack apps
+    'client',     // many full-stack apps
+    'web',        // some monorepos
+    'api',        // API-first projects
   ];
 
   for (const dir of candidates) {
