@@ -12,6 +12,7 @@ import {
   type QaConfig,
 } from '@promptwheel/core/services';
 import { projects } from '@promptwheel/core/repos';
+import { detectScope } from '@promptwheel/core/scout';
 import { createExecRunner } from '../lib/exec.js';
 import { createLogger } from '../lib/logger.js';
 import { startTuiApp } from '../tui/index.js';
@@ -234,7 +235,7 @@ export function registerQaCommands(solo: Command): void {
             const deps = createScoutDeps(adapter, { quiet: true });
             await scoutRepo(deps, {
               path: repoRoot,
-              scope: 'src/**',
+              scope: detectScope(repoRoot),
               maxProposals: 10,
               minConfidence: 50,
               model: 'haiku',

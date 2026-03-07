@@ -22,7 +22,7 @@ export { buildScoutPrompt, buildCategoryPrompt } from './prompt.js';
 export { runClaude, parseClaudeOutput, ClaudeScoutBackend, CodexScoutBackend, CodexMcpScoutBackend, type ScoutBackend } from './runner.js';
 export { AnthropicBatchScoutBackend } from './anthropic-batch-runner.js';
 export { McpBatchServer } from './mcp-batch-server.js';
-export { scanFiles, batchFiles, batchFilesByTokens, batchFilesByModule, estimateTokens, type ScannedFile, type ModuleGroup } from './scanner.js';
+export { scanFiles, detectScope, batchFiles, batchFilesByTokens, batchFilesByModule, estimateTokens, type ScannedFile, type ModuleGroup } from './scanner.js';
 
 /**
  * Default verification commands — used only when the scout returns none.

@@ -2,7 +2,7 @@ import { Command } from 'commander';
 import * as path from 'node:path';
 import chalk from 'chalk';
 import { scoutRepo, type ScoutProgress } from '@promptwheel/core/services';
-import type { ProposalCategory } from '@promptwheel/core/scout';
+import { type ProposalCategory, detectScope } from '@promptwheel/core/scout';
 import { writeJsonArtifact } from '../lib/artifacts.js';
 import {
   getPromptwheelDir,
@@ -46,7 +46,7 @@ export function registerInspectScoutCommand(solo: Command): void {
     .option('-v, --verbose', 'Show detailed output')
     .option('-q, --quiet', 'Suppress non-essential output')
     .option('--json', 'Output as JSON')
-    .option('-s, --scope <pattern>', 'Glob pattern for files to scan', 'src/**')
+    .option('-s, --scope <pattern>', 'Glob pattern for files to scan (auto-detected if omitted)')
     .option('-t, --types <categories>', 'Comma-separated categories: refactor,docs,test,perf,security')
     .option('-m, --max <count>', 'Maximum proposals to generate', '10')
     .option('-c, --min-confidence <percent>', 'Minimum confidence threshold', '50')
@@ -70,8 +70,6 @@ export function registerInspectScoutCommand(solo: Command): void {
       const isJsonMode = options.json;
       const isQuiet = options.quiet || isJsonMode;
 
-      const scope = targetPath ?? options.scope ?? 'src/**';
-
       if (!isQuiet) {
         console.log(chalk.blue('🔍 PromptWheel Solo Scout'));
         console.log();
@@ -89,6 +87,9 @@ export function registerInspectScoutCommand(solo: Command): void {
         autoInit: true,
         quiet: isQuiet,
       });
+
+      // Auto-detect scope if not explicitly provided
+      const scope = targetPath ?? options.scope ?? detectScope(repoRoot);
 
       if (!isQuiet) {
         console.log(chalk.gray(`Project: ${path.basename(repoRoot)}`));

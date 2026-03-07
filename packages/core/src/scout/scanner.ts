@@ -149,6 +149,35 @@ function walkDir(
 }
 
 /**
+ * Auto-detect the best scope pattern for a project directory.
+ * Checks for common source directory conventions and falls back
+ * to scanning all source-like files.
+ */
+export function detectScope(cwd: string): string {
+  // Ordered by specificity — check most common first
+  const candidates = [
+    'src',        // most TS/JS projects
+    'source',     // ky, some others
+    'lib',        // fastify, many Node.js projects
+    'app',        // Rails, Next.js, some monorepos
+    'apps',       // turborepo/nx monorepos
+    'packages',   // monorepos (changesets, effect, zod, trpc)
+  ];
+
+  for (const dir of candidates) {
+    try {
+      const stat = fs.statSync(path.join(cwd, dir));
+      if (stat.isDirectory()) return `${dir}/**`;
+    } catch {
+      // Directory doesn't exist, try next
+    }
+  }
+
+  // Fallback: scan everything (let shouldInclude filter by extension)
+  return '**';
+}
+
+/**
  * Scan a directory for files matching the given patterns
  */
 export function scanFiles(options: ScanOptions): ScannedFile[] {
