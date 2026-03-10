@@ -2,15 +2,15 @@
 /**
  * PromptWheel CLI entry point
  *
- * `promptwheel` with no subcommand runs auto mode.
+ * `promptwheel` with no subcommand runs scan (repo intelligence).
  * All solo subcommands are available at the top level:
  *
- *   promptwheel                     # auto mode (scout → fix → PR)
- *   promptwheel --claude             # Use Claude (needs ANTHROPIC_API_KEY)
- *   promptwheel scout .             # Scan for improvements
+ *   promptwheel                     # scan mode (find issues)
+ *   promptwheel scan --diff          # delta from last scan
+ *   promptwheel scan --fix           # auto-fix top findings
+ *   promptwheel auto                # orchestration mode (scout → fix → PR)
  *   promptwheel status              # Show local state
  *   promptwheel update              # Self-update to latest version
- *   promptwheel solo auto           # Explicit (backwards compat)
  */
 
 import { Command, CommanderError } from 'commander';
@@ -29,7 +29,7 @@ program.exitOverride();
 
 program
   .name('promptwheel')
-  .description('Continuous codebase improvement tool')
+  .description('Repo intelligence engine — find issues, track trends, auto-fix')
   .version(CURRENT_VERSION);
 
 // `promptwheel update` — self-update command
@@ -77,9 +77,9 @@ async function main(): Promise<void> {
     // Explicit `promptwheel solo ...` or help/version
     await program.parseAsync();
   } else {
-    // `promptwheel [flags...]` → `solo auto [flags...]`
-    // Insert 'solo auto' before the flags
-    process.argv.splice(2, 0, 'solo', 'auto');
+    // `promptwheel [flags...]` → `solo scan [flags...]`
+    // Default command is scan (repo intelligence), not auto (orchestration)
+    process.argv.splice(2, 0, 'solo', 'scan');
     await program.parseAsync();
   }
 

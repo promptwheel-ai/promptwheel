@@ -19,7 +19,8 @@ import { getRegistry } from './tool-registry.js';
 import { checkSpindle, recordDiff, recordCommandFailure, recordPlanHash } from './spindle.js';
 import { loadGuidelines, formatGuidelinesForPrompt } from './guidelines.js';
 import { validateTicketResultPayload } from './event-handlers-ticket.js';
-import { recordTicketDedup, toBooleanOrUndefined, toStringOrUndefined, toStringArrayOrUndefined } from './event-helpers.js';
+import { recordTicketDedup, toBooleanOrUndefined, toStringOrUndefined, toStringArrayOrUndefined, classifyQaError, extractErrorSignature } from './event-helpers.js';
+import { addLearning, extractTags, type StructuredKnowledge } from './learnings.js';
 import {
   computeRetryRisk,
   scoreStrategies,
@@ -474,6 +475,31 @@ export async function ingestTicketEvent(
         };
       }
       if (worker.qa_retries >= MAX_QA_RETRIES) {
+        // Record learning on final QA failure (mirrors event-handlers-qa.ts logic)
+        const s = run.require();
+        if (s.learnings_enabled) {
+          const ticket = await repos.tickets.getById(db, ticketId);
+          const errorOutput = worker.last_qa_failure?.error_output ?? '';
+          const primaryFailedCommand = worker.last_qa_failure?.failed_commands?.[0] ?? '';
+          const errorClass = classifyQaError(errorOutput);
+          const errorSig = extractErrorSignature(errorOutput);
+          const errorSummary = errorOutput.slice(0, 100);
+          const structured: StructuredKnowledge = {
+            pattern_type: errorClass === 'environment' ? 'environment' : 'antipattern',
+            failure_context: {
+              command: primaryFailedCommand || (ticket?.verificationCommands?.[0] ?? ''),
+              error_signature: errorSig ?? errorSummary.slice(0, 120),
+            },
+            fragile_paths: ticket?.allowedPaths?.filter(p => !p.includes('*')),
+          };
+          addLearning(run.rootPath, {
+            text: `QA fails on ${ticket?.title ?? 'unknown'} — ${errorSummary || primaryFailedCommand}`.slice(0, 200),
+            category: 'gotcha',
+            source: { type: 'qa_failure', detail: primaryFailedCommand },
+            tags: extractTags(ticket?.allowedPaths ?? [], ticket?.verificationCommands ?? []),
+            structured,
+          });
+        }
         await recordTicketDedup(db, run.rootPath, ticketId, false, 'qa_failed');
         await repos.tickets.updateStatus(db, ticketId, 'blocked');
         run.failTicketWorker(ticketId, `QA failed ${worker.qa_retries} times`);

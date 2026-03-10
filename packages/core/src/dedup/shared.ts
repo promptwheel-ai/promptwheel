@@ -22,8 +22,6 @@ export interface DedupEntry {
   hit_count: number;
   /** Whether this was actually executed successfully (stronger signal) */
   completed: boolean;
-  /** Module paths that this entry depends on — if these complete, retry is worthwhile */
-  blocked_by_modules?: string[];
 }
 
 export interface DedupMatch {
@@ -211,55 +209,6 @@ export function matchAgainstMemory(
   }
 
   return bestMatch;
-}
-
-// ---------------------------------------------------------------------------
-// Dependency-aware dedup gating (pure)
-// ---------------------------------------------------------------------------
-
-/**
- * Check if a failed dedup entry is blocked by dependency modules.
- * Returns true if the entry has `blocked_by_modules` AND at least one of those
- * modules appears in the set of recently-completed module paths — meaning the
- * blocker has been resolved and the entry should be retried.
- */
-export function isUnblockedByCompletion(
-  entry: DedupEntry,
-  completedModules: Set<string>,
-): boolean {
-  if (!entry.blocked_by_modules?.length) return false;
-  return entry.blocked_by_modules.some(mod =>
-    completedModules.has(mod) ||
-    // Also check prefix match: completing "packages/core/src" unblocks "packages/core/src/utils"
-    [...completedModules].some(cm => mod.startsWith(cm + '/') || cm.startsWith(mod + '/')),
-  );
-}
-
-/**
- * Resolve which dependency modules a proposal's files import from.
- * Used to populate `blocked_by_modules` when a ticket fails.
- */
-export function resolveBlockingModules(
-  files: string[],
-  edges: Record<string, string[]>,
-): string[] {
-  if (!files.length || !edges) return [];
-  const modules = new Set<string>();
-  for (const file of files) {
-    // Find the module containing this file (longest key prefix match)
-    let bestKey = '';
-    for (const key of Object.keys(edges)) {
-      if (file.startsWith(key) && key.length > bestKey.length) {
-        bestKey = key;
-      }
-    }
-    if (bestKey && edges[bestKey]) {
-      for (const dep of edges[bestKey]) {
-        modules.add(dep);
-      }
-    }
-  }
-  return [...modules];
 }
 
 // ---------------------------------------------------------------------------

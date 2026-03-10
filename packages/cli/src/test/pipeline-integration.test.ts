@@ -186,6 +186,8 @@ function makeState(overrides: Partial<Record<string, unknown>> = {}): Record<str
     effectiveMinConfidence: 20,
     consecutiveLowYieldCycles: 0,
     consecutiveIdleCycles: 0,
+    consecutiveFailureCycles: 0,
+    backpressureRetries: 0,
     _prevCycleCompleted: 0,
     pendingPrUrls: [] as string[],
     allPrUrls: [] as string[],

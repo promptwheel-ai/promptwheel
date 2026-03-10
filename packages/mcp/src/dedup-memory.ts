@@ -25,6 +25,19 @@ export { formatDedupForPrompt } from '@promptwheel/core/dedup/shared';
 const DEDUP_FILE = 'dedup-memory.json';
 
 // ---------------------------------------------------------------------------
+// Async mutex — prevents concurrent read-modify-write in parallel mode
+// ---------------------------------------------------------------------------
+
+let _writeLock: Promise<void> = Promise.resolve();
+
+function withWriteLock<T>(fn: () => T): Promise<T> {
+  const prev = _writeLock;
+  let release!: () => void;
+  _writeLock = new Promise<void>((r) => { release = r; });
+  return prev.then(fn).finally(() => release());
+}
+
+// ---------------------------------------------------------------------------
 // File I/O
 // ---------------------------------------------------------------------------
 
@@ -80,10 +93,12 @@ export function recordDedupEntry(
   title: string,
   completed: boolean,
   _failureReason?: string,
-): void {
-  const entries = readEntries(projectRoot);
-  coreRecordEntry(entries, title, completed);
-  writeEntries(projectRoot, entries);
+): Promise<void> {
+  return withWriteLock(() => {
+    const entries = readEntries(projectRoot);
+    coreRecordEntry(entries, title, completed);
+    writeEntries(projectRoot, entries);
+  });
 }
 
 /**
@@ -92,11 +107,13 @@ export function recordDedupEntry(
 export function recordDedupEntries(
   projectRoot: string,
   titles: { title: string; completed: boolean }[],
-): void {
-  if (titles.length === 0) return;
-  const entries = readEntries(projectRoot);
-  coreRecordEntries(entries, titles);
-  writeEntries(projectRoot, entries);
+): Promise<void> {
+  if (titles.length === 0) return Promise.resolve();
+  return withWriteLock(() => {
+    const entries = readEntries(projectRoot);
+    coreRecordEntries(entries, titles);
+    writeEntries(projectRoot, entries);
+  });
 }
 
 // formatDedupForPrompt is re-exported from core above

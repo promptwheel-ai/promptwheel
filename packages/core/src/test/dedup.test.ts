@@ -18,8 +18,6 @@ import {
   recordEntry,
   recordEntries,
   formatDedupForPrompt,
-  isUnblockedByCompletion,
-  resolveBlockingModules,
   DEDUP_DEFAULTS,
   type DedupEntry,
 } from '../dedup/shared.js';
@@ -447,96 +445,3 @@ describe('formatDedupForPrompt', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// isUnblockedByCompletion
-// ---------------------------------------------------------------------------
-
-describe('isUnblockedByCompletion', () => {
-  const makeEntry = (overrides: Partial<DedupEntry> = {}): DedupEntry => ({
-    title: 'Test entry',
-    weight: 60,
-    created_at: '',
-    last_seen_at: '',
-    hit_count: 3,
-    completed: false,
-    ...overrides,
-  });
-
-  it('returns false when entry has no blocked_by_modules', () => {
-    const entry = makeEntry();
-    expect(isUnblockedByCompletion(entry, new Set(['packages/core/src']))).toBe(false);
-  });
-
-  it('returns false when entry has empty blocked_by_modules', () => {
-    const entry = makeEntry({ blocked_by_modules: [] });
-    expect(isUnblockedByCompletion(entry, new Set(['packages/core/src']))).toBe(false);
-  });
-
-  it('returns true when a blocking module has been completed (exact match)', () => {
-    const entry = makeEntry({ blocked_by_modules: ['packages/core/src'] });
-    expect(isUnblockedByCompletion(entry, new Set(['packages/core/src']))).toBe(true);
-  });
-
-  it('returns true when a blocking module is a prefix of a completed path', () => {
-    const entry = makeEntry({ blocked_by_modules: ['packages/core/src'] });
-    expect(isUnblockedByCompletion(entry, new Set(['packages/core/src/utils']))).toBe(true);
-  });
-
-  it('returns false when no blocking modules match', () => {
-    const entry = makeEntry({ blocked_by_modules: ['packages/core/src'] });
-    expect(isUnblockedByCompletion(entry, new Set(['packages/cli/src']))).toBe(false);
-  });
-
-  it('handles multiple blocking modules — one match is enough', () => {
-    const entry = makeEntry({ blocked_by_modules: ['packages/core/src', 'packages/mcp/src'] });
-    expect(isUnblockedByCompletion(entry, new Set(['packages/mcp/src']))).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// resolveBlockingModules
-// ---------------------------------------------------------------------------
-
-describe('resolveBlockingModules', () => {
-  const edges: Record<string, string[]> = {
-    'packages/cli/src/lib': ['packages/core/src', 'packages/mcp/src'],
-    'packages/mcp/src': ['packages/core/src'],
-  };
-
-  it('resolves files to their imported modules', () => {
-    const result = resolveBlockingModules(['packages/cli/src/lib/execute.ts'], edges);
-    expect(result).toContain('packages/core/src');
-    expect(result).toContain('packages/mcp/src');
-  });
-
-  it('returns empty for files not matching any module', () => {
-    const result = resolveBlockingModules(['packages/unknown/file.ts'], edges);
-    expect(result).toEqual([]);
-  });
-
-  it('returns empty for empty files array', () => {
-    const result = resolveBlockingModules([], edges);
-    expect(result).toEqual([]);
-  });
-
-  it('deduplicates modules across multiple files', () => {
-    const result = resolveBlockingModules(
-      ['packages/cli/src/lib/a.ts', 'packages/mcp/src/b.ts'],
-      edges,
-    );
-    // Both resolve to packages/core/src
-    const coreCount = result.filter(m => m === 'packages/core/src').length;
-    expect(coreCount).toBe(1);
-  });
-
-  it('picks the longest prefix match for file-to-module resolution', () => {
-    const detailedEdges: Record<string, string[]> = {
-      'packages/cli': ['packages/shared'],
-      'packages/cli/src/lib': ['packages/core/src'],
-    };
-    const result = resolveBlockingModules(['packages/cli/src/lib/execute.ts'], detailedEdges);
-    // Should match packages/cli/src/lib (longer) not packages/cli
-    expect(result).toContain('packages/core/src');
-    expect(result).not.toContain('packages/shared');
-  });
-});

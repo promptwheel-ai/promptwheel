@@ -992,6 +992,8 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     })(),
     consecutiveLowYieldCycles: 0,
     consecutiveIdleCycles: 0,
+    consecutiveFailureCycles: 0,
+    backpressureRetries: 0,
     _prevCycleCompleted: 0,
 
     sessionPhase,
@@ -1050,14 +1052,6 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
     scoutedDirs: [],
     _pendingIntegrationProposals: [],
     integrationLastRun: {},
-    currentLens: 'default',
-    lensRotation: ['default'],
-    lensIndex: 0,
-    lensMatrix: new Map(),
-    lensZeroYieldPairs: new Set(),
-    lensExecutionStrikes: new Map(),
-    lensFullyExhausted: false,
-    lensRotationsCompleted: 0,
     _cycleProgress: null,
     escalationCandidates: new Set(),
     drillMode,
@@ -1086,11 +1080,12 @@ export async function initSession(options: AutoModeOptions): Promise<AutoSession
   // Redirect shutdown handler to state
   shutdownRef = state;
 
-  // Restore from crash-resume checkpoint if recent enough (< 30 min)
+  // Restore from crash-resume checkpoint if recent enough
   {
     const rs = readRunState(repoRoot);
     const cp = rs.sessionCheckpoint;
-    if (cp && Date.now() - cp.savedAt < 30 * 60 * 1000) {
+    const recoveryWindowMs = (autoConf.recoveryWindowMinutes ?? 120) * 60 * 1000;
+    if (cp && Date.now() - cp.savedAt < recoveryWindowMs) {
       state.cycleCount = cp.cycleCount;
       state.totalPrsCreated = cp.totalPrsCreated;
       state.totalFailed = cp.totalFailed;

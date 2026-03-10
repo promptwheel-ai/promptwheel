@@ -894,7 +894,7 @@ export async function recordTicketDedup(
   try {
     const ticket = prefetchedTicket ?? await repos.tickets.getById(db, ticketId);
     if (ticket) {
-      recordDedupEntry(rootPath, ticket.title, completed, reason);
+      await recordDedupEntry(rootPath, ticket.title, completed, reason);
     }
   } catch (err) {
     console.warn(`[promptwheel] recordTicketDedup: ${err instanceof Error ? err.message : String(err)}`);

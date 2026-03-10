@@ -28,8 +28,8 @@ function readRaw(): DedupEntry[] {
 }
 
 describe('recordDedupEntry', () => {
-  it('creates a new entry', () => {
-    recordDedupEntry(tmpDir, 'Add tests for utils', false);
+  it('creates a new entry', async () => {
+    await recordDedupEntry(tmpDir, 'Add tests for utils', false);
     const entries = readRaw();
     expect(entries).toHaveLength(1);
     expect(entries[0].title).toBe('Add tests for utils');
@@ -38,25 +38,25 @@ describe('recordDedupEntry', () => {
     expect(entries[0].hit_count).toBe(1);
   });
 
-  it('creates completed entry with higher weight', () => {
-    recordDedupEntry(tmpDir, 'Refactor auth', true);
+  it('creates completed entry with higher weight', async () => {
+    await recordDedupEntry(tmpDir, 'Refactor auth', true);
     const entries = readRaw();
     expect(entries[0].weight).toBe(80); // COMPLETED_WEIGHT
     expect(entries[0].completed).toBe(true);
   });
 
-  it('bumps existing entry on re-encounter', () => {
-    recordDedupEntry(tmpDir, 'Add tests for utils', false);
-    recordDedupEntry(tmpDir, 'Add tests for utils', false);
+  it('bumps existing entry on re-encounter', async () => {
+    await recordDedupEntry(tmpDir, 'Add tests for utils', false);
+    await recordDedupEntry(tmpDir, 'Add tests for utils', false);
     const entries = readRaw();
     expect(entries).toHaveLength(1);
     expect(entries[0].hit_count).toBe(2);
     expect(entries[0].weight).toBe(75); // 60 + 15 BUMP
   });
 
-  it('upgrades to completed on re-encounter', () => {
-    recordDedupEntry(tmpDir, 'Add tests for utils', false);
-    recordDedupEntry(tmpDir, 'add tests for utils', true); // case-insensitive match
+  it('upgrades to completed on re-encounter', async () => {
+    await recordDedupEntry(tmpDir, 'Add tests for utils', false);
+    await recordDedupEntry(tmpDir, 'add tests for utils', true); // case-insensitive match
     const entries = readRaw();
     expect(entries).toHaveLength(1);
     expect(entries[0].completed).toBe(true);
@@ -64,8 +64,8 @@ describe('recordDedupEntry', () => {
 });
 
 describe('recordDedupEntries', () => {
-  it('batch-records multiple titles', () => {
-    recordDedupEntries(tmpDir, [
+  it('batch-records multiple titles', async () => {
+    await recordDedupEntries(tmpDir, [
       { title: 'A', completed: true },
       { title: 'B', completed: false },
     ]);
@@ -73,8 +73,8 @@ describe('recordDedupEntries', () => {
     expect(entries).toHaveLength(2);
   });
 
-  it('skips empty array without writing', () => {
-    recordDedupEntries(tmpDir, []);
+  it('skips empty array without writing', async () => {
+    await recordDedupEntries(tmpDir, []);
     expect(fs.existsSync(path.join(tmpDir, '.promptwheel', 'dedup-memory.json'))).toBe(false);
   });
 });
@@ -226,39 +226,39 @@ describe('formatDedupForPrompt', () => {
 // ---------------------------------------------------------------------------
 
 describe('recordDedupEntry — extended fields', () => {
-  it('stores failureReason on new entry', () => {
-    recordDedupEntry(tmpDir, 'Scope issue fix', false, 'scope_violation');
+  it('stores failureReason on new entry', async () => {
+    await recordDedupEntry(tmpDir, 'Scope issue fix', false, 'scope_violation');
     const entries = readRaw();
     expect(entries).toHaveLength(1);
     expect(entries[0].failureReason).toBe('scope_violation');
   });
 
-  it('stores relatedTitles on new entry', () => {
-    recordDedupEntry(tmpDir, 'Refactor auth', true, undefined, ['Add auth tests', 'Fix auth bug']);
+  it('stores relatedTitles on new entry', async () => {
+    await recordDedupEntry(tmpDir, 'Refactor auth', true, undefined, ['Add auth tests', 'Fix auth bug']);
     const entries = readRaw();
     expect(entries).toHaveLength(1);
     expect(entries[0].relatedTitles).toEqual(['Add auth tests', 'Fix auth bug']);
   });
 
-  it('updates failureReason on re-encounter', () => {
-    recordDedupEntry(tmpDir, 'Flaky fix', false, 'agent_error');
-    recordDedupEntry(tmpDir, 'flaky fix', false, 'qa_failed');
+  it('updates failureReason on re-encounter', async () => {
+    await recordDedupEntry(tmpDir, 'Flaky fix', false, 'agent_error');
+    await recordDedupEntry(tmpDir, 'flaky fix', false, 'qa_failed');
     const entries = readRaw();
     expect(entries).toHaveLength(1);
     expect(entries[0].failureReason).toBe('qa_failed');
   });
 
-  it('updates relatedTitles on re-encounter', () => {
-    recordDedupEntry(tmpDir, 'Main task', true, undefined, ['Related A']);
-    recordDedupEntry(tmpDir, 'main task', true, undefined, ['Related B', 'Related C']);
+  it('updates relatedTitles on re-encounter', async () => {
+    await recordDedupEntry(tmpDir, 'Main task', true, undefined, ['Related A']);
+    await recordDedupEntry(tmpDir, 'main task', true, undefined, ['Related B', 'Related C']);
     const entries = readRaw();
     expect(entries).toHaveLength(1);
     expect(entries[0].relatedTitles).toEqual(['Related B', 'Related C']);
   });
 
-  it('preserves existing failureReason when re-encounter has no failureReason', () => {
-    recordDedupEntry(tmpDir, 'Has reason', false, 'spindle_abort');
-    recordDedupEntry(tmpDir, 'has reason', false);
+  it('preserves existing failureReason when re-encounter has no failureReason', async () => {
+    await recordDedupEntry(tmpDir, 'Has reason', false, 'spindle_abort');
+    await recordDedupEntry(tmpDir, 'has reason', false);
     const entries = readRaw();
     expect(entries[0].failureReason).toBe('spindle_abort');
   });

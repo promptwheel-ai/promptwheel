@@ -127,16 +127,11 @@ export interface AutoConfig {
   minImpactScore?: number;
   /** Max consecutive idle cycles (no completed tickets) before spin stops (default: 15) */
   maxIdleCycles?: number;
+  /** Crash recovery window in minutes — checkpoints older than this are discarded (default: 120) */
+  recoveryWindowMinutes?: number;
   // Integrations are configured via `.promptwheel/integrations.yaml` (not inline config).
   /** Opt-out: disable LLM-based acceptance criteria verification in QA. Default: true (enabled). */
   criteriaVerification?: boolean;
-  /** Lens rotation settings */
-  lensRotation?: {
-    /** Enable multi-lens rotation in spin mode (default: true) */
-    enabled?: boolean;
-    /** Override the default lens list. Names must match built-in or custom formula names. */
-    lenses?: string[];
-  };
   /**
    * Drill mode settings — auto-trajectory generation in spin mode.
    *
@@ -173,10 +168,6 @@ export interface AutoConfig {
     causalWindow?: number;
     /** Maximum cycles a single trajectory can consume before being abandoned (default: 15, range: 5-30). Prevents runaway trajectories from consuming the entire session. */
     maxCyclesPerTrajectory?: number;
-    /** Sigmoid steepness for quality gate scoring (default: 6, range: 1-20). Higher values create sharper pass/fail boundaries. */
-    sigmoidK?: number;
-    /** Sigmoid center point for quality gate (default: 0.5, range: 0-1). Shifts the inflection point of the quality curve. */
-    sigmoidCenter?: number;
     /** Log base for staleness decay calculation (default: 11, range: 2-100). Higher values slow staleness decay. */
     stalenessLogBase?: number;
     /** Blueprint analysis thresholds — controls grouping, merging, and quality gate sensitivity. */
@@ -224,8 +215,6 @@ export function validateDrillConfig(drill: NonNullable<AutoConfig['drill']>): No
   validated.maxCyclesPerTrajectory = clamp(drill.maxCyclesPerTrajectory, 5, 30, 15);
 
   // Validate sigmoid parameters — prevent division by zero and degenerate curves
-  validated.sigmoidK = clamp(drill.sigmoidK, 1, 20, 6);
-  validated.sigmoidCenter = clamp(drill.sigmoidCenter, 0, 1, 0.5);
   validated.stalenessLogBase = clamp(drill.stalenessLogBase, 2, 100, 11);
 
   // Validate blueprint thresholds

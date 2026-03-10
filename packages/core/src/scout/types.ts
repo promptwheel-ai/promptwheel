@@ -44,6 +44,8 @@ export interface TicketProposal {
   target_symbols?: string[];
   /** Severity tier: how critical is this change? */
   severity?: 'blocking' | 'degrading' | 'polish' | 'speculative';
+  /** Structured risk factors for rubric-based severity derivation. */
+  risk_assessment?: import('../proposals/shared.js').RiskAssessment;
   /** Arbitrary metadata (e.g., github_issue_number for issue-driven proposals). */
   metadata?: Record<string, unknown>;
 }
@@ -108,6 +110,10 @@ export interface ScoutOptions {
     sectorDifficulty?: 'easy' | 'moderate' | 'hard';
     sectorCategoryAffinity?: { boost: string[]; suppress: string[] };
   };
+  /** Custom rules loaded from .promptwheel/rules/ */
+  customRules?: import('./rules.js').CustomRule[];
+  /** Fix history context string for scout prompt enrichment */
+  fixContext?: string;
 }
 
 /**
@@ -196,6 +202,17 @@ export const PROPOSAL_SCHEMA = {
           rollback_note: { type: 'string' },
           target_symbols: { type: 'array', items: { type: 'string' } },
           severity: { type: 'string', enum: ['blocking', 'degrading', 'polish', 'speculative'] },
+          risk_assessment: {
+            type: 'object',
+            properties: {
+              user_impact: { type: 'string', enum: ['none', 'minor', 'degraded', 'broken'] },
+              exploitability: { type: 'string', enum: ['none', 'requires_auth', 'public'] },
+              blast_radius: { type: 'string', enum: ['single_file', 'module', 'system_wide'] },
+              data_risk: { type: 'string', enum: ['none', 'stale', 'corrupted', 'lost'] },
+              confidence_basis: { type: 'string', enum: ['pattern_match', 'code_trace', 'runtime_evidence'] },
+            },
+            required: ['user_impact', 'exploitability', 'blast_radius', 'data_risk', 'confidence_basis'],
+          },
         },
       },
     },

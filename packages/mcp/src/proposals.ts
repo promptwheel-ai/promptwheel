@@ -110,7 +110,12 @@ export async function filterAndCreateTickets(
       rejected.push({ proposal: raw, reason: `Missing fields: ${missing}` });
       continue;
     }
-    valid.push(normalizeProposal(raw));
+    const normalized = normalizeProposal(raw);
+    if (!normalized) {
+      rejected.push({ proposal: raw, reason: 'Rejected by noise filter (cosmetic/low-value)' });
+      continue;
+    }
+    valid.push(normalized);
   }
 
   // Step 2a: Reject fundamentally flawed proposals (confidence=0 from adversarial review)
@@ -300,7 +305,7 @@ export async function filterAndCreateTickets(
     }
   }
   if (dedupEntries.length > 0) {
-    recordDedupEntries(run.rootPath, dedupEntries);
+    await recordDedupEntries(run.rootPath, dedupEntries);
   }
 
   return { accepted, rejected, created_ticket_ids: createdIds };

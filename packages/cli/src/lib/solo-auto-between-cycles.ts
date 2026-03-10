@@ -55,19 +55,33 @@ export async function runPreCycleMaintenance(state: AutoSessionState): Promise<P
   // This lets us detect idle cycles even when retry paths skip post-cycle.
   state._prevCycleCompleted = state.cycleOutcomes.filter(o => o.status === 'completed').length;
 
-  // Idle cycle budget — catches ALL empty-cycle paths (including retry continues)
+  // Idle/failure cycle tracking — distinguish "no proposals found" from "all proposals failed"
   if (state.cycleCount >= 2) {
+    const prevHadOutcomes = state.cycleOutcomes.length > 0;
     if (state._prevCycleCompleted > 0) {
       state.consecutiveIdleCycles = 0;
+      state.consecutiveFailureCycles = 0;
+    } else if (prevHadOutcomes) {
+      // Had proposals but none completed — all-failure cycle
+      state.consecutiveFailureCycles++;
+      state.consecutiveIdleCycles = 0; // Not idle — we found work, it just failed
     } else {
+      // No proposals at all — truly idle
       state.consecutiveIdleCycles++;
+      state.consecutiveFailureCycles = 0;
     }
+
     const MAX_IDLE_CYCLES = state.autoConf.maxIdleCycles ?? 15;
     if (state.consecutiveIdleCycles >= MAX_IDLE_CYCLES) {
       state.shutdownRequested = true;
       if (state.shutdownReason === null) state.shutdownReason = 'idle';
-      state.displayAdapter.log(chalk.yellow(`  ${state.consecutiveIdleCycles} consecutive cycles without completed work — stopping`));
+      state.displayAdapter.log(chalk.yellow(`  ${state.consecutiveIdleCycles} consecutive idle cycles (no proposals) — stopping`));
       return { shouldSkipCycle: true };
+    }
+
+    // Warn on consistent failures but don't auto-stop — let the user decide
+    if (state.consecutiveFailureCycles === 10) {
+      state.displayAdapter.log(chalk.yellow(`  ⚠ ${state.consecutiveFailureCycles} consecutive all-failure cycles — consider adjusting scope or confidence`));
     }
   }
 
@@ -126,12 +140,21 @@ export async function runPreCycleMaintenance(state: AutoSessionState): Promise<P
   // Backpressure from open PRs (skip in direct mode)
   if (state.runMode === 'spin' && state.pendingPrUrls.length > 0 && state.deliveryMode !== 'direct') {
     const openRatio = state.pendingPrUrls.length / state.maxPrs;
+    const MAX_BACKPRESSURE_RETRIES = 20; // 5 minutes total (20 × 15s)
     if (openRatio > 0.7) {
-      state.displayAdapter.log(chalk.yellow(`  Backpressure: ${state.pendingPrUrls.length}/${state.maxPrs} PRs open — waiting for reviews...`));
-      await sleep(15000);
-      // Don't increment cycleCount — the cycle reruns
-      return { shouldSkipCycle: true };
+      state.backpressureRetries++;
+      if (state.backpressureRetries > MAX_BACKPRESSURE_RETRIES) {
+        state.displayAdapter.log(chalk.yellow(`  Backpressure: ${state.pendingPrUrls.length}/${state.maxPrs} PRs open for ${MAX_BACKPRESSURE_RETRIES} cycles — continuing with raised confidence`));
+        state.effectiveMinConfidence += 25;
+        state.backpressureRetries = 0;
+        // Fall through to continue the session
+      } else {
+        state.displayAdapter.log(chalk.yellow(`  Backpressure: ${state.pendingPrUrls.length}/${state.maxPrs} PRs open — waiting for reviews... (${state.backpressureRetries}/${MAX_BACKPRESSURE_RETRIES})`));
+        await sleep(15000);
+        return { shouldSkipCycle: true };
+      }
     } else if (openRatio > 0.4) {
+      state.backpressureRetries = 0; // Reset when pressure drops
       state.effectiveMinConfidence += 15;
       if (state.options.verbose) {
         state.displayAdapter.log(chalk.gray(`  Light backpressure (${state.pendingPrUrls.length}/${state.maxPrs} open) — raising confidence +15`));

@@ -1823,35 +1823,7 @@ describe('freshness filter → cooldown bridge', () => {
 // Configurable sigmoid and staleness parameters
 // ---------------------------------------------------------------------------
 
-describe('configurable sigmoid parameters', () => {
-  it('uses custom sigmoidK and sigmoidCenter from config', () => {
-    const history = [
-      makeEntry({ outcome: 'completed', completionPct: 1.0, stepsCompleted: 5, stepsTotal: 5 }),
-      makeEntry({ outcome: 'completed', completionPct: 1.0, stepsCompleted: 5, stepsTotal: 5 }),
-      makeEntry({ outcome: 'completed', completionPct: 1.0, stepsCompleted: 5, stepsTotal: 5 }),
-    ];
-    // With very steep sigmoid (k=20), the curve is almost binary
-    const stateDefault = makeDrillState({
-      drillHistory: history,
-      autoConf: { drill: { cooldownCompleted: 0, cooldownStalled: 10 } },
-    });
-    const stateSteep = makeDrillState({
-      drillHistory: history,
-      autoConf: { drill: { cooldownCompleted: 0, cooldownStalled: 10, sigmoidK: 20, sigmoidCenter: 0.5 } },
-    });
-    // Both should produce valid cooldowns
-    const defaultResults: number[] = [];
-    const steepResults: number[] = [];
-    for (let i = 0; i < 50; i++) {
-      defaultResults.push(getDrillCooldown(stateDefault));
-      steepResults.push(getDrillCooldown(stateSteep));
-    }
-    // All results should be non-negative
-    for (const v of [...defaultResults, ...steepResults]) {
-      expect(v).toBeGreaterThanOrEqual(0);
-    }
-  });
-});
+// sigmoid parameters are now hardcoded (k=6, center=0.5) — no config tests needed
 
 // ---------------------------------------------------------------------------
 // Per-ambition success tracking
@@ -1978,27 +1950,7 @@ describe('step-position failure analysis', () => {
 // Config validation: sigmoid, staleness, and center params
 // ---------------------------------------------------------------------------
 
-describe('validateDrillConfig — sigmoid and staleness', () => {
-  it('clamps sigmoidK to [1, 20]', () => {
-    expect(validateDrillConfig({ sigmoidK: 0 }).sigmoidK).toBe(1);
-    expect(validateDrillConfig({ sigmoidK: 50 }).sigmoidK).toBe(20);
-    expect(validateDrillConfig({ sigmoidK: 10 }).sigmoidK).toBe(10);
-  });
-
-  it('defaults sigmoidK to 6', () => {
-    expect(validateDrillConfig({}).sigmoidK).toBe(6);
-  });
-
-  it('clamps sigmoidCenter to [0, 1]', () => {
-    expect(validateDrillConfig({ sigmoidCenter: -0.5 }).sigmoidCenter).toBe(0);
-    expect(validateDrillConfig({ sigmoidCenter: 999 }).sigmoidCenter).toBe(1);
-    expect(validateDrillConfig({ sigmoidCenter: 0.3 }).sigmoidCenter).toBeCloseTo(0.3);
-  });
-
-  it('defaults sigmoidCenter to 0.5', () => {
-    expect(validateDrillConfig({}).sigmoidCenter).toBeCloseTo(0.5);
-  });
-
+describe('validateDrillConfig — staleness', () => {
   it('clamps stalenessLogBase to [2, 100]', () => {
     expect(validateDrillConfig({ stalenessLogBase: 1 }).stalenessLogBase).toBe(2);
     expect(validateDrillConfig({ stalenessLogBase: 500 }).stalenessLogBase).toBe(100);
@@ -2009,14 +1961,10 @@ describe('validateDrillConfig — sigmoid and staleness', () => {
     expect(validateDrillConfig({}).stalenessLogBase).toBe(11);
   });
 
-  it('coerces non-number sigmoid values to defaults', () => {
+  it('coerces non-number values to defaults', () => {
     const result = validateDrillConfig({
-      sigmoidK: 'fast' as any,
-      sigmoidCenter: true as any,
       stalenessLogBase: null as any,
     });
-    expect(result.sigmoidK).toBe(6);
-    expect(result.sigmoidCenter).toBeCloseTo(0.5);
     expect(result.stalenessLogBase).toBe(11);
   });
 });

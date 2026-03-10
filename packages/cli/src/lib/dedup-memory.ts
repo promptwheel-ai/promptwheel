@@ -16,12 +16,7 @@ import {
   type DedupEntry as CoreDedupEntry,
   applyDecay,
   DEDUP_DEFAULTS,
-  isUnblockedByCompletion,
-  resolveBlockingModules,
 } from '@promptwheel/core/dedup/shared';
-
-// Re-export for use by filter/execute modules
-export { isUnblockedByCompletion, resolveBlockingModules };
 
 // ---------------------------------------------------------------------------
 // Types (extends core with CLI-specific fields)
@@ -34,6 +29,20 @@ export interface DedupEntry extends CoreDedupEntry {
   relatedTitles?: string[];
   /** Primary files targeted by this proposal (top 10, no globs) */
   files?: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Async mutex — prevents concurrent read-modify-write in parallel mode
+// (same pattern as qa-stats.ts / run-state.ts)
+// ---------------------------------------------------------------------------
+
+let _writeLock: Promise<void> = Promise.resolve();
+
+function withWriteLock<T>(fn: () => T): Promise<T> {
+  const prev = _writeLock;
+  let release!: () => void;
+  _writeLock = new Promise<void>((r) => { release = r; });
+  return prev.then(fn).finally(() => release());
 }
 
 // ---------------------------------------------------------------------------
@@ -112,69 +121,29 @@ export function recordDedupEntry(
   failureReason?: 'qa_failed' | 'scope_violation' | 'spindle_abort' | 'agent_error' | 'no_changes',
   relatedTitles?: string[],
   files?: string[],
-  blockedByModules?: string[],
-): void {
-  const entries = readEntries(projectRoot);
-  const now = new Date().toISOString();
-  const normalized = title.toLowerCase().trim();
-
-  // Normalize files: top 10, no globs
-  const normalizedFiles = files?.filter(f => !f.includes('*')).slice(0, 10);
-
-  const existing = entries.find(e => e.title.toLowerCase().trim() === normalized);
-  if (existing) {
-    existing.weight = Math.min(MAX_WEIGHT, existing.weight + BUMP_AMOUNT);
-    existing.last_seen_at = now;
-    existing.hit_count++;
-    if (completed) {
-      existing.completed = true;
-      // Clear blocking info on success — the dependency issue is resolved
-      existing.blocked_by_modules = undefined;
-    }
-    if (failureReason) existing.failureReason = failureReason;
-    if (relatedTitles?.length) existing.relatedTitles = relatedTitles;
-    if (normalizedFiles?.length) existing.files = normalizedFiles;
-    if (blockedByModules?.length) existing.blocked_by_modules = blockedByModules;
-
-    // Instrument: duplicate detected
-    metric('dedup', 'duplicate_found', { hitCount: existing.hit_count, completed });
-  } else {
-    entries.push({
-      title,
-      weight: completed ? COMPLETED_WEIGHT : DEFAULT_WEIGHT,
-      created_at: now,
-      last_seen_at: now,
-      hit_count: 1,
-      completed,
-      failureReason,
-      relatedTitles,
-      files: normalizedFiles,
-      blocked_by_modules: blockedByModules,
-    });
-  }
-
-  writeEntries(projectRoot, entries);
-}
-
-/**
- * Batch-record multiple titles at once (avoids repeated file I/O).
- */
-export function recordDedupEntries(
-  projectRoot: string,
-  titles: { title: string; completed: boolean }[],
-): void {
-  if (titles.length === 0) return;
-  const entries = readEntries(projectRoot);
-  const now = new Date().toISOString();
-
-  for (const { title, completed } of titles) {
+): Promise<void> {
+  return withWriteLock(() => {
+    const entries = readEntries(projectRoot);
+    const now = new Date().toISOString();
     const normalized = title.toLowerCase().trim();
+
+    // Normalize files: top 10, no globs
+    const normalizedFiles = files?.filter(f => !f.includes('*')).slice(0, 10);
+
     const existing = entries.find(e => e.title.toLowerCase().trim() === normalized);
     if (existing) {
       existing.weight = Math.min(MAX_WEIGHT, existing.weight + BUMP_AMOUNT);
       existing.last_seen_at = now;
       existing.hit_count++;
-      if (completed) existing.completed = true;
+      if (completed) {
+        existing.completed = true;
+      }
+      if (failureReason) existing.failureReason = failureReason;
+      if (relatedTitles?.length) existing.relatedTitles = relatedTitles;
+      if (normalizedFiles?.length) existing.files = normalizedFiles;
+
+      // Instrument: duplicate detected
+      metric('dedup', 'duplicate_found', { hitCount: existing.hit_count, completed });
     } else {
       entries.push({
         title,
@@ -183,11 +152,50 @@ export function recordDedupEntries(
         last_seen_at: now,
         hit_count: 1,
         completed,
+        failureReason,
+        relatedTitles,
+        files: normalizedFiles,
       });
     }
-  }
 
-  writeEntries(projectRoot, entries);
+    writeEntries(projectRoot, entries);
+  });
+}
+
+/**
+ * Batch-record multiple titles at once (avoids repeated file I/O).
+ */
+export function recordDedupEntries(
+  projectRoot: string,
+  titles: { title: string; completed: boolean }[],
+): Promise<void> {
+  if (titles.length === 0) return Promise.resolve();
+  return withWriteLock(() => {
+    const entries = readEntries(projectRoot);
+    const now = new Date().toISOString();
+
+    for (const { title, completed } of titles) {
+      const normalized = title.toLowerCase().trim();
+      const existing = entries.find(e => e.title.toLowerCase().trim() === normalized);
+      if (existing) {
+        existing.weight = Math.min(MAX_WEIGHT, existing.weight + BUMP_AMOUNT);
+        existing.last_seen_at = now;
+        existing.hit_count++;
+        if (completed) existing.completed = true;
+      } else {
+        entries.push({
+          title,
+          weight: completed ? COMPLETED_WEIGHT : DEFAULT_WEIGHT,
+          created_at: now,
+          last_seen_at: now,
+          hit_count: 1,
+          completed,
+        });
+      }
+    }
+
+    writeEntries(projectRoot, entries);
+  });
 }
 
 /**

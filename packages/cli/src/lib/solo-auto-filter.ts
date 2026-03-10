@@ -20,7 +20,7 @@ import {
 } from './dedup.js';
 import {
   recordDedupEntries, getEnabledProposals,
-  loadDedupMemory, isUnblockedByCompletion, type DedupEntry,
+  loadDedupMemory,
 } from './dedup-memory.js';
 import { matchAgainstMemory } from '@promptwheel/core/dedup/shared';
 // balanceProposals removed — let quality determine proposal mix organically
@@ -259,14 +259,6 @@ export async function filterProposals(
   const HARD_DEDUP_HIT_THRESHOLD = 3;
   const hardDedupRejected: string[] = [];
   if (state.dedupMemory.length > 0) {
-    // Build set of file paths from completed dedup entries — these represent resolved modules
-    const completedModules = new Set<string>();
-    for (const e of state.dedupMemory) {
-      if (e.completed && e.files) {
-        for (const f of e.files) completedModules.add(f);
-      }
-    }
-
     const failedMemory = state.dedupMemory.filter(
       e => !e.completed && e.failureReason && e.hit_count >= HARD_DEDUP_HIT_THRESHOLD,
     );
@@ -274,19 +266,9 @@ export async function filterProposals(
       for (let i = approvedProposals.length - 1; i >= 0; i--) {
         const match = matchAgainstMemory(approvedProposals[i].title, failedMemory);
         if (match) {
-          const entry = match.entry as DedupEntry;
-
-          // Skip hard-blocking if the entry's dependency blockers have been resolved
-          if (isUnblockedByCompletion(entry, completedModules)) {
-            if (state.options.verbose) {
-              state.displayAdapter.log(chalk.gray(`  ↻ Unblocked: ${approvedProposals[i].title} (dependency module completed)`));
-            }
-            continue;
-          }
-
           hardDedupRejected.push(approvedProposals[i].title);
           if (state.options.verbose) {
-            state.displayAdapter.log(chalk.gray(`  ✗ Hard dedup: ${approvedProposals[i].title} (failed ${entry.hit_count}x as "${entry.failureReason}")`));
+            state.displayAdapter.log(chalk.gray(`  ✗ Hard dedup: ${approvedProposals[i].title} (failed ${match.entry.hit_count}x)`));
           }
           approvedProposals.splice(i, 1);
         }
@@ -339,7 +321,7 @@ export async function filterProposals(
   // Bump dedup memory for rejected duplicates (including hard dedup rejects)
   const allRejected = [...rejectedDupTitles, ...hardDedupRejected];
   if (allRejected.length > 0) {
-    recordDedupEntries(state.repoRoot, allRejected.map(t => ({ title: t, completed: false })));
+    await recordDedupEntries(state.repoRoot, allRejected.map(t => ({ title: t, completed: false })));
     state.dedupMemory = loadDedupMemory(state.repoRoot);
   }
 

@@ -230,6 +230,8 @@ function makeState(overrides: Partial<AutoSessionState> = {}): AutoSessionState 
     effectiveMinConfidence: 20,
     consecutiveLowYieldCycles: 0,
     consecutiveIdleCycles: 0,
+    consecutiveFailureCycles: 0,
+    backpressureRetries: 0,
     _prevCycleCompleted: 0,
 
     sessionPhase: 'deep',
@@ -283,14 +285,6 @@ function makeState(overrides: Partial<AutoSessionState> = {}): AutoSessionState 
     scoutRetries: 0,
     scoutedDirs: [],
 
-    currentLens: 'default',
-    lensRotation: ['default'],
-    lensIndex: 0,
-    lensMatrix: new Map(),
-    lensZeroYieldPairs: new Set(),
-    lensExecutionStrikes: new Map(),
-    lensFullyExhausted: false,
-    lensRotationsCompleted: 0,
     _cycleProgress: null,
     escalationCandidates: new Set(),
 
@@ -444,7 +438,6 @@ describe('executeProposals', () => {
         'agent_error',
         undefined,
         ['src/utils.ts'],
-        undefined,
       );
     });
 

@@ -5,6 +5,7 @@
  */
 
 import type { ProposalCategory } from './types.js';
+import { type CustomRule, buildRulesPromptSection } from './rules.js';
 
 /**
  * Build the scout prompt for analyzing a batch of files
@@ -20,6 +21,10 @@ export function buildScoutPrompt(options: {
   customPrompt?: string;
   /** Files the scout can read but must NOT propose changes to */
   protectedFiles?: string[];
+  /** Custom rules to inject into the prompt */
+  customRules?: CustomRule[];
+  /** Fix history context string */
+  fixContext?: string;
   /** Coverage context injected to give the scout awareness of scan progress */
   coverageContext?: {
     sectorPath: string;
@@ -45,6 +50,8 @@ export function buildScoutPrompt(options: {
     recentlyCompletedTitles,
     customPrompt,
     protectedFiles,
+    customRules,
+    fixContext,
     coverageContext,
   } = options;
 
@@ -132,8 +139,7 @@ Proposals must clear a high bar. Do NOT propose:
 - Changes that only affect developer experience marginally
 
 Each proposal should make the codebase meaningfully safer, faster, or more correct. Prefer fewer high-impact proposals over many small ones.
-
-
+${customRules?.length ? buildRulesPromptSection(customRules) : ''}${fixContext ? `\n## Fix History\n\nPrevious auto-fix outcomes for this codebase:\n${fixContext}\n` : ''}
 ## Requirements
 
 1. Each proposal MUST be:
@@ -179,12 +185,28 @@ Respond with ONLY a JSON object (no markdown, no explanation):
       "touched_files_estimate": 3,
       "rollback_note": "git revert",
       "target_symbols": ["functionName", "ClassName"],
-      "severity": "blocking"
+      "risk_assessment": {
+        "user_impact": "none|minor|degraded|broken",
+        "exploitability": "none|requires_auth|public",
+        "blast_radius": "single_file|module|system_wide",
+        "data_risk": "none|stale|corrupted|lost",
+        "confidence_basis": "pattern_match|code_trace|runtime_evidence"
+      }
     }
   ]
 }
 
-Note: "target_symbols" and "severity" are optional. Severity values: "blocking" (security/correctness), "degrading" (degrades functionality), "polish" (default, normal improvement), "speculative" (exploratory). Proposals are ranked by impact × confidence × severity weight (blocking=3×, degrading=2×, polish=1×, speculative=0.5×). — list the function/class/variable names this change modifies. This enables parallel execution of proposals that touch the same file but different symbols.
+Optional fields: "target_symbols" (function/class names modified — enables parallel execution), "risk_assessment" (structured risk factors — strongly preferred over "severity").
+
+When you provide "risk_assessment", severity is derived automatically:
+- **blocking**: user_impact=broken OR data_risk=lost OR exploitability=public
+- **degrading**: user_impact=degraded OR data_risk=corrupted OR blast_radius=system_wide
+- **speculative**: confidence_basis=pattern_match AND user_impact=none
+- **polish**: everything else
+
+If you cannot determine risk_assessment, you may provide "severity" directly: "blocking", "degrading", "polish", "speculative".
+
+Proposals are ranked by impact × confidence × severity weight (blocking=3×, degrading=2×, polish=1×, speculative=0.5×).
 
 If no improvements are needed, return: {"proposals": []}${coverageContext ? `
 

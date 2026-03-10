@@ -159,6 +159,10 @@ export interface SessionRuntime {
   consecutiveLowYieldCycles: number;
   /** Consecutive main-loop iterations with zero completed tickets (catches all empty-cycle paths) */
   consecutiveIdleCycles: number;
+  /** Consecutive cycles where all proposals failed (distinct from idle — proposals were found) */
+  consecutiveFailureCycles: number;
+  /** Consecutive backpressure waits — caps to prevent infinite hangs */
+  backpressureRetries: number;
   /** Completed ticket count from previous cycle — set before resetting cycleOutcomes */
   _prevCycleCompleted: number;
   sessionPhase: 'warmup' | 'deep' | 'cooldown';
@@ -178,22 +182,6 @@ export interface SessionRuntime {
   _pendingIntegrationProposals: TicketProposal[];
   /** Per-provider last-invoked cycle for cadence tracking */
   integrationLastRun: Record<string, number>;
-  /** Lens rotation: which formula lens is active for sector scanning */
-  currentLens: string;
-  /** Lens rotation: ordered list of lenses to cycle through */
-  lensRotation: string[];
-  /** Lens rotation: index into lensRotation */
-  lensIndex: number;
-  /** Lens rotation: [lensName] → Set<sectorPath> — tracks which sectors each lens has scanned */
-  lensMatrix: Map<string, Set<string>>;
-  /** Lens rotation: [lensName:sectorPath] pairs that produced zero proposals */
-  lensZeroYieldPairs: Set<string>;
-  /** Lens rotation: [lensName:sectorPath] → consecutive all-fail execution cycles */
-  lensExecutionStrikes: Map<string, number>;
-  /** Whether all lens×sector combinations are exhausted */
-  lensFullyExhausted: boolean;
-  /** Number of completed full rotations through all lenses */
-  lensRotationsCompleted: number;
   /** Per-phase progress within current cycle (for progress bar) */
   _cycleProgress: { done: number; total: number; label: string } | null;
   /** Titles hard-rejected by dedup gate, accumulated across cycles for drill escalation */

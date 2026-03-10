@@ -91,12 +91,9 @@ export function getDrillCooldown(state: AutoSessionState): number {
   // Smooth sigmoid adaptation based on recency-weighted success rate
   if (state.drillHistory.length >= COOLDOWN_MIN_HISTORY) {
     const rate = computeDrillMetrics(state.drillHistory).weightedCompletionRate;
-    // Configurable sigmoid parameters (via config.json auto.drill)
-    const k = drillConf?.sigmoidK ?? 6;
-    const center = drillConf?.sigmoidCenter ?? 0.5;
     // Sigmoid: smooth mapping from rate to adjustment
-    // rate=0 → +4 (more cooldown), rate=center → 0, rate=1.0 → -4 (less cooldown)
-    const sigmoid = 1 / (1 + Math.exp(-k * (rate - center)));
+    // rate=0 → +4 (more cooldown), rate=0.5 → 0, rate=1.0 → -4 (less cooldown)
+    const sigmoid = 1 / (1 + Math.exp(-6 * (rate - 0.5)));
     const adjustment = Math.round(4 - 8 * sigmoid);
 
     // Freshness filter → cooldown bridge: adjust based on last generation's stale ratio.

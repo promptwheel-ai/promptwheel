@@ -103,11 +103,13 @@ export async function run(ctx: TicketContext): Promise<StepResult> {
       if (failedStepInfo) {
         const errorOutput = failedStepInfo.stderrTail || failedStepInfo.stdoutTail;
         if (errorOutput) {
-          const truncated = errorOutput.length > 500
-            ? '...' + errorOutput.slice(-497)
+          // Give the agent enough error context for meaningful retries (2000 chars)
+          // Event logging uses its own truncation downstream
+          const truncated = errorOutput.length > 2000
+            ? '...' + errorOutput.slice(-1997)
             : errorOutput;
           errorParts.push('');
-          errorParts.push('Error output:');
+          errorParts.push(`Error output (${failedStep}):`);
           errorParts.push(truncated.split('\n').map(l => `  ${l}`).join('\n'));
         }
         if (failedStepInfo.errorMessage) {

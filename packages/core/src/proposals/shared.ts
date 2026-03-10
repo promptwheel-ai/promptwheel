@@ -19,13 +19,71 @@ export const SEVERITY_WEIGHT: Record<ProposalSeverity, number> = {
   speculative: 0.5,
 };
 
+// ---------------------------------------------------------------------------
+// Structured risk assessment
+// ---------------------------------------------------------------------------
+
+/** Structured risk factors produced by the LLM for rubric-based severity. */
+export interface RiskAssessment {
+  /** How does this affect end users? */
+  user_impact: 'none' | 'minor' | 'degraded' | 'broken';
+  /** How easily can the issue be triggered externally? */
+  exploitability: 'none' | 'requires_auth' | 'public';
+  /** How much of the system is affected? */
+  blast_radius: 'single_file' | 'module' | 'system_wide';
+  /** Risk of data corruption or loss. */
+  data_risk: 'none' | 'stale' | 'corrupted' | 'lost';
+  /** What evidence supports this finding? */
+  confidence_basis: 'pattern_match' | 'code_trace' | 'runtime_evidence';
+}
+
+/**
+ * Derive severity from structured risk factors using a deterministic rubric.
+ * This is more reliable than regex heuristics or raw LLM labels.
+ */
+export function deriveSeverity(assessment: RiskAssessment): ProposalSeverity {
+  // Blocking: any critical dimension
+  if (assessment.user_impact === 'broken') return 'blocking';
+  if (assessment.data_risk === 'lost') return 'blocking';
+  if (assessment.exploitability === 'public') return 'blocking';
+
+  // Degrading: significant but not critical
+  if (assessment.user_impact === 'degraded') return 'degrading';
+  if (assessment.data_risk === 'corrupted') return 'degrading';
+  if (assessment.blast_radius === 'system_wide') return 'degrading';
+
+  // Speculative: low-evidence pattern matches with no user impact
+  if (assessment.confidence_basis === 'pattern_match' && assessment.user_impact === 'none') {
+    return 'speculative';
+  }
+
+  return 'polish';
+}
+
+/** Validate that a risk_assessment object has all required fields with valid values. */
+export function isValidRiskAssessment(ra: unknown): ra is RiskAssessment {
+  if (!ra || typeof ra !== 'object') return false;
+  const r = ra as Record<string, unknown>;
+  return (
+    ['none', 'minor', 'degraded', 'broken'].includes(r.user_impact as string) &&
+    ['none', 'requires_auth', 'public'].includes(r.exploitability as string) &&
+    ['single_file', 'module', 'system_wide'].includes(r.blast_radius as string) &&
+    ['none', 'stale', 'corrupted', 'lost'].includes(r.data_risk as string) &&
+    ['pattern_match', 'code_trace', 'runtime_evidence'].includes(r.confidence_basis as string)
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Regex-based severity inference (fallback)
+// ---------------------------------------------------------------------------
+
 const BLOCKING_SIGNALS = /(?:\b(?:crash|race condition|security|vulnerability|injection|xss|csrf|auth bypass|data loss|corrupt|undefined is not|typeerror|referenceerror|unhandled|deadlock|infinite loop|memory leak|denial.of.service|force.delete|rm -rf)\b|\.catch\(null\))/i;
 const DEGRADING_SIGNALS = /\b(silent(ly)?.(fail|swallow|ignore|drop)|wrong (result|output|value|status|code)|incorrect|broken|missing (guard|check|validation|error)|unreachable|dead code|resource leak|hang(s|ing)?|timeout|orphan)\b/i;
 const SPECULATIVE_SIGNALS = /\b(consider|might|could|potentially|arguably|style|cosmetic|nitpick|optional|subjective)\b/i;
 
 /**
- * Infer severity from category + description when LLM doesn't provide it.
- * Deterministic, no LLM dependency.
+ * Infer severity from category + description when LLM doesn't provide
+ * structured risk_assessment. Deterministic regex fallback.
  */
 export function inferSeverity(category: string, description: string): ProposalSeverity {
   if (category === 'security') return 'blocking';
@@ -58,6 +116,8 @@ export interface RawProposal {
   target_symbols?: string[];
   /** Severity tier: how critical is this change? */
   severity?: ProposalSeverity;
+  /** Structured risk factors for rubric-based severity derivation. */
+  risk_assessment?: RiskAssessment;
 }
 
 /** Proposal with all required fields validated and defaults applied. */
@@ -80,6 +140,8 @@ export interface ValidatedProposal {
   target_symbols?: string[];
   /** Severity tier: how critical is this change? */
   severity: ProposalSeverity;
+  /** Structured risk factors (present when LLM produced them). */
+  risk_assessment?: RiskAssessment;
 }
 
 /** Result of adversarial review — revised scores for a single proposal. */
@@ -170,10 +232,20 @@ export function validateProposalSchema(raw: RawProposal): string | null {
  * Normalize a raw proposal into a validated proposal with defaults applied.
  * Caller must ensure schema validation passed first.
  */
-export function normalizeProposal(raw: RawProposal): ValidatedProposal {
+export function normalizeProposal(raw: RawProposal): ValidatedProposal | null {
   // Lowercase category — LLMs produce "Fix", "Refactor" etc. Trust ladder
   // uses lowercase set (e.g. allowedCategories.has("fix")), so normalize here.
   const category = raw.category!.toLowerCase();
+
+  // Noise filter — reject low-value cosmetic proposals
+  const NOISE_PATTERNS = /\b(jsdoc|comment|typo|spelling|whitespace|import order|sort import|lint|format|prettier|eslint|tslint)\b/i;
+  if (
+    NOISE_PATTERNS.test(raw.title ?? '') &&
+    (category === 'docs' || category === 'cleanup') &&
+    (raw.confidence ?? 50) < 80
+  ) {
+    return null;
+  }
 
   // Clamp impact_score to 1-10 range (CLI already does this, MCP didn't)
   const rawImpact = raw.impact_score ?? PROPOSALS_DEFAULTS.DEFAULT_IMPACT;
@@ -196,10 +268,15 @@ export function normalizeProposal(raw: RawProposal): ValidatedProposal {
     risk: raw.risk ?? 'medium',
     touched_files_estimate: raw.touched_files_estimate ?? (raw.allowed_paths?.length ?? 1),
     rollback_note: raw.rollback_note ?? 'git revert',
-    severity: (['blocking', 'degrading', 'polish', 'speculative'] as const).includes(raw.severity as ProposalSeverity)
-      ? raw.severity as ProposalSeverity
-      : inferSeverity(category, raw.description ?? ''),
+    severity: raw.risk_assessment && isValidRiskAssessment(raw.risk_assessment)
+      ? deriveSeverity(raw.risk_assessment)
+      : (['blocking', 'degrading', 'polish', 'speculative'] as const).includes(raw.severity as ProposalSeverity)
+        ? raw.severity as ProposalSeverity
+        : inferSeverity(category, raw.description ?? ''),
   };
+  if (raw.risk_assessment && isValidRiskAssessment(raw.risk_assessment)) {
+    result.risk_assessment = raw.risk_assessment;
+  }
   if (raw.target_symbols?.length) result.target_symbols = raw.target_symbols;
   return result;
 }

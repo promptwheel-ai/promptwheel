@@ -9,6 +9,9 @@ import { registerInspectHistoryCommand } from './inspect-history.js';
 import { registerInspectExportCommand } from './inspect-export.js';
 import { registerInspectArtifactsCommand } from './inspect-artifacts.js';
 import { registerInspectApproveCommand } from './inspect-approve.js';
+import { registerInspectBaselineCommand } from './inspect-baseline.js';
+import { registerInspectRulesCommand } from './inspect-rules.js';
+import { registerInspectIngestCommand } from './inspect-ingest.js';
 
 export function registerInspectCommands(solo: Command): void {
   registerInspectScoutCommand(solo);
@@ -17,4 +20,7 @@ export function registerInspectCommands(solo: Command): void {
   registerInspectExportCommand(solo);
   registerInspectArtifactsCommand(solo);
   registerInspectApproveCommand(solo);
+  registerInspectBaselineCommand(solo);
+  registerInspectRulesCommand(solo);
+  registerInspectIngestCommand(solo);
 }

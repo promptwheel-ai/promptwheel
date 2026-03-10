@@ -5,7 +5,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import chalk from 'chalk';
-import type { TicketProposal } from '@promptwheel/core/scout';
+import { type TicketProposal, proposalToFinding, appendFixOutcome } from '@promptwheel/core/scout';
 import { tickets, runs } from '@promptwheel/core/repos';
 import type { AutoSessionState } from './solo-auto-state.js';
 import { shouldContinue } from './solo-auto-state.js';
@@ -15,9 +15,10 @@ import { formatGuidelinesForPrompt } from './guidelines.js';
 import { selectRelevant, formatLearningsForPrompt, extractTags, addLearning, confirmLearning, recordAccess, recordApplication, type StructuredKnowledge } from './learnings.js';
 import { classifyFailure } from './failure-classifier.js';
 import { analyzeFailure } from './recovery-analyzer.js';
+import { computeRetryRisk, scoreStrategies, buildCriticBlock, type FailureContext } from '@promptwheel/core/critic/shared';
 import { normalizeQaConfig } from './solo-utils.js';
 import { computeTicketTimeout } from './solo-auto-utils.js';
-import { recordDedupEntry, resolveBlockingModules } from './dedup-memory.js';
+import { recordDedupEntry } from './dedup-memory.js';
 import { recordOutcome as recordLearningOutcome } from './learnings.js';
 import { pushRecentDiff, recordQualitySignal, recordCategoryOutcome, deferProposal } from './run-state.js';
 import { appendErrorLedger } from './error-ledger.js';
@@ -162,19 +163,37 @@ export async function processOneProposal(
         guidelinesContext: state.guidelines ? formatGuidelinesForPrompt(state.guidelines) : undefined,
         learningsContext: ticketLearningsBlock || undefined,
         metadataContext: state.metadataBlock || undefined,
-        qaRetryWithTestFix: ['refactor', 'perf', 'types'].includes(proposal.category),
+        qaRetryWithTestFix: true, // All categories can retry with test files in scope
         criteriaVerification: state.autoConf.criteriaVerification,
         confidence: proposal.confidence,
         complexity: proposal.estimated_complexity,
         rationale: proposal.rationale,
         acceptanceCriteria: proposal.acceptance_criteria,
-        retryContext: retryCount > 0 ? {
-          attempt: retryCount,
-          previousError: (recoveryHint
+        retryContext: retryCount > 0 ? (() => {
+          // Build critic block for structured retry guidance
+          let criticGuidance = '';
+          if (state.autoConf.learningsEnabled && ticketLearnings.length > 0) {
+            const failureCtx: FailureContext = {
+              failed_commands: ticket.verificationCommands ?? [],
+              error_output: (lastError ?? '').slice(0, 2000),
+              attempt: retryCount,
+              max_attempts: maxScopeRetries,
+            };
+            const risk = computeRetryRisk(ticket.allowedPaths ?? [], ticket.verificationCommands ?? [], ticketLearnings, failureCtx);
+            const strategies = scoreStrategies(ticket.allowedPaths ?? [], failureCtx, ticketLearnings);
+            criticGuidance = buildCriticBlock(failureCtx, risk, strategies, ticketLearnings);
+          }
+          const baseError = recoveryHint
             ? `${(lastError ?? '').slice(0, 300)}\n\nRecovery hint: ${recoveryHint}`
-            : (lastError ?? '')).slice(0, 500),
-          failureReason: lastFailureReason ?? 'unknown',
-        } : undefined,
+            : (lastError ?? '');
+          return {
+            attempt: retryCount,
+            previousError: criticGuidance
+              ? `${baseError.slice(0, 500)}\n\n${criticGuidance}`
+              : baseError.slice(0, 500),
+            failureReason: lastFailureReason ?? 'unknown',
+          };
+        })() : undefined,
         qaBaseline: cycleQaBaseline ?? undefined,
         formulaHint: undefined,
         model: routedModel,
@@ -625,7 +644,7 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
   };
 
   // Helper to record outcome after processing
-  const recordOutcome = (proposal: TicketProposal, result: ProposalResult, otherTitles: string[]) => {
+  const recordOutcome = async (proposal: TicketProposal, result: ProposalResult, otherTitles: string[]) => {
     if (result.mergeConflictDeferred) {
       // Don't record dedup entry — we want the re-injected proposal to pass dedup
       // Don't count as failed — it will be retried next cycle
@@ -638,7 +657,7 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
       return;
     }
     if (result.noChanges) {
-      recordDedupEntry(state.repoRoot, proposal.title, false, 'no_changes', undefined, proposal.files ?? proposal.allowed_paths);
+      await recordDedupEntry(state.repoRoot, proposal.title, false, 'no_changes', undefined, proposal.files ?? proposal.allowed_paths);
       const outcome: TicketOutcome = { id: '', title: proposal.title, category: proposal.category, status: 'no_changes' };
       state.allTicketOutcomes.push(outcome);
       state.cycleOutcomes.push(outcome);
@@ -659,7 +678,7 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
         });
       }
       const verifiedFiles = result.actualChangedFiles ?? proposal.files ?? proposal.allowed_paths ?? [];
-      recordDedupEntry(state.repoRoot, proposal.title, true, undefined, otherTitles, verifiedFiles);
+      await recordDedupEntry(state.repoRoot, proposal.title, true, undefined, otherTitles, verifiedFiles);
       recordCategoryOutcome(state.repoRoot, proposal.category, true);
       pushRecentDiff(state.repoRoot, { title: proposal.title, summary: `${verifiedFiles.length} files`, files: verifiedFiles, cycle: state.cycleCount });
       recordQualitySignal(state.repoRoot, result.wasRetried ? 'retried' : 'first_pass');
@@ -685,6 +704,21 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
       if (result.injectedLearningIds?.length) {
         recordLearningOutcome(state.repoRoot, result.injectedLearningIds, true);
       }
+      // Record fix outcome in journal
+      try {
+        const finding = proposalToFinding(proposal);
+        appendFixOutcome(getPromptwheelDir(state.repoRoot), {
+          finding_id: finding.id,
+          ticket_id: '',
+          success: true,
+          completed_at: new Date().toISOString(),
+          files_changed: result.actualChangedFiles ?? proposal.files ?? [],
+          pr_url: result.prUrl,
+          duration_ms: result.phaseTiming?.executeMs,
+          cost_usd: result.costUsd,
+        });
+      } catch { /* non-critical */ }
+
       const outcome: TicketOutcome = {
         id: '', title: proposal.title, category: proposal.category, status: 'completed', prUrl: result.prUrl,
         costUsd: result.costUsd, inputTokens: result.inputTokens, outputTokens: result.outputTokens,
@@ -695,15 +729,26 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
     } else {
       state.totalFailed++;
       const failFiles = proposal.files ?? proposal.allowed_paths ?? [];
-      const blockedBy = state.codebaseIndex?.dependency_edges
-        ? resolveBlockingModules(failFiles, state.codebaseIndex.dependency_edges)
-        : undefined;
-      recordDedupEntry(state.repoRoot, proposal.title, false, (result.failureReason as any) ?? 'agent_error', undefined, failFiles, blockedBy);
+      await recordDedupEntry(state.repoRoot, proposal.title, false, (result.failureReason as any) ?? 'agent_error', undefined, failFiles);
       recordCategoryOutcome(state.repoRoot, proposal.category, false);
       // Record learning outcome — learnings injected into this ticket failed
       if (result.injectedLearningIds?.length) {
         recordLearningOutcome(state.repoRoot, result.injectedLearningIds, false);
       }
+      // Record fix failure in journal
+      try {
+        const finding = proposalToFinding(proposal);
+        appendFixOutcome(getPromptwheelDir(state.repoRoot), {
+          finding_id: finding.id,
+          ticket_id: '',
+          success: false,
+          completed_at: new Date().toISOString(),
+          failure_reason: result.failureReason ?? 'agent_error',
+          duration_ms: result.phaseTiming?.executeMs,
+          cost_usd: result.costUsd,
+        });
+      } catch { /* non-critical */ }
+
       const outcome: TicketOutcome = { id: '', title: proposal.title, category: proposal.category, status: 'failed', failureReason: result.failureReason };
       state.allTicketOutcomes.push(outcome);
       state.cycleOutcomes.push(outcome);
@@ -725,10 +770,10 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
       const result = await processOneProposal(state, toProcess[i], makeLabel(state.totalPrsCreated + 1), cycleQaBaseline);
       const otherTitles = toProcess.filter((_, j) => j !== i).map(p => p.title);
       if (result.noChanges) {
-        recordOutcome(toProcess[i], result, otherTitles);
+        await recordOutcome(toProcess[i], result, otherTitles);
         continue;
       }
-      recordOutcome(toProcess[i], result, otherTitles);
+      await recordOutcome(toProcess[i], result, otherTitles);
       if (i < toProcess.length - 1 && shouldContinue(state)) {
         await sleep(1000);
       }
@@ -776,11 +821,11 @@ export async function executeProposals(state: AutoSessionState, toProcess: Ticke
         const proposal = wave[ri];
         const otherTitles = wave.filter((_, j) => j !== ri).map(p => p.title);
         if (r.status === 'fulfilled') {
-          recordOutcome(proposal, r.value, otherTitles);
+          await recordOutcome(proposal, r.value, otherTitles);
         } else {
           const reason = r.reason instanceof Error ? r.reason.message : String(r.reason);
           console.error(chalk.red(`  Ticket "${proposal.title}" rejected: ${reason}`));
-          recordOutcome(proposal, { success: false }, otherTitles);
+          await recordOutcome(proposal, { success: false }, otherTitles);
         }
       }
 

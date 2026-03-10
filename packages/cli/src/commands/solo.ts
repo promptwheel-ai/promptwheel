@@ -21,32 +21,39 @@ export type { FailureReason, CompletionOutcome, RunTicketResult } from '../lib/s
 export { EXIT_CODES } from '../lib/solo-ticket-types.js';
 
 export const soloCommand = new Command('solo')
-  .description('Zero-config local mode - works without any external services')
+  .description('Repo intelligence engine — find issues, track trends, auto-fix')
   .addHelpText('after', `
-Running 'promptwheel solo' without a subcommand starts auto mode.
+Running 'promptwheel' without a subcommand runs scan.
 
-Examples:
-  promptwheel solo                 Spin mode with drill (default)
-  promptwheel solo --plan          Planning mode (scout → approve → execute)
-  promptwheel --claude             Use Claude backend (needs ANTHROPIC_API_KEY)
-  promptwheel solo init            Initialize local state in current repo
-  promptwheel solo scout .         Scan for improvement opportunities
-  promptwheel solo approve 1-3     Convert proposals 1-3 to tickets
-  promptwheel solo run tkt_abc123  Execute a ticket using Claude
-  promptwheel solo retry tkt_abc123  Reset a blocked ticket to ready
-  promptwheel solo qa              Run QA commands (lint, test, etc.)
-  promptwheel solo status          Show local state and active tickets
-  promptwheel solo nudge "..."     Steer a running auto session with a hint
-  promptwheel solo nudge --drill-pause   Pause drill during a running session
-  promptwheel solo nudge --drill-resume  Resume paused drill
-  promptwheel solo trajectory list     List all trajectories and status
-  promptwheel solo trajectory show <n> Show trajectory details
-  promptwheel solo trajectory generate "goal" Generate a trajectory from a goal
-  promptwheel solo portfolio       Show project portfolio
-  promptwheel solo portfolio reset Reset project portfolio
-  promptwheel solo tui             Launch interactive terminal UI
-  promptwheel solo reset           Clear all local state
-  promptwheel solo export          Export state for debugging
+Scan (intelligence):
+  promptwheel                      Scan for issues (default)
+  promptwheel scan --diff          Delta from last scan (new/fixed/changed)
+  promptwheel scan --history       Show finding trends over time
+  promptwheel scan --fix           Auto-fix top blocking/degrading findings
+  promptwheel scan --stats         Show fix success rates alongside findings
+  promptwheel scan --format sarif  SARIF output for GitHub Code Scanning
+  promptwheel scan --fail-on blocking  Exit 1 if blocking findings (CI gate)
+
+Finding management:
+  promptwheel ingest <file.sarif>  Import findings from external tools
+  promptwheel ingest <f> --fix     Import + create tickets for auto-fix
+  promptwheel baseline show        List suppressed findings
+  promptwheel suppress <id> --expires 90d  Suppress with auto-expiration
+  promptwheel unsuppress <id>      Re-activate a suppressed finding
+  promptwheel rules list           Show custom semantic rules
+
+Orchestration:
+  promptwheel auto                 Spin mode with drill
+  promptwheel auto --plan          Planning mode (scout → approve → execute)
+  promptwheel run tkt_abc123       Execute a specific ticket
+  promptwheel nudge "..."          Steer a running session with a hint
+
+Other:
+  promptwheel init                 Initialize local state in current repo
+  promptwheel status               Show local state and active tickets
+  promptwheel trajectory list      List trajectories
+  promptwheel qa                   Run QA commands (lint, test, etc.)
+  promptwheel update               Self-update to latest version
 `);
 
 registerLifecycleCommands(soloCommand);

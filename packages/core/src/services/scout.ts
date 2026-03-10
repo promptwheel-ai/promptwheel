@@ -103,6 +103,10 @@ export interface ScoutRepoOptions {
   moduleGroups?: import('../scout/scanner.js').ModuleGroup[];
   /** Restrict scanning to these file paths (incremental scanning). */
   changedFiles?: string[];
+  /** Custom rules loaded from .promptwheel/rules/ */
+  customRules?: import('../scout/rules.js').CustomRule[];
+  /** Fix history context string for scout prompt enrichment */
+  fixContext?: string;
   /** Coverage context passed through to the scout prompt */
   coverageContext?: {
     sectorPath: string;
@@ -251,6 +255,8 @@ export async function scoutRepo(
       moduleGroups: opts.moduleGroups,
       changedFiles: opts.changedFiles,
       coverageContext: opts.coverageContext,
+      customRules: opts.customRules,
+      fixContext: opts.fixContext,
       onRawOutput: opts.onRawOutput,
       onProgress: (p) => {
         report({

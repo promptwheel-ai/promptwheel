@@ -4,8 +4,11 @@
  * This is the core scout implementation that works with any DatabaseAdapter.
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { nanoid } from '../utils/id.js';
-import { inferSeverity } from '../proposals/shared.js';
+import { bigramSimilarity } from '../dedup/shared.js';
+import { inferSeverity, deriveSeverity, isValidRiskAssessment } from '../proposals/shared.js';
 import { buildScoutPrompt } from './prompt.js';
 import { parseClaudeOutput, ClaudeScoutBackend, type ScoutBackend } from './runner.js';
 import { scanFiles, batchFilesByTokens, batchFilesByModule } from './scanner.js';
@@ -19,15 +22,72 @@ import type {
 
 export * from './types.js';
 export { buildScoutPrompt, buildCategoryPrompt } from './prompt.js';
+export { type Finding, type ScanResult, type ScanSummary, findingId, proposalToFinding, validatedProposalToFinding, findingToProposal, buildScanResult } from './finding.js';
+export { type EvalCase, type EvalResult, type ExpectedFinding, evalProject, formatEvalResult } from './eval.js';
+export { toSarif } from './sarif.js';
+export {
+  type ScanHistoryEntry, type ScanDiff, type ScanTrend,
+  appendScanHistory, loadScanHistory, getLastScan, diffScans, computeTrend, historyPath,
+} from './history.js';
+export {
+  type Baseline, type BaselineEntry, type BaselineFilterResult,
+  loadBaseline, saveBaseline, createBaseline, suppressFinding, unsuppressFinding,
+  filterByBaseline, baselineSize, baselinePath, parseDuration, countExpired,
+} from './baseline.js';
+export {
+  type FixAttempt, type FixOutcome, type FixJournalEntry, type FixStats, type FindingFixHistory,
+  appendFixAttempt, appendFixOutcome, loadFixJournal,
+  computeFixStats, getFixHistory, getRepeatFailures, buildFixContext, journalPath as fixJournalPath,
+} from './fix-journal.js';
+export {
+  type CustomRule, type RuleSet,
+  loadRules, saveRule, buildRulesPromptSection, rulesDir,
+} from './rules.js';
+export {
+  type IngestOptions, type IngestResult,
+  parseSarif, ingestToScanResult,
+} from './ingest.js';
 export { runClaude, parseClaudeOutput, ClaudeScoutBackend, CodexScoutBackend, CodexMcpScoutBackend, type ScoutBackend } from './runner.js';
 export { AnthropicBatchScoutBackend } from './anthropic-batch-runner.js';
 export { McpBatchServer } from './mcp-batch-server.js';
 export { scanFiles, detectScope, batchFiles, batchFilesByTokens, batchFilesByModule, estimateTokens, type ScannedFile, type ModuleGroup } from './scanner.js';
 
 /**
- * Default verification commands — used only when the scout returns none.
+ * Detect available verification commands from a project's package.json.
+ * Returns category-appropriate defaults if the project has relevant scripts.
  */
-const DEFAULT_VERIFICATION_COMMANDS: string[] = [];
+function detectVerificationCommands(projectPath: string): { test: string[]; types: string[]; fallback: string[] } {
+  try {
+    const pkgPath = path.join(projectPath, 'package.json');
+    const raw = fs.readFileSync(pkgPath, 'utf8');
+    const pkg = JSON.parse(raw);
+    const scripts = pkg.scripts ?? {};
+    const hasTest = 'test' in scripts;
+    const hasTypecheck = 'typecheck' in scripts || 'type-check' in scripts;
+    const hasTsc = hasTypecheck || (pkg.devDependencies?.typescript || pkg.dependencies?.typescript);
+    return {
+      test: hasTest ? ['npm test'] : [],
+      types: hasTsc ? ['npx tsc --noEmit'] : [],
+      fallback: hasTest ? ['npm test'] : [],
+    };
+  } catch {
+    return { test: [], types: [], fallback: [] };
+  }
+}
+
+/** Module-level cache — set once per scout() call. */
+let _projectVerificationCommands: ReturnType<typeof detectVerificationCommands> | null = null;
+
+/**
+ * Get default verification commands for a proposal category.
+ * Returns empty if no project scripts were detected.
+ */
+function getDefaultVerificationCommands(category: string): string[] {
+  if (!_projectVerificationCommands) return [];
+  if (category === 'test') return _projectVerificationCommands.test;
+  if (category === 'types') return _projectVerificationCommands.types;
+  return _projectVerificationCommands.fallback;
+}
 
 /**
  * Expand allowed paths for test proposals to include test file locations
@@ -165,6 +225,16 @@ function normalizeProposal(
       return null;
     }
 
+    // Noise filter — reject low-value cosmetic proposals that slip through the scout prompt
+    const NOISE_PATTERNS = /\b(jsdoc|comment|typo|spelling|whitespace|import order|sort import|lint|format|prettier|eslint|tslint)\b/i;
+    if (
+      NOISE_PATTERNS.test(proposal.title) &&
+      (rawCategory === 'docs' || rawCategory === 'cleanup') &&
+      (proposal.confidence ?? 50) < 80
+    ) {
+      return null;
+    }
+
     // Ensure arrays
     proposal.acceptance_criteria = Array.isArray(proposal.acceptance_criteria)
       ? proposal.acceptance_criteria
@@ -184,9 +254,9 @@ function normalizeProposal(
       proposal.acceptance_criteria = ['Implementation verified by tests'];
     }
 
-    // Ensure at least default verification commands
+    // Ensure at least default verification commands (category-appropriate)
     if (proposal.verification_commands.length === 0) {
-      proposal.verification_commands = [...DEFAULT_VERIFICATION_COMMANDS];
+      proposal.verification_commands = [...getDefaultVerificationCommands(rawCategory)];
     }
 
     // Ensure allowed_paths
@@ -243,10 +313,16 @@ function normalizeProposal(
       proposal.target_symbols = undefined;
     }
 
-    // Normalize severity — infer from category+description if LLM didn't provide it
-    const validSeverities = ['blocking', 'degrading', 'polish', 'speculative'];
-    if (!proposal.severity || !validSeverities.includes(proposal.severity)) {
-      proposal.severity = inferSeverity(proposal.category, proposal.description);
+    // Normalize risk_assessment and severity
+    const rawAssessment = (raw as Record<string, unknown>).risk_assessment;
+    if (rawAssessment && isValidRiskAssessment(rawAssessment)) {
+      proposal.risk_assessment = rawAssessment;
+      proposal.severity = deriveSeverity(rawAssessment);
+    } else {
+      const validSeverities = ['blocking', 'degrading', 'polish', 'speculative'];
+      if (!proposal.severity || !validSeverities.includes(proposal.severity)) {
+        proposal.severity = inferSeverity(proposal.category, proposal.description);
+      }
     }
 
     return proposal;
@@ -281,6 +357,9 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
     scoutConcurrency,
     coverageContext,
   } = options;
+
+  // Detect project verification commands once for all proposals
+  _projectVerificationCommands = detectVerificationCommands(projectPath);
 
   const scoutBackend: ScoutBackend = backend ?? new ClaudeScoutBackend();
   // Codex needs more time per batch: cold start + large token-packed batches
@@ -376,9 +455,11 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
         if (excludeTypes?.length && excludeTypes.includes(proposal.category)) continue;
         if (proposal.confidence < minConfidence) continue;
 
-        const isDuplicate = proposals.some(
-          p => p.title.toLowerCase() === proposal.title.toLowerCase()
-        );
+        const isDuplicate = proposals.some(p => {
+          const titleA = p.title.toLowerCase();
+          const titleB = proposal.title.toLowerCase();
+          return titleA === titleB || bigramSimilarity(titleA, titleB) >= 0.65;
+        });
         if (isDuplicate) continue;
 
         proposals.push(proposal);
@@ -400,6 +481,8 @@ export async function scout(options: ScoutOptions): Promise<ScoutResult> {
         customPrompt,
         protectedFiles,
         coverageContext,
+        customRules: options.customRules,
+        fixContext: options.fixContext,
       })
     );
 
