@@ -179,24 +179,20 @@ export function detectScope(cwd: string): string {
       const stat = fs.statSync(path.join(cwd, dir));
       if (!stat.isDirectory()) continue;
 
-      // For monorepo roots, enumerate sub-packages for targeted scanning
+      // For monorepo roots, use wildcard glob for sub-packages
+      // (our glob matcher doesn't support brace expansion)
       if (monorepoRoots.includes(dir)) {
         const subDirs = fs.readdirSync(path.join(cwd, dir), { withFileTypes: true })
-          .filter(d => d.isDirectory() && !d.name.startsWith('.'))
-          .map(d => d.name)
-          .slice(0, 10); // Cap at 10 to avoid glob explosion
+          .filter(d => d.isDirectory() && !d.name.startsWith('.'));
 
         if (subDirs.length === 0) return `${dir}/**`;
 
         // If sub-packages have src/ dirs, scope to those for precision
         const hasSrcDirs = subDirs.some(d => {
-          try { return fs.statSync(path.join(cwd, dir, d, 'src')).isDirectory(); } catch { return false; }
+          try { return fs.statSync(path.join(cwd, dir, d.name, 'src')).isDirectory(); } catch { return false; }
         });
 
-        if (hasSrcDirs) {
-          return `{${subDirs.map(d => `${dir}/${d}/src`).join(',')}}/**`;
-        }
-        return `{${subDirs.map(d => `${dir}/${d}`).join(',')}}/**`;
+        return hasSrcDirs ? `${dir}/*/src/**` : `${dir}/**`;
       }
 
       return `${dir}/**`;
