@@ -357,7 +357,8 @@ export async function ensureDirectBranch(repoRoot: string, branchName: string, b
           throw new Error(
             `Cannot create branch "${branchName}" — a conflicting ref exists (e.g. "${branchName}/*" branches).\n` +
             `This happens when milestone or ticket branches like "${branchName}/milestone-*" exist.\n` +
-            `Fix: delete the conflicting branches with \`git branch -D <branch>\` or set a different \`directBranch\` in .promptwheel/config.json.`
+            `Fix: delete the conflicting branches with \`git branch -D <branch>\` or set a different \`directBranch\` in .promptwheel/config.json.`,
+            { cause: err },
           );
         }
         throw err;

@@ -354,7 +354,7 @@ describe('DirectClient — spindle detection', () => {
         estimated_lines: 10,
         risk_level: 'low',
       });
-      resp = await client.advance();
+      await client.advance();
     }
 
     // Force spindle stalling state — set recoveries to 2 so next abort hits the cap

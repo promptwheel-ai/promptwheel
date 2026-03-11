@@ -176,7 +176,7 @@ export async function withOptionalCommandAdapter<T>(
   try {
     adapter = await getAdapter(repoRoot);
   } catch {
-    adapter = null;
+    // adapter stays null — caller handles missing DB gracefully
   }
 
   try {

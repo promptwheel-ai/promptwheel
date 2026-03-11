@@ -155,7 +155,7 @@ export async function runPreflightChecks(repoRoot: string, opts: {
     const remotes = execSync('git remote', { cwd: repoRoot, encoding: 'utf-8' }).trim();
     hasRemote = remotes.length > 0;
   } catch {
-    hasRemote = false;
+    // hasRemote stays false — no git remote available
   }
 
   if (!hasRemote) {

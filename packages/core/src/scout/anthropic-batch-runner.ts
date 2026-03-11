@@ -268,19 +268,17 @@ export class AnthropicBatchScoutBackend implements ScoutBackend {
 
       // Wait with abort-awareness
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(resolve, delay);
+        let onAbort: (() => void) | undefined;
+        const timer = setTimeout(() => {
+          if (onAbort) signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, delay);
         if (signal) {
-          const onAbort = () => {
+          onAbort = () => {
             clearTimeout(timer);
             reject(new Error('Aborted by signal'));
           };
           signal.addEventListener('abort', onAbort, { once: true });
-          // Clean up listener when timer fires
-          const origResolve = resolve;
-          resolve = (() => {
-            signal.removeEventListener('abort', onAbort);
-            origResolve();
-          }) as () => void;
         }
       });
 

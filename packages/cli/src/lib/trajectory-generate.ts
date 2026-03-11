@@ -171,7 +171,7 @@ export async function generateTrajectoryFromProposals(opts: GenerateFromProposal
   // 1. Build codebase context
   let indexBlock: string;
   let metaBlock: string;
-  let depEdges: Record<string, string[]> = {};
+  let depEdges: Record<string, string[]>;
   try {
     const excludeDirs = ['node_modules', 'dist', 'build', '.git', '.promptwheel', 'coverage', '__pycache__'];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -186,7 +186,7 @@ export async function generateTrajectoryFromProposals(opts: GenerateFromProposal
     indexBlock = formatIndexForPrompt(codebaseIndex, 0);
     metaBlock = formatMetadataForPrompt(projectMeta);
   } catch (err) {
-    throw new Error(`Trajectory generation failed during codebase indexing: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`Trajectory generation failed during codebase indexing: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
 
   // 2. Format proposals and build prompt
@@ -253,7 +253,7 @@ export async function generateTrajectoryFromProposals(opts: GenerateFromProposal
   try {
     trajectory = validateAndBuild(parsed);
   } catch (err) {
-    throw new Error(`Trajectory generation failed during validation: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`Trajectory generation failed during validation: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
 
   // 8. Quality gate — validate trajectory quality if blueprint was provided

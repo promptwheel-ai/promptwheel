@@ -39,7 +39,7 @@ const MAX_PERSISTED_EVENT_PAYLOAD_BYTES = 128 * 1024;
 const MAX_PERSISTED_EVENT_PREVIEW_BYTES = 8192;
 
 function capEventPayloadForPersistence(payload: Record<string, unknown>): Record<string, unknown> {
-  let serialized = '';
+  let serialized: string;
   try {
     const maybeSerialized = JSON.stringify(payload);
     if (typeof maybeSerialized !== 'string') {
@@ -124,6 +124,7 @@ export class RunManager {
     } catch (err) {
       throw new Error(
         `Cannot create .promptwheel directory at ${this.bsDir}: ${err instanceof Error ? err.message : String(err)}. Check file permissions.`,
+        { cause: err },
       );
     }
 
@@ -144,7 +145,7 @@ export class RunManager {
           if (!isNaN(lockPid)) {
             try {
               process.kill(lockPid, 0); // throws ESRCH if dead
-              throw new Error(`Another PromptWheel session is active (PID ${lockPid}). End it first or delete .promptwheel/session.lock.`);
+              throw new Error(`Another PromptWheel session is active (PID ${lockPid}). End it first or delete .promptwheel/session.lock.`, { cause: err });
             } catch (e) {
               if (e instanceof Error && e.message.includes('Another PromptWheel session')) throw e;
               // Process dead — stale lock, overwrite atomically

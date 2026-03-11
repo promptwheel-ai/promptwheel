@@ -21,7 +21,7 @@ import { generateSessionReport, generateSessionJson, writeSessionReport, writeSe
 import { computeDrillMetrics } from './solo-auto-drill.js';
 
 export async function finalizeSession(state: AutoSessionState): Promise<number> {
-  let exitCode = 0;
+  let exitCode: number;
   try {
     exitCode = await finalizeSafe(state);
   } finally {

@@ -134,7 +134,7 @@ export class ToolRegistry {
     // Load custom tools from .promptwheel/tools/*.json
     if (!toolsDir || !fs.existsSync(toolsDir)) return;
 
-    let files: string[] = [];
+    let files: string[];
     try {
       files = fs.readdirSync(toolsDir).filter(f => f.endsWith('.json')).sort();
       this.customToolReport.discovered = files.length;

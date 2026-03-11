@@ -355,7 +355,7 @@ describe('Golden Path E2E', () => {
       risk_level: 'low',
     });
 
-    resp = await advance(ctx()); // EXECUTE
+    await advance(ctx()); // EXECUTE
 
     // Ticket fails
     await ingestEvent('TICKET_RESULT', {

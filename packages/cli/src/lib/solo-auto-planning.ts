@@ -27,8 +27,6 @@ export interface ScoutAllResult {
  */
 export async function scoutAllSectors(state: AutoSessionState): Promise<ScoutAllResult> {
   const allProposals: TicketProposal[] = [];
-  let sectorsScanned = 0;
-
   const scope = getNextScope(state) ?? '**';
   state.displayAdapter.log(chalk.bold(`Scouting scope: ${scope}...`));
   state.cycleCount++;
@@ -40,8 +38,7 @@ export async function scoutAllSectors(state: AutoSessionState): Promise<ScoutAll
       allProposals.push(...filterResult.toProcess);
     }
   }
-  sectorsScanned = 1;
-  return { proposals: rankWithGraph(state, allProposals), sectorsScanned };
+  return { proposals: rankWithGraph(state, allProposals), sectorsScanned: 1 };
 }
 
 // ── Rank proposals ───────────────────────────────────────────────────────────
