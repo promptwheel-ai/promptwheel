@@ -284,6 +284,7 @@ const COMMAND_BLOCKLIST = [
   { pattern: /\bmkfs\b/, reason: 'mkfs formats filesystems' },
   { pattern: /\bdd\s+.*\bof=\/dev\//, reason: 'dd to device can destroy data' },
   { pattern: />\s*\/dev\/sd[a-z]/, reason: 'Redirecting to block device can destroy data' },
+  { pattern: /:\(\)\s*\{.*:\|:.*\}/, reason: 'Fork bomb' },
 ];
 
 function checkCommandBlocklist(command) {
