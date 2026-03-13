@@ -151,7 +151,7 @@ export class RunManager {
               // Process dead — stale lock, overwrite atomically
               try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
               try { fs.writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}`, { flag: 'wx' }); } catch {
-                console.warn('[promptwheel] Failed to acquire session lock after stale lock removal — another session may have started concurrently');
+                throw new Error('Another PromptWheel session acquired the lock concurrently. Try again shortly or delete .promptwheel/session.lock.');
               }
             }
           } else {
@@ -159,7 +159,7 @@ export class RunManager {
             console.warn('[promptwheel] Session lock file contains unreadable PID, treating as stale');
             try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
             try { fs.writeFileSync(lockPath, `${process.pid}\n${new Date().toISOString()}`, { flag: 'wx' }); } catch {
-              console.warn('[promptwheel] Failed to acquire session lock after corrupt lock removal');
+              throw new Error('Another PromptWheel session acquired the lock concurrently. Try again shortly or delete .promptwheel/session.lock.');
             }
           }
         }
