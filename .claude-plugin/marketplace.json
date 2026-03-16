@@ -10,7 +10,7 @@
     {
       "name": "promptwheel",
       "description": "AI coding agent orchestrator — autonomous parallel runs with cross-run memory, human-reviewed draft PRs",
-      "version": "0.7.38",
+      "version": "0.7.39",
       "author": {
         "name": "PromptWheel",
         "email": "support@promptwheel.com"

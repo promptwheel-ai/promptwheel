@@ -1,6 +1,6 @@
 {
   "name": "promptwheel",
-  "version": "0.7.38",
+  "version": "0.7.39",
   "description": "Interactive codebase improvement — scouts, presents roadmap, executes approved changes",
   "skills": [
     "./skills/run",

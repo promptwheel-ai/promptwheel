@@ -1,6 +1,6 @@
 {
   "name": "@promptwheel/cli",
-  "version": "0.7.38",
+  "version": "0.7.39",
   "description": "PromptWheel CLI - AI coding agent orchestrator — autonomous runs, human-reviewed PRs",
   "author": "PromptWheel",
   "homepage": "https://promptwheel.com",
