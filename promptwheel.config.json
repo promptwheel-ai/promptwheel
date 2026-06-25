@@ -1,0 +1,35 @@
+{
+  "linkNodeModules": true,
+  "metrics": [
+    {
+      "name": "tests_pass",
+      "cmd": "npm test --silent",
+      "extract": "exit",
+      "direction": "pass",
+      "guard": true,
+      "_note": "PASS_TO_PASS guard: if tests passed at base they must still pass at head"
+    },
+    {
+      "name": "lint_errors",
+      "cmd": "npx eslint . -f unix 2>/dev/null | grep -c ' error ' || true",
+      "extract": "number",
+      "direction": "down",
+      "guard": true
+    },
+    {
+      "name": "bundle_kb",
+      "cmd": "du -sk dist 2>/dev/null | cut -f1 || echo 0",
+      "extract": "number",
+      "direction": "down",
+      "guard": false,
+      "_note": "informational: track but don't block"
+    },
+    {
+      "name": "todos",
+      "cmd": "grep -rn TODO --include=*.js --include=*.mjs --include=*.ts . 2>/dev/null | wc -l",
+      "extract": "number",
+      "direction": "down",
+      "guard": false
+    }
+  ]
+}

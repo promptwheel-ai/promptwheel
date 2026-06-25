@@ -1,0 +1,17 @@
+{
+  "name": "promptwheel",
+  "version": "0.0.1",
+  "description": "The outcome gate for AI code — prove every change moved a metric. Before/after in an isolated worktree, regression-guarded, noise-aware.",
+  "type": "module",
+  "bin": {
+    "promptwheel": "bin/promptwheel.mjs",
+    "pw": "bin/promptwheel.mjs"
+  },
+  "files": ["bin"],
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "gate": "node bin/promptwheel.mjs run"
+  },
+  "license": "MIT",
+  "keywords": ["agent", "ci", "regression", "metrics", "verification", "ai-coding", "outcome", "promptwheel"]
+}
