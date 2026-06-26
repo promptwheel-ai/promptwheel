@@ -17,6 +17,14 @@ The unowned gap is **principled prioritization** (nobody publishes a work-select
 ### 3. Paid surface
 Cross-repo aggregation of the playbook + lever data ("change-types that reliably help across your fleet") is the hosted product. Never in the OSS core.
 
+## Harvested data-quality guards (from the securitychecks/blockspool lineage, 2026-06-26)
+
+The reward stream and any future playbook are only as good as the data feeding them. Three disciplines the earlier projects learned the hard way (see `../../explorations/ripcut-backup.md`), to build *before* the playbook:
+
+- **Typed override reasons gate what feeds learning.** When a human overrides a verdict, require a typed reason (`false_signal` / `flaky_metric` / `acceptable_tradeoff` / `duplicate`). Only `false_signal`/`flaky_metric` may adjust a metric's noise model or lever score; an `acceptable_tradeoff` must **never** teach "this change-type is bad." A `VERDICT_MAP` from typed action → reward, never free-text. (securitychecks: "don't auto-learn from generic waive — risk of learning to suppress real issues.")
+- **Cohort-segmented reliability, not one global number.** Fingerprint each outcome with an environment/cohort tag (CI vs local, benchmark-class, machine) and segment lever scores + noise bands by cohort. securitychecks precision was ~100% on SaaS repos but ~30–50% on frameworks — "don't chase a single universal FP rate." Also a marketing-honesty guard: don't claim "works on any repo."
+- **Composite lever score = effect-size × confidence, Beta-smoothed.** Replace raw `improved/runs` with a Beta(α,β) posterior mean (smooths low-sample metrics) times the median effect size; drop metrics below an effect-size floor from prioritization. (securitychecks ranked by confidence×severity; blockspool's UCB1 used a Beta posterior + impact floor.)
+
 ## Hard gates before building any of this
 - **≥ a few hundred gated runs** of real outcome data in a real repo (else the playbook overfits to noise).
 - **Proof of compounding**: an `improve` loop using the playbook must beat the same loop without it, *measured by the gate itself*. If it doesn't, this layer is a research dead-end and we stop — cheaply.

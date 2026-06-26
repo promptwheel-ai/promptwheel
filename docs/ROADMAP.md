@@ -32,6 +32,14 @@ Sequenced so each phase ships something usable and feeds the next. The ordering 
 - **Work-discovery:** UCB/bandit-scored proposal of the next high-value change, scored against the outcome record (the principled prioritization nobody publishes).
 - **Paid:** hosted cross-repo intelligence + dashboards over the aggregate.
 
+## Phase 6 — credibility & evidence (harvested from the securitychecks/blockspool lineage, 2026-06-26)
+
+Disciplines the earlier verification projects actually shipped; they protect the gate's own credibility and are the basis of the paid tier. See `../../explorations/ripcut-backup.md`.
+
+- **Golden self-eval + accuracy-regression canary.** A labeled `test/fixtures/` of changes with known outcomes (a true win, a true no-op, a true regression, a deliberately flaky benchmark) + `promptwheel selfcheck` that asserts the gate's own verdict accuracy, and a CI canary that fails if an engine change degrades it. (securitychecks shipped recall/precision-bench + a benchmark-canary.) We measure the change; we don't yet prove our verdict is right.
+- **Portable attestation artifact.** Make each outcome record a self-contained, hashable/signable bundle (cmd + env fingerprint + raw repeat samples + median + band + verdict) that a third party / the future cloud can independently re-verify *without the repo*. Turns "prove" into "produce a checkable proof"; the technical basis of the paid cross-repo tier.
+- **Pre-flight `unmeasurable` gate.** Classify a change with no derivable metric/extract target as `unmeasurable` and skip the worktree experiment before spending compute, rather than emitting a junk verdict.
+
 ## Guardrails (non-negotiable)
 - **Ship now.** The window is closing (Auto-Memory + Routines creeping in).
 - **Stay radically thin.** Ride the platform (Agent SDK, `/loop`, `bd`, git). Zero deps in the core.
