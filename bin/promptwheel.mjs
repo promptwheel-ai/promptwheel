@@ -202,6 +202,35 @@ function revert(repo) {
   try { git(['clean', '-fd', '-e', '.promptwheel'], repo); } catch { /* best effort */ }
 }
 
+// Phase-5 seed: turn the accumulated reward stream into signal. Thin on purpose —
+// this is the substrate a future ACE playbook / UCB work-discovery loop trains on,
+// NOT that loop itself. Just honest aggregation, no model.
+function insights(argv) {
+  const args = parseArgs(argv);
+  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
+  const f = join(repo, '.promptwheel', 'outcomes.jsonl');
+  if (!existsSync(f)) { console.error('no outcome record yet — run the gate a few times first (.promptwheel/outcomes.jsonl)'); process.exit(2); }
+  const runs = readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const agg = {};
+  for (const r of runs) for (const m of (r.metrics || [])) {
+    const a = agg[m.name] ??= { runs: 0, improved: 0, regressed: 0, inconclusive: 0, unchanged: 0, net: 0, last: null };
+    a.runs++; if (a[m.status] != null) a[m.status]++;
+    if (typeof m.delta === 'number') a.net = +(a.net + m.delta).toFixed(6);
+    a.last = m.after;
+  }
+  // "lever score" = how reliably acting on this metric yields a real improvement
+  const rows = Object.entries(agg).map(([name, a]) => ({ name, ...a, lever: a.runs ? a.improved / a.runs : 0 }))
+    .sort((x, y) => y.lever - x.lever);
+  if (args.json) { console.log(JSON.stringify({ runs: runs.length, metrics: rows }, null, 2)); return; }
+  console.log(`\nPromptWheel insights — ${runs.length} gated runs recorded\n`);
+  console.log(`  ${'metric'.padEnd(18)} ${'runs'.padStart(5)} ${'impr'.padStart(5)} ${'regr'.padStart(5)} ${'inconc'.padStart(6)} ${'net Δ'.padStart(9)}  lever`);
+  for (const r of rows) {
+    console.log(`  ${r.name.padEnd(18)} ${String(r.runs).padStart(5)} ${String(r.improved).padStart(5)} ${String(r.regressed).padStart(5)} ${String(r.inconclusive).padStart(6)} ${String(r.net).padStart(9)}  ${(r.lever * 100).toFixed(0)}%`);
+  }
+  console.log('\n  lever = improved/runs — how reliably this metric actually responds. The');
+  console.log('  highest-lever metrics are where an agent loop should spend its attempts.\n');
+}
+
 const short = (repo, ref) => { try { return git(['rev-parse', '--short', ref], repo); } catch { return ref; } };
 
 function printHuman(r) {
@@ -256,6 +285,7 @@ function parseArgs(argv) {
 const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === 'run') run(rest);
 else if (cmd === 'improve') improve(rest);
+else if (cmd === 'insights') insights(rest);
 else {
   console.log([
     'PromptWheel — the outcome gate for AI code. Prove every change moved a metric.',
@@ -264,6 +294,7 @@ else {
     '  promptwheel run --working                 measure uncommitted changes (HEAD → working tree)',
     '  promptwheel run --no-record               skip appending to .promptwheel/outcomes.jsonl',
     '  promptwheel improve --attempt "<cmd>"     run an agent/script, keep the change only if a metric improved',
+    '  promptwheel insights                      summarize the accumulated outcome record (which metrics actually respond)',
     '',
     'Config: promptwheel.config.json → { metrics: [{ name, cmd, direction, extract?, guard? }] }',
   ].join('\n'));
