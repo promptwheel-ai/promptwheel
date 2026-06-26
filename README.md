@@ -32,6 +32,9 @@ npx promptwheel run --repeat 5 --json     # measure 5× to establish a noise ban
 # the flywheel: run any agent/script, keep the change ONLY if a metric improved
 npx promptwheel improve --attempt "claude -p 'reduce lint errors'"
 npx promptwheel improve --attempt "aider --message 'speed up the hot path'" --repeat 5
+
+# what's actually responding in this repo? (aggregates .promptwheel/outcomes.jsonl)
+npx promptwheel insights
 ```
 
 It never touches your working tree — every measurement runs in a throwaway worktree. Every gated run appends to `.promptwheel/outcomes.jsonl` (commit it to build the per-repo "what moves what" record; `--no-record` to skip).
@@ -90,15 +93,18 @@ The accumulated record of **which change-types move which metrics** is the asset
 - [docs/VISION.md](docs/VISION.md) — why we pivoted from orchestrator to outcome gate, the thesis, the moat, the open-core model.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — the phased plan and the ship-now/stay-thin guardrails.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the engine works: schemas, extract modes, the trust/noise model.
+- [docs/LEARNING.md](docs/LEARNING.md) — the (research-gated) Phase-5 design: ACE-style playbook + UCB work-discovery.
 - [CLAUDE.md](CLAUDE.md) — the constitution for anyone (human or agent) working in this repo.
 
 ## Roadmap
 
 - [x] before/after worktree measurement + regression guards
 - [x] noise band + confidence (don't trust a delta inside the jitter)
-- [ ] `--working` mode: measure uncommitted changes (stash-based) for local dev
-- [ ] persisted reward stream (`.promptwheel/outcomes.jsonl`) → the compounding "what moves what" record
-- [ ] GitHub Action / PR-comment wrapper (the open-core distribution surface)
-- [ ] agent loop: propose change → gate → keep only if a metric improved
+- [x] `--working` mode (measure uncommitted changes)
+- [x] persisted reward stream (`.promptwheel/outcomes.jsonl`) — the compounding "what moves what" record
+- [x] GitHub Action / PR-comment wrapper (open-core distribution surface)
+- [x] agent loop: `improve` — propose → gate → keep only if a metric improved
+- [x] `insights` — reward-stream aggregation (Phase-5 seed)
+- [ ] npm publish + `v0` tag · ACE-style learning + UCB work-discovery (gated on data — see [docs/ROADMAP.md](docs/ROADMAP.md), [docs/LEARNING.md](docs/LEARNING.md))
 
-> Status: v0, runnable. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.
+> Status: v0, runnable, all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.

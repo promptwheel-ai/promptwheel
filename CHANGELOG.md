@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.2 — 2026-06-26 — roadmap phases 1–5
+
+- **`--working` mode** — measure uncommitted (tracked) changes via `git stash create`; never disturbs the working tree.
+- **Reward stream** — every gated run appends to `.promptwheel/outcomes.jsonl` (`--no-record` to skip). The per-repo "what moves what" record.
+- **`improve --attempt "<cmd>"`** — the flywheel: run any agent/script, gate the result, **keep only if a metric improved** (commit), else revert. Agent-agnostic.
+- **`--markdown`** output + **GitHub Action** (`action.yml`) — PR-comment verdict + status check, zero-install (runs from the action's own checkout). Example workflow included.
+- **`insights`** — aggregate the reward stream into per-metric lever scores (Phase-5 seed; design in `docs/LEARNING.md`).
+- Internals: extracted a shared `gate()` core used by `run` and `improve`.
+
 ## 0.0.1 — 2026-06-26 — the pivot
 
 PromptWheel rebooted from an **agent orchestrator** into **the outcome gate for AI code**. Orchestration was retired (commoditized by Claude Code Workflows/subagents/hooks/Routines and Cursor); the prior codebase is archived at `_archive/promptwheel-orchestration` (recoverable from GitHub `promptwheel-ai/promptwheel` + `CodeWheel-AI/promptwheel`).
