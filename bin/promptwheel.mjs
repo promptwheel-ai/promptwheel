@@ -122,39 +122,42 @@ function evaluate(m, beforeS, afterS, repeat) {
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
-function run(argv) {
-  const args = parseArgs(argv);
-  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
+// the shared core: measure a change (base→head) and return the structured report
+function gate(repo, opts) {
   const cfg = loadConfig(repo);
-  const repeat = Math.max(1, args.repeat ?? cfg.repeat ?? 1);
+  const repeat = Math.max(1, opts.repeat ?? cfg.repeat ?? 1);
   const linkNM = cfg.linkNodeModules !== false;
 
   let base, head;
-  if (args.working) {
-    // measure uncommitted (tracked) changes: HEAD → a snapshot commit of the working tree,
-    // made via `git stash create` so the actual working tree is never disturbed.
-    const snap = git(['stash', 'create'], repo); // '' when the tree is clean
+  if (opts.working) {
+    // measure uncommitted (tracked) changes via a snapshot commit; never disturbs the working tree
+    const snap = git(['stash', 'create'], repo); // '' when clean
     base = 'HEAD';
     head = snap || 'HEAD';
   } else {
-    base = resolveBase(repo, args.base);
-    head = args.head || 'HEAD';
+    base = resolveBase(repo, opts.base);
+    head = opts.head || 'HEAD';
   }
 
   const before = measureAt(repo, base, cfg.metrics, linkNM, repeat);
   const after = measureAt(repo, head, cfg.metrics, linkNM, repeat);
-
   const metrics = cfg.metrics.map((m) => {
     const ev = evaluate(m, before[m.name], after[m.name], repeat);
     return { name: m.name, direction: m.direction || 'up', guard: !!m.guard, ...ev };
   });
-
   const verdict = metrics.some((m) => m.guard && !m.ok) ? 'fail' : 'pass';
-  const report = { base: short(repo, base), head: short(repo, head), repeat, mode: args.working ? 'working' : 'refs', verdict, metrics };
-  if (!args.noRecord && cfg.record !== false) recordOutcome(repo, report);
+  const report = { base: short(repo, base), head: short(repo, head), repeat, mode: opts.working ? 'working' : 'refs', verdict, metrics };
+  if (!opts.noRecord && cfg.record !== false) recordOutcome(repo, report);
+  return report;
+}
+
+function run(argv) {
+  const args = parseArgs(argv);
+  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
+  const report = gate(repo, { base: args.base, head: args.head, working: args.working, repeat: args.repeat, noRecord: args.noRecord });
   if (args.json) console.log(JSON.stringify(report, null, 2));
   else printHuman(report);
-  process.exit(verdict === 'pass' ? 0 : 1);
+  process.exit(report.verdict === 'pass' ? 0 : 1);
 }
 
 // the moat: append every gated run to a per-repo outcome record (best-effort, never fails the gate)
@@ -164,6 +167,38 @@ function recordOutcome(repo, report) {
     mkdirSync(dir, { recursive: true });
     appendFileSync(join(dir, 'outcomes.jsonl'), JSON.stringify({ ts: new Date().toISOString(), ...report }) + '\n');
   } catch { /* recording must never break the gate */ }
+}
+
+// the flywheel: run any agent/script, gate the result, keep the change ONLY if a metric improved
+function improve(argv) {
+  const args = parseArgs(argv);
+  if (!args.attempt) { console.error('improve requires --attempt "<command that changes the repo>"'); process.exit(2); }
+  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
+  const dirty = git(['status', '--porcelain'], repo).split('\n').filter((l) => l.trim() && !l.includes('.promptwheel'));
+  if (dirty.length) { console.error('working tree not clean — commit or stash first (improve needs a clean base to revert to)'); process.exit(2); }
+
+  console.error(`▶ attempt: ${args.attempt}`);
+  try { execSync(args.attempt, { cwd: repo, stdio: 'inherit' }); }
+  catch (e) { console.error(`  (attempt exited ${e.status ?? 1} — gating whatever it changed)`); }
+
+  const report = gate(repo, { working: true, repeat: args.repeat, noRecord: args.noRecord });
+  printHuman(report);
+
+  const noChange = report.metrics.every((m) => m.delta === 0 || m.delta == null);
+  const improvedNames = report.metrics.filter((m) => m.status === 'improved').map((m) => m.name);
+  if (report.verdict === 'fail') { console.log('  ✗ guarded regression — reverting\n'); revert(repo); process.exit(1); }
+  if (noChange) { console.log('  = no metric moved — reverting\n'); revert(repo); process.exit(0); }
+  if (improvedNames.length === 0) { console.log('  = nothing improved beyond noise — reverting\n'); revert(repo); process.exit(0); }
+
+  git(['add', '-A'], repo);
+  execFileSync('git', ['commit', '-qm', `promptwheel: ${args.attempt} [improved ${improvedNames.join(', ')}]`], { cwd: repo });
+  console.log(`  ✓ kept — committed ${git(['rev-parse', '--short', 'HEAD'], repo)} (improved ${improvedNames.join(', ')})\n`);
+}
+
+// discard the attempt's changes; keep the .promptwheel outcome record
+function revert(repo) {
+  git(['reset', '--hard', 'HEAD'], repo);
+  try { git(['clean', '-fd', '-e', '.promptwheel'], repo); } catch { /* best effort */ }
 }
 
 const short = (repo, ref) => { try { return git(['rev-parse', '--short', ref], repo); } catch { return ref; } };
@@ -187,6 +222,7 @@ function parseArgs(argv) {
     else if (argv[i] === '--repeat') a.repeat = parseInt(argv[++i], 10);
     else if (argv[i] === '--working') a.working = true;
     else if (argv[i] === '--no-record') a.noRecord = true;
+    else if (argv[i] === '--attempt') a.attempt = argv[++i];
     else if (argv[i] === '--json') a.json = true;
   }
   return a;
@@ -194,7 +230,17 @@ function parseArgs(argv) {
 
 const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === 'run') run(rest);
+else if (cmd === 'improve') improve(rest);
 else {
-  console.log('PromptWheel — the outcome gate for AI code. Prove every change moved a metric.\n\n  promptwheel run [--base <ref>] [--head <ref>] [--repeat <N>] [--json]\n  promptwheel run --working           measure uncommitted changes (HEAD → working tree)\n  promptwheel run --no-record         skip appending to .promptwheel/outcomes.jsonl\n\nConfig: promptwheel.config.json → { metrics: [{ name, cmd, direction, extract?, guard? }] }');
+  console.log([
+    'PromptWheel — the outcome gate for AI code. Prove every change moved a metric.',
+    '',
+    '  promptwheel run [--base <ref>] [--head <ref>] [--repeat <N>] [--json]',
+    '  promptwheel run --working                 measure uncommitted changes (HEAD → working tree)',
+    '  promptwheel run --no-record               skip appending to .promptwheel/outcomes.jsonl',
+    '  promptwheel improve --attempt "<cmd>"     run an agent/script, keep the change only if a metric improved',
+    '',
+    'Config: promptwheel.config.json → { metrics: [{ name, cmd, direction, extract?, guard? }] }',
+  ].join('\n'));
   process.exit(cmd ? 2 : 0);
 }
