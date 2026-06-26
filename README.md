@@ -96,6 +96,14 @@ The accumulated record of **which change-types move which metrics** is the asset
 - [docs/LEARNING.md](docs/LEARNING.md) — the (research-gated) Phase-5 design: ACE-style playbook + UCB work-discovery.
 - [CLAUDE.md](CLAUDE.md) — the constitution for anyone (human or agent) working in this repo.
 
+## Develop
+
+```bash
+npm test     # 20 dep-free tests (node:test) — unit + integration, no dependencies
+```
+
+The engine is one importable file; pure helpers are exported for unit tests, the CLI runs only when invoked directly. Add a test with every behavior change.
+
 ## Roadmap
 
 - [x] before/after worktree measurement + regression guards

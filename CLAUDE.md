@@ -25,9 +25,10 @@
 
 ```bash
 node bin/promptwheel.mjs run --base <ref> --head <ref> [--repeat N] [--json]
+npm test          # 20 dep-free node:test tests (unit + integration)
 ```
 
-There is no test suite yet (v0). When adding one, keep it dep-free (node:test) and treat `bin/promptwheel.mjs` as the single source of behavior.
+Tests live in `test/promptwheel.test.mjs` — keep them **dep-free** (`node:test`): import the pure helpers for unit tests, shell out to the CLI for integration. `bin/promptwheel.mjs` is the single source of behavior; **add/adjust a test with every behavior change**. The engine is importable (pure helpers exported; the CLI runs only when invoked directly) — don't break that, the tests rely on it.
 
 ## Don'ts
 

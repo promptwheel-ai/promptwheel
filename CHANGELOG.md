@@ -8,6 +8,8 @@
 - **`--markdown`** output + **GitHub Action** (`action.yml`) — PR-comment verdict + status check, zero-install (runs from the action's own checkout). Example workflow included.
 - **`insights`** — aggregate the reward stream into per-metric lever scores (Phase-5 seed; design in `docs/LEARNING.md`).
 - Internals: extracted a shared `gate()` core used by `run` and `improve`.
+- **Tests:** 20 dep-free `node:test` tests (unit + integration); engine made importable (pure helpers exported, CLI guarded behind a direct-invocation check). `npm test`.
+- Docs: `ARCHITECTURE.md` covers the full command set + reward stream + testing.
 
 ## 0.0.1 — 2026-06-26 — the pivot
 

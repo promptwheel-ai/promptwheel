@@ -1,6 +1,6 @@
 # Architecture (v0)
 
-The whole engine is `bin/promptwheel.mjs` (~200 LOC, Node ESM, zero deps). It is intentionally a single file.
+The whole engine is `bin/promptwheel.mjs` (~280 LOC, Node ESM, zero deps). It is intentionally a single file — importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
 
 ## Flow
 
@@ -19,6 +19,21 @@ config (promptwheel.config.json)
 ```
 
 The working tree is **never** touched — every read happens in a temp worktree that is removed afterward.
+
+## Commands
+
+| command | what it does |
+|---|---|
+| `run [--base R] [--head R] [--repeat N] [--json\|--markdown]` | gate a change between two refs |
+| `run --working` | gate **uncommitted** changes (HEAD → a `git stash create` snapshot; tree untouched) |
+| `run --no-record` | don't append to the reward stream |
+| `improve --attempt "<cmd>"` | run any agent/script, gate the result, **keep only if a metric improved** (commit), else revert |
+| `insights [--json]` | aggregate `.promptwheel/outcomes.jsonl` into per-metric lever scores |
+
+`run` and `improve` share one `gate(repo, opts)` core. `improve` requires a clean tree (ignoring `.promptwheel/`), runs the attempt, gates working-vs-HEAD, then **commits** on a real improvement or reverts (`git reset --hard` + `git clean -fd -e .promptwheel`) on a regression / no-op.
+
+### Reward stream
+Every gated run (unless `--no-record` or `record:false`) appends one JSON line to `.promptwheel/outcomes.jsonl`: `{ ts, base, head, repeat, mode, verdict, metrics }`. Commit it to accumulate the per-repo "what moves what" record; `insights` reads it.
 
 ## Config schema — `promptwheel.config.json`
 
@@ -68,7 +83,7 @@ So `--repeat` is how you trade time for trust: it earns a real confidence label 
 
 ```jsonc
 {
-  "base": "a1b2c3d", "head": "e4f5g6h", "repeat": 5, "verdict": "pass",
+  "base": "a1b2c3d", "head": "e4f5g6h", "repeat": 5, "mode": "refs", "verdict": "pass",
   "metrics": [
     { "name": "lint_errors", "direction": "down", "guard": true,
       "before": 12, "after": 7, "delta": -5,
@@ -82,7 +97,12 @@ So `--repeat` is how you trade time for trust: it earns a real confidence label 
 
 Exit code: `0` = pass, `1` = fail (a guarded metric had a trusted regression), `2` = config/usage error. This is the JSON that later becomes the persisted reward stream (Roadmap Phase 2).
 
+## Testing
+
+`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` — **20 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
+
 ## Design constraints
 - **Zero runtime dependencies, no build.** Node 18+, ESM, runs straight from source.
 - **Never mutate the working tree.** Throwaway worktrees only.
 - **Deterministic-friendly, noise-honest.** Prefer cheap deterministic metrics; for noisy ones, demand `--repeat`.
+- **Importable + tested.** Pure helpers exported; CLI guarded behind a direct-invocation check.
