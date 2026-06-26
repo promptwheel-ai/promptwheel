@@ -59,6 +59,13 @@ A number that jumps around between runs is worthless as a signal. PromptWheel wo
 
 The accumulated record of **which change-types move which metrics** is the asset: a per-repo reward signal a base tool can't replicate, and the spine that lets an agent loop learn what actually helps.
 
+## Docs
+
+- [docs/VISION.md](docs/VISION.md) — why we pivoted from orchestrator to outcome gate, the thesis, the moat, the open-core model.
+- [docs/ROADMAP.md](docs/ROADMAP.md) — the phased plan and the ship-now/stay-thin guardrails.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the engine works: schemas, extract modes, the trust/noise model.
+- [CLAUDE.md](CLAUDE.md) — the constitution for anyone (human or agent) working in this repo.
+
 ## Roadmap
 
 - [x] before/after worktree measurement + regression guards
