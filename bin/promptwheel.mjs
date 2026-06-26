@@ -11,9 +11,10 @@
 //   promptwheel run [--base R] [--head R] [--repeat N] [--json]
 
 import { execSync, execFileSync } from 'node:child_process';
-import { readFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, appendFileSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, appendFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -282,21 +283,32 @@ function parseArgs(argv) {
   return a;
 }
 
-const [cmd, ...rest] = process.argv.slice(2);
-if (cmd === 'run') run(rest);
-else if (cmd === 'improve') improve(rest);
-else if (cmd === 'insights') insights(rest);
-else {
-  console.log([
-    'PromptWheel — the outcome gate for AI code. Prove every change moved a metric.',
-    '',
-    '  promptwheel run [--base <ref>] [--head <ref>] [--repeat <N>] [--json]',
-    '  promptwheel run --working                 measure uncommitted changes (HEAD → working tree)',
-    '  promptwheel run --no-record               skip appending to .promptwheel/outcomes.jsonl',
-    '  promptwheel improve --attempt "<cmd>"     run an agent/script, keep the change only if a metric improved',
-    '  promptwheel insights                      summarize the accumulated outcome record (which metrics actually respond)',
-    '',
-    'Config: promptwheel.config.json → { metrics: [{ name, cmd, direction, extract?, guard? }] }',
-  ].join('\n'));
-  process.exit(cmd ? 2 : 0);
+// pure, side-effect-free helpers are exported for unit testing; the CLI below only
+// runs when this file is executed directly (not when imported by the test suite).
+export { extract, evaluate, median, spread, renderMarkdown };
+
+function main() {
+  const [cmd, ...rest] = process.argv.slice(2);
+  if (cmd === 'run') run(rest);
+  else if (cmd === 'improve') improve(rest);
+  else if (cmd === 'insights') insights(rest);
+  else {
+    console.log([
+      'PromptWheel — the outcome gate for AI code. Prove every change moved a metric.',
+      '',
+      '  promptwheel run [--base <ref>] [--head <ref>] [--repeat <N>] [--json]',
+      '  promptwheel run --working                 measure uncommitted changes (HEAD → working tree)',
+      '  promptwheel run --no-record               skip appending to .promptwheel/outcomes.jsonl',
+      '  promptwheel improve --attempt "<cmd>"     run an agent/script, keep the change only if a metric improved',
+      '  promptwheel insights                      summarize the accumulated outcome record (which metrics actually respond)',
+      '',
+      'Config: promptwheel.config.json → { metrics: [{ name, cmd, direction, extract?, guard? }] }',
+    ].join('\n'));
+    process.exit(cmd ? 2 : 0);
+  }
 }
+
+// run the CLI only when invoked directly (resolves symlinks so the npm bin still works)
+let isMain = false;
+try { isMain = !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { /* not main */ }
+if (isMain) main();

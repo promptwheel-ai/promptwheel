@@ -10,7 +10,8 @@
   "files": ["bin"],
   "engines": { "node": ">=18" },
   "scripts": {
-    "gate": "node bin/promptwheel.mjs run"
+    "gate": "node bin/promptwheel.mjs run",
+    "test": "node --test"
   },
   "license": "MIT",
   "keywords": ["agent", "ci", "regression", "metrics", "verification", "ai-coding", "outcome", "promptwheel"]
