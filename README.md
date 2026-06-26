@@ -26,10 +26,36 @@ Exit `0` on pass, `1` on fail (CI-friendly). No build step, zero dependencies, N
 ```bash
 # in your repo, with a promptwheel.config.json
 npx promptwheel run                       # base = merge-base with main, head = HEAD
+npx promptwheel run --working             # measure your UNCOMMITTED changes (local inner loop)
 npx promptwheel run --repeat 5 --json     # measure 5× to establish a noise band, emit JSON
+
+# the flywheel: run any agent/script, keep the change ONLY if a metric improved
+npx promptwheel improve --attempt "claude -p 'reduce lint errors'"
+npx promptwheel improve --attempt "aider --message 'speed up the hot path'" --repeat 5
 ```
 
-It never touches your working tree — every measurement runs in a throwaway worktree.
+It never touches your working tree — every measurement runs in a throwaway worktree. Every gated run appends to `.promptwheel/outcomes.jsonl` (commit it to build the per-repo "what moves what" record; `--no-record` to skip).
+
+## In CI — GitHub Action
+
+Drop this in your repo (it posts a verdict comment on every PR and fails the check on a guarded regression beyond noise):
+
+```yaml
+# .github/workflows/promptwheel.yml
+name: PromptWheel
+on: pull_request
+permissions: { contents: read, pull-requests: write }
+jobs:
+  outcome-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: promptwheel-ai/promptwheel@v0
+        with: { repeat: '3' }
+```
+
+The Action runs straight from its own checkout — no npm install, no build. See [`action.yml`](action.yml).
 
 ## Config — `promptwheel.config.json`
 

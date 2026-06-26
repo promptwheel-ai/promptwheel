@@ -1,0 +1,24 @@
+# Example — copy this into YOUR repo (it needs a promptwheel.config.json at the root).
+# Posts an outcome-gate verdict comment on every PR and fails the check on a
+# guarded regression beyond the noise band.
+name: PromptWheel
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write   # needed to post the verdict comment
+
+jobs:
+  outcome-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # need base history to measure before/after
+      - uses: promptwheel-ai/promptwheel@v0
+        with:
+          repeat: '3'             # sample noisy metrics 3× before trusting a delta
+          # base: ${{ github.event.pull_request.base.sha }}   # default
+          # comment: 'true'                                   # default

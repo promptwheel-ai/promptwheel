@@ -156,6 +156,7 @@ function run(argv) {
   const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
   const report = gate(repo, { base: args.base, head: args.head, working: args.working, repeat: args.repeat, noRecord: args.noRecord });
   if (args.json) console.log(JSON.stringify(report, null, 2));
+  else if (args.markdown) console.log(renderMarkdown(report));
   else printHuman(report);
   process.exit(report.verdict === 'pass' ? 0 : 1);
 }
@@ -214,6 +215,29 @@ function printHuman(r) {
   console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? '  — a guarded metric regressed (beyond noise)' : ''}\n`);
 }
 
+// PR-comment markdown (rendering lives in the tool so the GitHub Action stays thin)
+function renderMarkdown(r) {
+  const icon = r.verdict === 'pass' ? '✅' : '❌';
+  const sIcon = { improved: '🟢', regressed: '🔴', unchanged: '⚪', inconclusive: '🟡', unmeasurable: '⚫' };
+  const rows = r.metrics.map((m) => {
+    const d = m.delta == null ? '—' : (m.delta > 0 ? `+${m.delta}` : `${m.delta}`);
+    return `| ${m.guard ? '🛡️ ' : ''}${m.name} | ${m.before} | ${m.after} | ${d} | ${sIcon[m.status] || ''} ${m.status} | ${m.confidence} |`;
+  }).join('\n');
+  return [
+    `### ${icon} PromptWheel — outcome gate: **${r.verdict.toUpperCase()}**`,
+    '',
+    `\`${r.base} → ${r.head}\` · ${r.mode} mode${r.repeat > 1 ? ` · ×${r.repeat}` : ''}`,
+    '',
+    '| metric | before | after | Δ | status | confidence |',
+    '|---|--:|--:|--:|---|---|',
+    rows,
+    '',
+    r.verdict === 'fail' ? '> ❌ A 🛡️ guarded metric regressed beyond the noise band.' : '> ✅ No guarded metric regressed.',
+    '',
+    '<sub>🛡️ = guard · _prove every change moved a metric_ · [PromptWheel](https://github.com/promptwheel-ai/promptwheel)</sub>',
+  ].join('\n');
+}
+
 function parseArgs(argv) {
   const a = { json: false };
   for (let i = 0; i < argv.length; i++) {
@@ -224,6 +248,7 @@ function parseArgs(argv) {
     else if (argv[i] === '--no-record') a.noRecord = true;
     else if (argv[i] === '--attempt') a.attempt = argv[++i];
     else if (argv[i] === '--json') a.json = true;
+    else if (argv[i] === '--markdown') a.markdown = true;
   }
   return a;
 }

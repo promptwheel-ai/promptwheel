@@ -1,0 +1,47 @@
+name: 'PromptWheel Outcome Gate'
+description: 'Prove a pull request changed a metric for the better without regressing another.'
+branding:
+  icon: 'check-circle'
+  color: 'green'
+
+inputs:
+  base:
+    description: 'Base ref/sha to compare against'
+    required: false
+    default: ${{ github.event.pull_request.base.sha }}
+  repeat:
+    description: 'Samples per metric to establish a noise band (use >1 for noisy metrics)'
+    required: false
+    default: '1'
+  comment:
+    description: 'Post the verdict as a PR comment'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    # Runs straight from this action's own checkout — no npm install, no build.
+    - id: gate
+      shell: bash
+      run: |
+        set +e
+        node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" run \
+          --base "${{ inputs.base }}" --head HEAD --repeat "${{ inputs.repeat }}" --markdown \
+          > "$RUNNER_TEMP/promptwheel.md"
+        echo "exit=$?" >> "$GITHUB_OUTPUT"
+        cat "$RUNNER_TEMP/promptwheel.md" >> "$GITHUB_STEP_SUMMARY"
+
+    - if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/promptwheel.md" || true
+
+    # Fail the job if a guarded metric regressed (exit 1 from the gate).
+    - shell: bash
+      run: exit ${{ steps.gate.outputs.exit }}
