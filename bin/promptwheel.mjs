@@ -11,7 +11,7 @@
 //   promptwheel run [--base R] [--head R] [--repeat N] [--json]
 
 import { execSync, execFileSync } from 'node:child_process';
-import { readFileSync, existsSync, mkdtempSync, symlinkSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -127,9 +127,19 @@ function run(argv) {
   const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
   const cfg = loadConfig(repo);
   const repeat = Math.max(1, args.repeat ?? cfg.repeat ?? 1);
-  const head = args.head || 'HEAD';
-  const base = resolveBase(repo, args.base);
   const linkNM = cfg.linkNodeModules !== false;
+
+  let base, head;
+  if (args.working) {
+    // measure uncommitted (tracked) changes: HEAD → a snapshot commit of the working tree,
+    // made via `git stash create` so the actual working tree is never disturbed.
+    const snap = git(['stash', 'create'], repo); // '' when the tree is clean
+    base = 'HEAD';
+    head = snap || 'HEAD';
+  } else {
+    base = resolveBase(repo, args.base);
+    head = args.head || 'HEAD';
+  }
 
   const before = measureAt(repo, base, cfg.metrics, linkNM, repeat);
   const after = measureAt(repo, head, cfg.metrics, linkNM, repeat);
@@ -140,10 +150,20 @@ function run(argv) {
   });
 
   const verdict = metrics.some((m) => m.guard && !m.ok) ? 'fail' : 'pass';
-  const report = { base: short(repo, base), head: short(repo, head), repeat, verdict, metrics };
+  const report = { base: short(repo, base), head: short(repo, head), repeat, mode: args.working ? 'working' : 'refs', verdict, metrics };
+  if (!args.noRecord && cfg.record !== false) recordOutcome(repo, report);
   if (args.json) console.log(JSON.stringify(report, null, 2));
   else printHuman(report);
   process.exit(verdict === 'pass' ? 0 : 1);
+}
+
+// the moat: append every gated run to a per-repo outcome record (best-effort, never fails the gate)
+function recordOutcome(repo, report) {
+  try {
+    const dir = join(repo, '.promptwheel');
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, 'outcomes.jsonl'), JSON.stringify({ ts: new Date().toISOString(), ...report }) + '\n');
+  } catch { /* recording must never break the gate */ }
 }
 
 const short = (repo, ref) => { try { return git(['rev-parse', '--short', ref], repo); } catch { return ref; } };
@@ -165,6 +185,8 @@ function parseArgs(argv) {
     if (argv[i] === '--base') a.base = argv[++i];
     else if (argv[i] === '--head') a.head = argv[++i];
     else if (argv[i] === '--repeat') a.repeat = parseInt(argv[++i], 10);
+    else if (argv[i] === '--working') a.working = true;
+    else if (argv[i] === '--no-record') a.noRecord = true;
     else if (argv[i] === '--json') a.json = true;
   }
   return a;
@@ -173,6 +195,6 @@ function parseArgs(argv) {
 const [cmd, ...rest] = process.argv.slice(2);
 if (cmd === 'run') run(rest);
 else {
-  console.log('PromptWheel — the outcome gate for AI code. Prove every change moved a metric.\n\n  promptwheel run [--base <ref>] [--head <ref>] [--repeat <N>] [--json]\n\nConfig: promptwheel.config.json → { metrics: [{ name, cmd, direction, extract?, guard? }] }');
+  console.log('PromptWheel — the outcome gate for AI code. Prove every change moved a metric.\n\n  promptwheel run [--base <ref>] [--head <ref>] [--repeat <N>] [--json]\n  promptwheel run --working           measure uncommitted changes (HEAD → working tree)\n  promptwheel run --no-record         skip appending to .promptwheel/outcomes.jsonl\n\nConfig: promptwheel.config.json → { metrics: [{ name, cmd, direction, extract?, guard? }] }');
   process.exit(cmd ? 2 : 0);
 }
