@@ -1,0 +1,5 @@
+{ "repeat": 3, "linkNodeModules": false, "metrics": [
+  { "name": "eval_pass_rate",   "cmd": "node eval.mjs",         "extract": "number", "direction": "up",   "guard": true },
+  { "name": "cost_per_run_usd", "cmd": "node estimate-cost.mjs","extract": "number", "direction": "down", "guard": true },
+  { "name": "latency_ms",       "cmd": "node bench.mjs",        "extract": "number", "direction": "down", "guard": false }
+] }

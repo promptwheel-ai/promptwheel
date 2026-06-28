@@ -1,5 +1,7 @@
 # PromptWheel
 
+[![CI](https://github.com/promptwheel-ai/promptwheel/actions/workflows/ci.yml/badge.svg)](https://github.com/promptwheel-ai/promptwheel/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Node ≥18](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![deps: zero](https://img.shields.io/badge/deps-zero-blue)
+
 **The outcome gate for AI code — prove every change moved a metric.**
 
 > Same name, new meaning. The "wheel" is no longer a wheel of prompts (orchestration — a solved, commoditized problem). It's the **improvement flywheel**: every turn only counts if it **provably moved a metric without regressing another.** The outcome gate is the hub.

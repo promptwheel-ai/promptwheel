@@ -1,0 +1,14 @@
+[
+ {"text":"You double charged my card this month","intent":"billing"},
+ {"text":"I need a refund for the invoice","intent":"billing"},
+ {"text":"My payment did not go through","intent":"billing"},
+ {"text":"Why is my balance higher than expected","intent":"billing"},
+ {"text":"The app keeps freezing on startup","intent":"bug"},
+ {"text":"It crashes when I upload a file","intent":"bug"},
+ {"text":"The page will not load at all","intent":"bug"},
+ {"text":"Can you add dark mode","intent":"feature"},
+ {"text":"It would be nice to support CSV export","intent":"feature"},
+ {"text":"Please add bulk edit","intent":"feature"},
+ {"text":"How do I change my email","intent":"other"},
+ {"text":"What are your business hours","intent":"other"}
+]
