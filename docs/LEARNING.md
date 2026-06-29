@@ -27,6 +27,14 @@ The reward stream and any future playbook are only as good as the data feeding t
 - **Cohort-segmented reliability, not one global number.** Fingerprint each outcome with an environment/cohort tag (CI vs local, benchmark-class, machine) and segment lever scores + noise bands by cohort. securitychecks precision was ~100% on SaaS repos but ~30–50% on frameworks — "don't chase a single universal FP rate." Also a marketing-honesty guard: don't claim "works on any repo."
 - **Composite lever score = effect-size × confidence, Beta-smoothed.** Replace raw `improved/runs` with a Beta(α,β) posterior mean (smooths low-sample metrics) times the median effect size; drop metrics below an effect-size floor from prioritization. (securitychecks ranked by confidence×severity; blockspool's UCB1 used a Beta posterior + impact floor.)
 
+## Harvesting the reward stream (the bootstrap) — design, FROZEN under D7/R-FRANK
+
+The record currently fills only from *forward* gated runs. Three harvest paths, in priority order — **none unfreeze without the gates below**:
+
+1. **Backfill from git (the primary harvest).** `promptwheel backfill --since <ref>` walks each historical commit/PR, gates base→head with the *current* metrics, and seeds `.promptwheel/outcomes.jsonl`. One-time execution cost → an instant, queryable "what-moves-what" record of the whole repo history. **Determinism boundary:** deterministic metrics (`exit`/`lines`) replay byte-identically; noisy metrics need `--repeat` even in backfill (and old commits may not build — record `unmeasurable`, don't fake a number).
+2. **Attribution from conversations (enrich only).** Agent transcripts / `.claude` history supply the *change-type* that caused an outcome (the deferred `attempt`/`label` field, R6) — never the measurement. They make `insights` answer "which change-TYPES move which metrics," but they presuppose a measured outcome; they cannot replace execution.
+3. **Instant deterministic artifact (the graphify analog).** `insights` is already a pure, deterministic, instant aggregation over the record; a static HTML render of it ("lever scores + which change-types reliably help") is the `graph.html`-style wow — instant *given the record*. The record is execution-earned, not free static analysis: **PromptWheel proves outcomes (dynamic), graphify proves structure (static).** Don't promise structure-grade instancy for outcome data — the honesty *is* the credibility feature.
+
 ## Hard gates before building any of this
 - **≥ a few hundred gated runs** of real outcome data in a real repo (else the playbook overfits to noise).
 - **Proof of compounding**: an `improve` loop using the playbook must beat the same loop without it, *measured by the gate itself*. If it doesn't, this layer is a research dead-end and we stop — cheaply.
