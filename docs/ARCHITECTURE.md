@@ -1,6 +1,6 @@
 # Architecture (v0)
 
-The whole engine is `bin/promptwheel.mjs` (~440 LOC, Node ESM, zero deps). It is intentionally a single file — importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
+The whole engine is `bin/promptwheel.mjs` (~500 LOC, Node ESM, zero deps). It is intentionally a single file — importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
 
 ## Flow
 
@@ -30,6 +30,7 @@ The working tree is **never** touched — every read happens in a temp worktree 
 | `improve --attempt "<cmd>"` | run any agent/script, gate, **keep only if a metric improved** (commit) else revert. Exit `0` kept / `1` regression / `3` plateau; `--json` adds a top-level `result` |
 | `insights [--json]` | aggregate `.promptwheel/outcomes.jsonl` into per-metric lever scores |
 | `init [--preset <name> \| --list]` | write a starter config (detect stack; presets `tests-pass`/`lint`/`bundle-size`/`llm-eval`) |
+| `guards [--json]` | list the effective guardrails (incl. inherited via `extends`) with provenance + each guard's flag record |
 
 `run` and `improve` share one `gate(repo, opts)` core. `improve` requires a clean tree (ignoring `.promptwheel/`), runs the attempt, gates working-vs-HEAD, then **commits** on a real improvement or reverts (`git reset --hard` + `git clean -fd -e .promptwheel`) on a regression / no-op.
 
@@ -40,6 +41,7 @@ Every gated run (unless `--no-record` or `record:false`) appends one JSON line t
 
 ```jsonc
 {
+  "extends": "./promptwheel.base.json",  // optional: inherit guardrails from a shared base (path or array)
   "repeat": 1,                 // default sample count (overridden by --repeat)
   "linkNodeModules": true,     // symlink repo node_modules into worktrees (fast; default true)
   "metrics": [

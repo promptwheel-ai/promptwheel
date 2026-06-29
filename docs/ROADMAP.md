@@ -30,6 +30,10 @@ Sequenced so each phase ships something usable and feeds the next. The ordering 
 ## Phase 4.5 — onboarding ✅
 - `promptwheel init [--preset <name> | --list]`: detect stack → write a **guarded-only** starter config (tests-pass + lint); presets `tests-pass / lint / bundle-size / llm-eval`. Kills the blank-config wall (the #1 adoption bounce); a configless first run is pointed at `init`.
 
+## Phase 4.6 — guardrail observability + inheritance ✅
+- `promptwheel guards`: show the **effective** guardrails (enforced vs info) with provenance + each guard's flag record from the stream.
+- `extends`: inherit guardrails from a shared base config (path or array); local metrics override by name. A team keeps one `promptwheel.base.json`; every repo inherits it. *(The hosted cross-repo/fleet view — one org base, aggregated compliance across all repos — stays the paid tier.)*
+
 ## Phase 5 — learning & discovery 🌱 seeded (full build gated on data)
 
 > **FROZEN (DECISIONS D7):** beyond the shipped `insights` seed, no Phase 5/6 engine work until **≥1 paid engagement** OR the LEARNING.md data + compounding gate is met. Building selfcheck / attestation / ACE / UCB now is roadmap-costume procrastination.

@@ -111,6 +111,24 @@ The Action runs straight from its own checkout — no npm install, no build. See
 - **direction** — `up` (higher better) · `down` (lower better) · `pass` (boolean 0/1).
 - **guard** — `true` = a *trusted* regression **fails** the gate; `false` = informational.
 
+## Guardrails & inheritance
+
+To see what's actually enforced in a repo — including guards inherited from a shared config:
+
+```bash
+promptwheel guards
+```
+
+Teams keep one shared base config and have every repo inherit it via `extends`:
+
+```json
+// promptwheel.config.json
+{ "extends": "./promptwheel.base.json",
+  "metrics": [ { "name": "cost_per_run_usd", "guard": false } ] }   // loosen one inherited guard, locally
+```
+
+`extends` takes a path (or array of paths) to base configs: a repo **inherits** their guardrails, and a local metric of the same name **overrides** the inherited one (tighten, loosen, or disable). `promptwheel guards` shows the effective set with provenance — `inherited ← base.json`, `local`, or `local override` — plus each guard's flag record from the outcome stream.
+
 ## Trust model — the point of the whole thing
 
 A number that jumps around between runs is worthless as a signal. PromptWheel won't pretend otherwise:

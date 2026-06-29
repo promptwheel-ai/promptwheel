@@ -13,7 +13,7 @@
 import { execSync, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, appendFileSync, realpathSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname, isAbsolute, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
@@ -28,11 +28,42 @@ const median = (xs) => {
 };
 const spread = (xs) => { const a = xs.filter((x) => x != null); return a.length ? Math.max(...a) - Math.min(...a) : 0; };
 
+function readConfigFile(p) {
+  try { return JSON.parse(readFileSync(p, 'utf8')); }
+  catch (e) { console.error(`invalid config ${p}: ${e.message}`); process.exit(2); }
+}
+
+const relOf = (repo, p) => { try { return relative(repo, p) || p; } catch { return p; } };
+
+// resolve a config + its `extends` chain into a flat, provenance-tagged metric list.
+// `extends` is a path (or array of paths) to base configs, relative to the config file:
+// a repo INHERITS their guardrails, and a local metric of the same name overrides the inherited one.
+function resolveConfig(p, repo, label, seen) {
+  const abs = realpathSync(p);
+  if (seen.has(abs)) { console.error(`config inheritance cycle at ${relOf(repo, p)}`); process.exit(2); }
+  seen.add(abs);
+  const cfg = readConfigFile(p);
+  const byName = new Map();
+  const scalars = {};
+  for (const ref of [].concat(cfg.extends || [])) {
+    const bp = isAbsolute(ref) ? ref : join(dirname(p), ref);
+    if (!existsSync(bp)) { console.error(`extends target not found: ${ref} (from ${relOf(repo, p)})`); process.exit(2); }
+    const base = resolveConfig(bp, repo, relOf(repo, bp), seen);
+    for (const m of base.metrics) byName.set(m.name, m);
+    for (const k of ['repeat', 'linkNodeModules', 'record']) if (base[k] !== undefined) scalars[k] = base[k];
+  }
+  for (const m of (cfg.metrics || [])) {
+    byName.set(m.name, { ...m, __src: label, __override: byName.has(m.name) });
+  }
+  for (const k of ['repeat', 'linkNodeModules', 'record']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
+  return { ...scalars, metrics: [...byName.values()] };
+}
+
 function loadConfig(repo) {
   const candidates = ['promptwheel.config.json', 'outcome-gate.config.json']; // back-compat alias
   const p = candidates.map((c) => join(repo, c)).find(existsSync);
   if (!p) { console.error('no promptwheel.config.json — run: promptwheel init   (writes one for your stack)'); process.exit(2); }
-  const cfg = JSON.parse(readFileSync(p, 'utf8'));
+  const cfg = resolveConfig(p, repo, 'local', new Set());
   if (!Array.isArray(cfg.metrics) || cfg.metrics.length === 0) {
     console.error('config.metrics must be a non-empty array'); process.exit(2);
   }
@@ -353,6 +384,34 @@ function init(argv) {
   console.log('         promptwheel init --list     # other presets (llm-eval, bundle-size, …)');
 }
 
+// observability: list the EFFECTIVE guardrails (incl. inherited) + each one's flag record
+function guards(argv) {
+  const args = parseArgs(argv);
+  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
+  const cfg = loadConfig(repo);
+  const hist = {};
+  const f = join(repo, '.promptwheel', 'outcomes.jsonl');
+  if (existsSync(f)) for (const line of readFileSync(f, 'utf8').split('\n').filter(Boolean)) {
+    let r; try { r = JSON.parse(line); } catch { continue; }
+    for (const m of (r.metrics || [])) {
+      const h = hist[m.name] ??= { runs: 0, flagged: 0, last: null };
+      h.runs++; if (m.guard && m.ok === false) h.flagged++; h.last = m.status;
+    }
+  }
+  const rows = cfg.metrics.map((m) => ({
+    name: m.name, direction: m.direction || 'up', guard: !!m.guard,
+    source: m.__src, override: !!m.__override, ...(hist[m.name] || { runs: 0, flagged: 0, last: null }),
+  }));
+  if (args.json) { console.log(JSON.stringify({ guards: rows }, null, 2)); return; }
+  console.log('\nPromptWheel guardrails — effective set for this repo\n');
+  for (const r of rows) {
+    const prov = r.override ? 'local override' : (r.source === 'local' ? 'local' : `inherited ← ${r.source}`);
+    const rec = r.guard ? (r.runs ? `· ${r.flagged} flagged / ${r.runs} runs` : '· no runs yet') : '';
+    console.log(`  ${r.guard ? '🛡️  GUARD' : '·   info '}  ${r.name.padEnd(18)} better=${r.direction.padEnd(5)}  [${prov}]  ${rec}`);
+  }
+  console.log('\n  🛡️ = enforced (a trusted regression fails the gate) · info = tracked only\n');
+}
+
 const short = (repo, ref) => { try { return git(['rev-parse', '--short', ref], repo); } catch { return ref; } };
 
 function printHuman(r) {
@@ -414,6 +473,7 @@ function main() {
   else if (cmd === 'improve') improve(rest);
   else if (cmd === 'insights') insights(rest);
   else if (cmd === 'init') init(rest);
+  else if (cmd === 'guards') guards(rest);
   else {
     console.log([
       'PromptWheel — the per-turn reward for AI coding loops. Prove a change moved a metric.',
@@ -424,9 +484,11 @@ function main() {
       '  promptwheel improve --attempt "<cmd>"        run an agent/script; keep only if a metric improved',
       '                                               exit 0=kept · 1=regression · 3=plateau · add --json',
       '  promptwheel insights                         which metrics actually respond (loop memory)',
+      '  promptwheel guards                           show the effective guardrails (incl. inherited) + flag record',
       '',
       'Loop it:  while promptwheel improve --attempt "$AGENT"; do :; done   # stops on plateau/regression',
-      'Config:   promptwheel.config.json → { metrics:[{ name, cmd, direction, extract?, guard? }] }   (or: promptwheel init)',
+      'Config:   promptwheel.config.json → { extends?, metrics:[{ name, cmd, direction, extract?, guard? }] }   (or: promptwheel init)',
+      '          extends: a path (or array) to a shared base config — repos INHERIT its guardrails; local metrics override by name.',
     ].join('\n'));
     process.exit(cmd ? 2 : 0);
   }

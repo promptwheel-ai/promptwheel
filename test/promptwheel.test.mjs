@@ -194,3 +194,37 @@ test('self-heal: a stale /tmp worktree from a crashed run is cleaned on the next
   assert.equal(existsSync(orphan), false);          // the abandoned checkout was removed
   rmSync(d, { recursive: true, force: true });
 });
+
+// ---------------------------------------- guardrail inheritance + observability
+test('guards: inherits a base config, local overrides by name, reports provenance', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-inh-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'base.json'), JSON.stringify({ metrics: [
+    { name: 'tests', cmd: 'true', extract: 'exit', direction: 'pass', guard: true },
+    { name: 'lint', cmd: 'echo 0', extract: 'number', direction: 'down', guard: true },
+  ] }));
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, extends: './base.json', metrics: [
+    { name: 'lint', cmd: 'echo 0', extract: 'number', direction: 'down', guard: false }, // loosen inherited guard → info
+    { name: 'cost', cmd: 'echo 1', extract: 'number', direction: 'down', guard: true },  // add a local guard
+  ] }));
+  writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
+  const r = pw(d, ['guards', '--json']);
+  assert.equal(r.code, 0);
+  const by = Object.fromEntries(JSON.parse(r.out).guards.map((x) => [x.name, x]));
+  assert.equal(by.tests.source, 'base.json'); assert.equal(by.tests.guard, true);  // inherited + enforced
+  assert.equal(by.lint.override, true); assert.equal(by.lint.guard, false);        // local override loosened it
+  assert.equal(by.cost.source, 'local');                                           // added locally
+  rmSync(d, { recursive: true, force: true });
+});
+
+test("guards: reports each guard's flag record from the stream", () => {
+  const d = tmpRepo([TODOS]); // todos: direction down, guarded
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'c1'); // todos 0->2 = regression
+  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']); // records a flag
+  const todos = JSON.parse(pw(d, ['guards', '--json']).out).guards.find((x) => x.name === 'todos');
+  assert.equal(todos.guard, true);
+  assert.ok(todos.flagged >= 1); // the regression shows up as a flag in the record
+  rmSync(d, { recursive: true, force: true });
+});
