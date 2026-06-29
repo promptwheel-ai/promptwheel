@@ -1,6 +1,6 @@
 # Architecture (v0)
 
-The whole engine is `bin/promptwheel.mjs` (~280 LOC, Node ESM, zero deps). It is intentionally a single file — importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
+The whole engine is `bin/promptwheel.mjs` (~415 LOC, Node ESM, zero deps). It is intentionally a single file — importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
 
 ## Flow
 
@@ -25,10 +25,11 @@ The working tree is **never** touched — every read happens in a temp worktree 
 | command | what it does |
 |---|---|
 | `run [--base R] [--head R] [--repeat N] [--json\|--markdown]` | gate a change between two refs |
-| `run --working` | gate **uncommitted** changes (HEAD → a `git stash create` snapshot; tree untouched) |
+| `run --working` | gate **uncommitted** changes incl. newly added files (temp-index `write-tree`/`commit-tree` snapshot; real index + tree untouched) |
 | `run --no-record` | don't append to the reward stream |
-| `improve --attempt "<cmd>"` | run any agent/script, gate the result, **keep only if a metric improved** (commit), else revert |
+| `improve --attempt "<cmd>"` | run any agent/script, gate, **keep only if a metric improved** (commit) else revert. Exit `0` kept / `1` regression / `3` plateau; `--json` adds a top-level `result` |
 | `insights [--json]` | aggregate `.promptwheel/outcomes.jsonl` into per-metric lever scores |
+| `init [--preset <name> \| --list]` | write a starter config (detect stack; presets `tests-pass`/`lint`/`bundle-size`/`llm-eval`) |
 
 `run` and `improve` share one `gate(repo, opts)` core. `improve` requires a clean tree (ignoring `.promptwheel/`), runs the attempt, gates working-vs-HEAD, then **commits** on a real improvement or reverts (`git reset --hard` + `git clean -fd -e .promptwheel`) on a regression / no-op.
 
@@ -99,7 +100,7 @@ Exit code: `0` = pass, `1` = fail (a guarded metric had a trusted regression), `
 
 ## Testing
 
-`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` — **20 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
+`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` — **24 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
 
 ## Design constraints
 - **Zero runtime dependencies, no build.** Node 18+, ESM, runs straight from source.

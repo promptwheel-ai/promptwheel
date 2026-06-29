@@ -1,5 +1,5 @@
 name: 'PromptWheel Outcome Gate'
-description: 'Prove a pull request changed a metric for the better without regressing another.'
+description: 'The reward gate for your AI coding loop — prove a change moved a metric without regressing another (in CI: your PR check).'
 branding:
   icon: 'check-circle'
   color: 'green'

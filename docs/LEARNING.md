@@ -1,5 +1,7 @@
 # Learning & discovery (Phase 5) — design, gated on data
 
+> **FROZEN — not built** (only the `insights` seed exists). Gated on **≥ a few hundred real gated runs + proof of compounding**; unfreezes only on that data gate *or* ≥1 paid engagement (see DECISIONS **D7** / the Phase 5–6 freeze). The loop-native reframe does **not** unfreeze this.
+
 This is the *speculative* layer. It is deliberately **not built** beyond the `insights` seed command, because the research is clear that the value here is unproven until the reward stream (Phase 2) holds real per-repo data. Build order is non-negotiable: **outcomes first, learning second.**
 
 ## What exists now (the seed)

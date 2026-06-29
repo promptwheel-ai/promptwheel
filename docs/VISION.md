@@ -15,7 +15,7 @@ Two independent research passes converged on one unowned, durable niche: **outco
 
 > Today *everyone* verifies "the diff applied / tests passed." **Nobody verifies "a real metric actually moved, without regression," and feeds that back as a reward.** Outcome data rots in dashboards (DORA, Swarmia) disconnected from the change that caused it.
 
-This is the **keystone**: a trustworthy per-change "did metric X improve without regressing Y" signal is the prerequisite that makes the other two coveted capabilities *honest* —
+This is the **keystone** — concretely, the **per-turn reward an agentic coding loop consumes** to keep improving instead of confidently drifting. A trustworthy per-change "did metric X improve without regressing Y" signal is also the prerequisite that makes the other two coveted capabilities *honest* —
 
 - **Cross-run learning** is unproven without it (the one controlled coding-memory benchmark, Mar 2026, found memory saves tokens but does **not** improve quality).
 - **Autonomous work-discovery** has no principled prioritization without an outcome signal to score against.
@@ -28,10 +28,11 @@ The accumulated, per-repo record of **which change-types move which metrics** is
 
 ## Positioning
 
-**PromptWheel — the outcome gate for AI code. Prove every change moved a metric.**
+**PromptWheel — the trustworthy per-turn reward for AI coding loops** (and the outcome gate for AI code in CI). Prove a turn moved a metric without regressing another.
 
-- Audience: teams shipping AI-generated changes who can't tell improvement from churn (AI code ships ~1.7× more issues; the "feel 20% faster, are 19% slower" paradox).
-- Wedge: a free CI/CLI check that fails a PR if a guarded metric regressed *beyond noise* — and, unlike CI, tells you a change actually made something *better*.
+- Audience: teams running AI changes in a loop (`/loop`, Ralph, agents) who can't tell improvement from churn (AI code ships ~1.7× more issues; the "feel 20% faster, are 19% slower" paradox).
+- Wedge: the **cross-metric, noise-aware reward** a loop consumes — it composes single-axis gates (Codspeed/Bencher) into one "did X improve without regressing Y" verdict; in CI it fails a PR on a guarded regression beyond noise.
+- Boundary (a feature, not a gap): it is for **graded numeric outcomes**; a change with no number is correctly out of scope, and it is the *signal*, never the loop driver.
 
 ## Business model — open-core
 
