@@ -45,7 +45,7 @@ npx promptwheel improve --attempt "claude -p 'reduce lint errors'"
 npx promptwheel insights
 ```
 
-It never touches your working tree — every measurement runs in a throwaway worktree. Every gated run appends to `.promptwheel/outcomes.jsonl` (commit it to build the per-repo "what moves what" record; `--no-record` to skip).
+**Footprint:** it never touches your working tree — every measurement runs in a throwaway git worktree **in your system temp dir** (one at a time; `node_modules` is symlinked, not copied), removed when the run finishes. The only thing PromptWheel writes to your repo is the optional `.promptwheel/outcomes.jsonl` record — commit it to build the per-repo "what moves what" history, or `.gitignore` it (`--no-record` to skip entirely). A hard-killed run can't leave clutter behind: the next run **self-heals** any orphaned worktree (stale registry entry + abandoned temp checkout).
 
 ## Loop patterns
 

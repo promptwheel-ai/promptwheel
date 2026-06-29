@@ -11,7 +11,7 @@
 //   promptwheel run [--base R] [--head R] [--repeat N] [--json]
 
 import { execSync, execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, appendFileSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, appendFileSync, realpathSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -149,8 +149,30 @@ function workingSnapshot(repo) {
   }
 }
 
+// self-heal: a hard-killed run (SIGKILL / power loss) can leave an orphaned worktree —
+// its `finally` never ran. On the next run, drop stale worktree registry entries and any
+// abandoned /tmp checkout, so nothing accumulates in your repo or temp dir. Never touches a
+// live worktree (a still-registered dir, or a checkout younger than 1h).
+function selfHeal(repo) {
+  try {
+    git(['worktree', 'prune'], repo); // remove registry entries whose dir is already gone (always safe)
+    const tracked = new Set(
+      git(['worktree', 'list', '--porcelain'], repo)
+        .split('\n').filter((l) => l.startsWith('worktree ')).map((l) => l.slice(9).trim()),
+    );
+    const tmp = tmpdir(), cutoff = Date.now() - 3600_000;
+    for (const name of readdirSync(tmp)) {
+      if (!name.startsWith('promptwheel-')) continue;
+      const p = join(tmp, name);
+      if (tracked.has(p)) continue;                 // a live/registered worktree — leave it
+      try { if (statSync(p).mtimeMs < cutoff) rmSync(p, { recursive: true, force: true }); } catch { /* */ }
+    }
+  } catch { /* cleanup must never block the gate */ }
+}
+
 // the shared core: measure a change (base→head) and return the structured report
 function gate(repo, opts) {
+  selfHeal(repo);
   const cfg = loadConfig(repo);
   const repeat = Math.max(1, opts.repeat ?? cfg.repeat ?? 1);
   const linkNM = cfg.linkNodeModules !== false;

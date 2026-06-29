@@ -15,7 +15,7 @@
 
 ## Layout
 
-- `bin/promptwheel.mjs` — the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict; commands run/improve/insights/init). ~415 LOC.
+- `bin/promptwheel.mjs` — the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict; commands run/improve/insights/init). ~440 LOC.
 - `promptwheel.config.json` — example metrics config.
 - `docs/VISION.md` — why we pivoted, the thesis, the moat, open-core model.
 - `docs/ROADMAP.md` — phased plan + the guardrails (ship thin, the window is closing).

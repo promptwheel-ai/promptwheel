@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -178,5 +178,19 @@ test('init: writes a starter config for the stack, refuses overwrite without --f
   assert.ok(JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).metrics.some((m) => m.name === 'tests_pass'));
   assert.equal(pw(d, ['init']).code, 2);          // refuses overwrite
   assert.equal(pw(d, ['init', '--list']).code, 0); // catalog
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ---------------------------------------- self-heal: orphaned worktrees from a crashed run
+test('self-heal: a stale /tmp worktree from a crashed run is cleaned on the next run', () => {
+  const orphan = join(tmpdir(), 'promptwheel-ORPHANTEST');
+  rmSync(orphan, { recursive: true, force: true });
+  mkdirSync(orphan, { recursive: true });
+  const old = new Date(Date.now() - 7200_000);     // 2h old → safely an orphan, not a live run
+  utimesSync(orphan, old, old);
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  pw(d, ['run', '--working', '--no-record']);       // any gate triggers selfHeal first
+  assert.equal(existsSync(orphan), false);          // the abandoned checkout was removed
   rmSync(d, { recursive: true, force: true });
 });
