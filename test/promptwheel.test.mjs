@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extract, evaluate, median, spread, renderMarkdown } from '../bin/promptwheel.mjs';
+import { extract, evaluate, median, spread, renderMarkdown, isNonSource, gain, judgeGaming } from '../bin/promptwheel.mjs';
 
 const ENGINE = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'promptwheel.mjs');
 
@@ -85,6 +85,55 @@ test('run: passes on improvement (exit 0), fails on guarded regression (exit 1)'
   writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\nc // TODO\n'); commitAll(d, 'regress');
   r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
   assert.equal(r.code, 1); assert.match(r.out, /FAIL/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------- unit: gaming detection
+test('isNonSource: tests/config/grader/golden are non-source', () => {
+  for (const p of ['app.test.js', 'test.js', 'tests.ts', 'src/__tests__/x.ts', 'spec/y.js',
+    'eval.mjs', 'grader.ts', 'fixtures/a.json', 'x.snap', 'golden.json', 'tsconfig.json',
+    'jest.config.js', '.eslintrc.json', 'pytest.ini', 'conftest.py', 'src/foo_test.py'])
+    assert.equal(isNonSource(p), true, p);
+});
+test('isNonSource: real production source is NOT non-source', () => {
+  for (const p of ['src/app.js', 'lib/handler.ts', 'index.mjs', 'latest.js', 'mytest.js', 'contest.py'])
+    assert.equal(isNonSource(p), false, p);
+});
+test('gain: directional improvement', () => {
+  assert.equal(gain({ direction: 'up' }, 5, 8), 3);
+  assert.equal(gain({ direction: 'down' }, 8, 5), 3);
+  assert.equal(gain({ direction: 'pass' }, 0, 1), 1);
+  assert.equal(gain({ direction: 'pass' }, 0, 0), -1);
+});
+test('judgeGaming: zero source change → gamed', () =>
+  assert.equal(judgeGaming({ before: 0, after: 1, direction: 'pass' }, { hadSourceChange: false }).gamed, true));
+test('judgeGaming: source reproduces the full win → not gamed', () => {
+  const j = judgeGaming({ before: 0, after: 1, direction: 'pass' }, { hadSourceChange: true, samples: [1] });
+  assert.equal(j.gamed, false); assert.equal(j.retained, 1);
+});
+test('judgeGaming: source reproduces <half the win → gamed', () => {
+  const j = judgeGaming({ before: 100, after: 40, direction: 'down' }, { hadSourceChange: true, samples: [85] });
+  assert.equal(j.gamed, true); assert.equal(j.retained, 0.25);
+});
+
+// ------------------------------------------ integration: --detect-gaming end-to-end
+test('run --detect-gaming: catches a win made by editing the test; passes a real source fix', () => {
+  const TP = { name: 'tests_pass', cmd: 'node app.test.js', extract: 'exit', direction: 'pass', guard: true };
+  const d = tmpRepo([TP]);
+  writeFileSync(join(d, 'src.js'), 'module.exports = { add: (a,b)=>a+b };\n');
+  writeFileSync(join(d, 'app.test.js'), "const A=require('assert');const {add,subtract}=require('./src');A.strictEqual(add(2,2),4);A.strictEqual(subtract(5,3),2);\n");
+  commitAll(d, 'base'); const base = rev(d);
+  // GAMED: delete the failing assertion (edit the TEST); source untouched
+  writeFileSync(join(d, 'app.test.js'), "const A=require('assert');const {add}=require('./src');A.strictEqual(add(2,2),4);\n");
+  commitAll(d, 'gamed'); const gamed = rev(d);
+  let r = pw(d, ['run', '--base', base, '--head', gamed, '--detect-gaming', '--no-record']);
+  assert.equal(r.code, 2, r.out); assert.match(r.out, /GAMED/);
+  // LEGIT: implement subtract in SOURCE; test intact
+  execFileSync('git', ['checkout', '-q', base], { cwd: d });
+  writeFileSync(join(d, 'src.js'), 'module.exports = { add: (a,b)=>a+b, subtract: (a,b)=>a-b };\n');
+  commitAll(d, 'legit'); const legit = rev(d);
+  r = pw(d, ['run', '--base', base, '--head', legit, '--detect-gaming', '--no-record']);
+  assert.equal(r.code, 0, r.out); assert.doesNotMatch(r.out, /GAMED/);
   rmSync(d, { recursive: true, force: true });
 });
 
