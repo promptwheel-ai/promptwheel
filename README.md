@@ -2,7 +2,11 @@
 
 [![CI](https://github.com/promptwheel-ai/promptwheel/actions/workflows/ci.yml/badge.svg)](https://github.com/promptwheel-ai/promptwheel/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Node ≥18](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![deps: zero](https://img.shields.io/badge/deps-zero-blue)
 
-**The trustworthy per-turn reward for AI coding loops — proves a turn moved a metric without regressing another.**
+**Catch your agent cheating** — the deterministic auditor that flags when your AI coding agent gamed its own success metric.
+
+PromptWheel re-proves every "win" using the agent's **source edits alone**. If the gate only went green because the agent edited the test, mocked the grader, suppressed the error (`@ts-ignore` / `eslint-disable`), or deleted the feature, the win evaporates when those edits are reverted → **`VERDICT GAMED`, exit 2**. No LLM in the loop — a diff partition plus a re-run, so every flag is reproducible in seconds with a human-readable reason.
+
+It's built on an **outcome gate**: for any change it re-runs your metric commands (tests, lint, `tsc`, coverage, bundle, eval) in throwaway git worktrees before and after, and refuses to trust a delta inside the measurement noise. The gate everyone ships asks *"did the number move?"* — PromptWheel also asks *"did the agent **earn** it?"*
 
 PromptWheel is the **signal, not the loop driver**: wire it as the verifier inside Claude Code `/loop`, a Ralph `while`-loop, or a Beads pull-loop. Each turn it measures your real repo metrics in throwaway worktrees, refuses to trust a delta inside the noise, and answers one question — *did this turn earn its keep?* — so the loop improves instead of confidently degrading. (In CI it's the **outcome gate for AI code**: the same verdict, as a PR check.)
 
@@ -25,12 +29,34 @@ PromptWheel  a1b2c3d → e4f5g6h  (×5)
 
 Exit `0` on pass, `1` on fail (CI-friendly). No build step, zero dependencies, Node 18+.
 
+## Catch your agent cheating — `--detect-gaming`
+
+The headline feature. After the normal gate, every *win* is re-proven using the agent's source edits **alone**: PromptWheel splits the diff into production source vs. `{test, config, grader, golden}` files, rebuilds a clean worktree at the base with **only the source slice** applied, and re-runs the gate. If the win doesn't survive — because it only passed by skipping/deleting a test, mocking the grader, editing a golden, relaxing a config, or the "win" touched zero source files — the verdict is **`GAMED` (exit 2)**:
+
+```
+$ promptwheel run --detect-gaming
+
+PromptWheel  base → head
+  ▲ tests_pass    0 → 1  (+1, improved) [guard✓, high]
+      🚩 GAMED — the "win" changed zero production-source files — only test/config/grader/golden
+  VERDICT: GAMED  — a metric "improved" by editing the goalposts, not the source
+```
+
+Inline source-file suppressions (`@ts-nocheck`, `eslint-disable`, `# noqa`) are a different shape, caught by the **`antihack` preset** — a target metric plus tripwire guards (`test_count`, `skipped_tests`, `suppressions`, `assertions`) that fail when a "win" introduces them:
+
+```bash
+npx promptwheel init --preset antihack    # target + tripwire guards
+npx promptwheel run --detect-gaming       # exit 0 = real win · 1 = regression · 2 = GAMED
+```
+
+Deterministic, zero-LLM, zero-network: an LLM judge asking "did you cheat?" is itself gameable; this is a diff partition plus a re-run, so a flag is trustworthy without a human in the loop. The 50%-of-gain-survives threshold is the default and is tunable.
+
 ## Use
 
 ```bash
 # 0. write a starter config for your stack (or hand-write promptwheel.config.json)
 npx promptwheel init                      # detects stack → guarded test metric + lint
-npx promptwheel init --list               # presets: tests-pass · lint · bundle-size · llm-eval
+npx promptwheel init --list               # presets: tests-pass · lint · bundle-size · llm-eval · antihack
 
 # measure a change
 npx promptwheel run                       # base = merge-base with main, head = HEAD
@@ -156,7 +182,7 @@ The accumulated record of **which change-types move which metrics** is the asset
 ## Develop
 
 ```bash
-npm test     # 20 dep-free tests (node:test) — unit + integration, no dependencies
+npm test     # 36 dep-free tests (node:test) — unit + integration, no dependencies
 ```
 
 The engine is one importable file; pure helpers are exported for unit tests, the CLI runs only when invoked directly. Add a test with every behavior change.
@@ -172,6 +198,7 @@ The engine is one importable file; pure helpers are exported for unit tests, the
 - [x] loop-consumable `improve`: exit `0` kept / `1` regression / `3` plateau + `--json result`
 - [x] `promptwheel init` + presets — zero-config onboarding
 - [x] `insights` — reward-stream aggregation (Phase-5 seed)
+- [x] `--detect-gaming` — reward-hack detection: re-prove the win from source edits alone + `antihack` preset
 - [ ] npm publish (the lead magnet) · ACE-style learning + UCB work-discovery (**frozen** — gated on data + ≥1 paid engagement; see [docs/LEARNING.md](docs/LEARNING.md))
 
 > Status: v0, runnable, all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.
