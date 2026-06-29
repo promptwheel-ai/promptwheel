@@ -218,6 +218,32 @@ test('guards: inherits a base config, local overrides by name, reports provenanc
   rmSync(d, { recursive: true, force: true });
 });
 
+test('extends: a diamond (two bases sharing a grandparent) is NOT a false cycle', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-diamond-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'd.json'), JSON.stringify({ metrics: [{ name: 'base_m', cmd: 'echo 1', extract: 'number', direction: 'up', guard: true }] }));
+  writeFileSync(join(d, 'b.json'), JSON.stringify({ extends: './d.json', metrics: [{ name: 'b_m', cmd: 'echo 1', extract: 'number', direction: 'up' }] }));
+  writeFileSync(join(d, 'c.json'), JSON.stringify({ extends: './d.json', metrics: [{ name: 'c_m', cmd: 'echo 1', extract: 'number', direction: 'up' }] }));
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, extends: ['./b.json', './c.json'], metrics: [{ name: 'local_m', cmd: 'echo 1', extract: 'number', direction: 'up' }] }));
+  writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
+  const r = pw(d, ['guards', '--json']);
+  assert.equal(r.code, 0); // diamond resolves — no false "cycle" exit 2
+  const names = JSON.parse(r.out).guards.map((x) => x.name);
+  for (const n of ['base_m', 'b_m', 'c_m', 'local_m']) assert.ok(names.includes(n), `missing ${n}`);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('extends: a real self-cycle still exits 2', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-cycle-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, extends: './promptwheel.config.json', metrics: [{ name: 'm', cmd: 'echo 1', extract: 'number', direction: 'up' }] }));
+  writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
+  assert.equal(pw(d, ['guards']).code, 2); // true cycle caught
+  rmSync(d, { recursive: true, force: true });
+});
+
 test("guards: reports each guard's flag record from the stream", () => {
   const d = tmpRepo([TODOS]); // todos: direction down, guarded
   writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');

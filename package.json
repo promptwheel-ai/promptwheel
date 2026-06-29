@@ -1,7 +1,7 @@
 {
   "name": "promptwheel",
-  "version": "0.0.1",
-  "description": "The outcome gate for AI code — prove every change moved a metric. Before/after in an isolated worktree, regression-guarded, noise-aware.",
+  "version": "0.1.0",
+  "description": "The trustworthy per-turn reward for AI coding loops — prove a change moved a metric without regressing another. Before/after in an isolated worktree, regression-guarded, noise-aware.",
   "type": "module",
   "bin": {
     "promptwheel": "bin/promptwheel.mjs",
@@ -13,6 +13,10 @@
     "gate": "node bin/promptwheel.mjs run",
     "test": "node --test"
   },
+  "repository": { "type": "git", "url": "git+https://github.com/promptwheel-ai/promptwheel.git" },
+  "homepage": "https://github.com/promptwheel-ai/promptwheel#readme",
+  "bugs": { "url": "https://github.com/promptwheel-ai/promptwheel/issues" },
+  "author": "Matthew Owens",
   "license": "MIT",
-  "keywords": ["agent", "ci", "regression", "metrics", "verification", "ai-coding", "outcome", "promptwheel"]
+  "keywords": ["agent", "ci", "regression", "metrics", "verification", "ai-coding", "outcome", "evals", "loop", "promptwheel"]
 }

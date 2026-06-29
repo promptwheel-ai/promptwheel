@@ -42,21 +42,25 @@ function resolveConfig(p, repo, label, seen) {
   const abs = realpathSync(p);
   if (seen.has(abs)) { console.error(`config inheritance cycle at ${relOf(repo, p)}`); process.exit(2); }
   seen.add(abs);
-  const cfg = readConfigFile(p);
-  const byName = new Map();
-  const scalars = {};
-  for (const ref of [].concat(cfg.extends || [])) {
-    const bp = isAbsolute(ref) ? ref : join(dirname(p), ref);
-    if (!existsSync(bp)) { console.error(`extends target not found: ${ref} (from ${relOf(repo, p)})`); process.exit(2); }
-    const base = resolveConfig(bp, repo, relOf(repo, bp), seen);
-    for (const m of base.metrics) byName.set(m.name, m);
-    for (const k of ['repeat', 'linkNodeModules', 'record']) if (base[k] !== undefined) scalars[k] = base[k];
+  try {
+    const cfg = readConfigFile(p);
+    const byName = new Map();
+    const scalars = {};
+    for (const ref of [].concat(cfg.extends || [])) {
+      const bp = isAbsolute(ref) ? ref : join(dirname(p), ref);
+      if (!existsSync(bp)) { console.error(`extends target not found: ${ref} (from ${relOf(repo, p)})`); process.exit(2); }
+      const base = resolveConfig(bp, repo, relOf(repo, bp), seen);
+      for (const m of base.metrics) byName.set(m.name, m);
+      for (const k of ['repeat', 'linkNodeModules', 'record']) if (base[k] !== undefined) scalars[k] = base[k];
+    }
+    for (const m of (cfg.metrics || [])) {
+      byName.set(m.name, { ...m, __src: label, __override: byName.has(m.name) });
+    }
+    for (const k of ['repeat', 'linkNodeModules', 'record']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
+    return { ...scalars, metrics: [...byName.values()] };
+  } finally {
+    seen.delete(abs); // only ACTIVE ancestors are a cycle — a diamond (a base reached two ways) is fine
   }
-  for (const m of (cfg.metrics || [])) {
-    byName.set(m.name, { ...m, __src: label, __override: byName.has(m.name) });
-  }
-  for (const k of ['repeat', 'linkNodeModules', 'record']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
-  return { ...scalars, metrics: [...byName.values()] };
 }
 
 function loadConfig(repo) {
@@ -193,7 +197,7 @@ function selfHeal(repo) {
     );
     const tmp = tmpdir(), cutoff = Date.now() - 3600_000;
     for (const name of readdirSync(tmp)) {
-      if (!name.startsWith('promptwheel-')) continue;
+      if (!name.startsWith('promptwheel-') && !name.startsWith('pw-idx-')) continue; // worktrees + temp-index dirs
       const p = join(tmp, name);
       if (tracked.has(p)) continue;                 // a live/registered worktree — leave it
       try { if (statSync(p).mtimeMs < cutoff) rmSync(p, { recursive: true, force: true }); } catch { /* */ }
@@ -213,6 +217,8 @@ function gate(repo, opts) {
     // measure uncommitted changes — tracked AND untracked — via a temp-index snapshot;
     // never touches the real index or working tree. (A loop agent's most common action
     // is to ADD a file; `git stash create` omits untracked, which silently reverted them.)
+    try { git(['rev-parse', '--verify', 'HEAD'], repo); }
+    catch { console.error('no commits yet — make an initial commit before gating --working changes'); process.exit(2); }
     base = 'HEAD';
     head = workingSnapshot(repo);
   } else {
