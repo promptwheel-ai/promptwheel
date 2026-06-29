@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PromptWheel — the outcome gate for AI code. Prove every change moved a metric.
+// PromptWheel — the per-turn reward for AI coding loops (a.k.a. the outcome gate for AI code).
 //
 // For any change (base ref → head ref), measure each configured metric in an
 // isolated git worktree BEFORE and AFTER, enforce regression guards, and refuse
@@ -11,7 +11,7 @@
 //   promptwheel run [--base R] [--head R] [--repeat N] [--json]
 
 import { execSync, execFileSync } from 'node:child_process';
-import { readFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, appendFileSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, appendFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +31,7 @@ const spread = (xs) => { const a = xs.filter((x) => x != null); return a.length 
 function loadConfig(repo) {
   const candidates = ['promptwheel.config.json', 'outcome-gate.config.json']; // back-compat alias
   const p = candidates.map((c) => join(repo, c)).find(existsSync);
-  if (!p) { console.error(`no promptwheel.config.json in ${repo}`); process.exit(2); }
+  if (!p) { console.error('no promptwheel.config.json — run: promptwheel init   (writes one for your stack)'); process.exit(2); }
   const cfg = JSON.parse(readFileSync(p, 'utf8'));
   if (!Array.isArray(cfg.metrics) || cfg.metrics.length === 0) {
     console.error('config.metrics must be a non-empty array'); process.exit(2);
@@ -123,6 +123,32 @@ function evaluate(m, beforeS, afterS, repeat) {
 // ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
+// snapshot the working tree (tracked + untracked) into a dangling commit WITHOUT
+// touching the real index or files — so a gate/improve sees a file an agent just added.
+// Returns 'HEAD' when nothing changed.
+function workingSnapshot(repo) {
+  const idxDir = mkdtempSync(join(tmpdir(), 'pw-idx-'));
+  const env = {
+    ...process.env, GIT_INDEX_FILE: join(idxDir, 'index'),
+    GIT_AUTHOR_NAME: 'promptwheel', GIT_AUTHOR_EMAIL: 'promptwheel@local',
+    GIT_COMMITTER_NAME: 'promptwheel', GIT_COMMITTER_EMAIL: 'promptwheel@local',
+  };
+  const g = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', env }).trim();
+  try {
+    try { g(['read-tree', 'HEAD']); } catch { /* no HEAD yet (empty repo) */ }
+    g(['add', '-A']);                         // stages tracked + untracked into the TEMP index only
+    const tree = g(['write-tree']);
+    let headTree = ''; try { headTree = git(['rev-parse', 'HEAD^{tree}'], repo); } catch { /* no HEAD */ }
+    if (tree === headTree) return 'HEAD';      // nothing actually changed
+    let parent = ''; try { parent = git(['rev-parse', 'HEAD'], repo); } catch { /* no HEAD */ }
+    return g(parent
+      ? ['commit-tree', tree, '-p', parent, '-m', 'promptwheel working snapshot']
+      : ['commit-tree', tree, '-m', 'promptwheel working snapshot']);
+  } finally {
+    try { rmSync(idxDir, { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+}
+
 // the shared core: measure a change (base→head) and return the structured report
 function gate(repo, opts) {
   const cfg = loadConfig(repo);
@@ -131,10 +157,11 @@ function gate(repo, opts) {
 
   let base, head;
   if (opts.working) {
-    // measure uncommitted (tracked) changes via a snapshot commit; never disturbs the working tree
-    const snap = git(['stash', 'create'], repo); // '' when clean
+    // measure uncommitted changes — tracked AND untracked — via a temp-index snapshot;
+    // never touches the real index or working tree. (A loop agent's most common action
+    // is to ADD a file; `git stash create` omits untracked, which silently reverted them.)
     base = 'HEAD';
-    head = snap || 'HEAD';
+    head = workingSnapshot(repo);
   } else {
     base = resolveBase(repo, opts.base);
     head = opts.head || 'HEAD';
@@ -184,17 +211,29 @@ function improve(argv) {
   catch (e) { console.error(`  (attempt exited ${e.status ?? 1} — gating whatever it changed)`); }
 
   const report = gate(repo, { working: true, repeat: args.repeat, noRecord: args.noRecord });
-  printHuman(report);
-
   const noChange = report.metrics.every((m) => m.delta === 0 || m.delta == null);
   const improvedNames = report.metrics.filter((m) => m.status === 'improved').map((m) => m.name);
-  if (report.verdict === 'fail') { console.log('  ✗ guarded regression — reverting\n'); revert(repo); process.exit(1); }
-  if (noChange) { console.log('  = no metric moved — reverting\n'); revert(repo); process.exit(0); }
-  if (improvedNames.length === 0) { console.log('  = nothing improved beyond noise — reverting\n'); revert(repo); process.exit(0); }
 
-  git(['add', '-A'], repo);
-  execFileSync('git', ['commit', '-qm', `promptwheel: ${args.attempt} [improved ${improvedNames.join(', ')}]`], { cwd: repo });
-  console.log(`  ✓ kept — committed ${git(['rev-parse', '--short', 'HEAD'], repo)} (improved ${improvedNames.join(', ')})\n`);
+  // result + exit code express loop progress so `while improve; do :; done` converges:
+  //   0 = kept a real win · 1 = guarded regression (reverted) · 3 = plateau/no-op (reverted)
+  let result, exit, note;
+  if (report.verdict === 'fail') { result = 'regression'; exit = 1; revert(repo); note = '✗ guarded regression — reverted'; }
+  else if (noChange || improvedNames.length === 0) {
+    result = 'plateau'; exit = 3; revert(repo);
+    note = noChange ? '= no metric moved — reverted' : '= nothing improved beyond noise — reverted';
+  } else {
+    git(['add', '-A'], repo);
+    execFileSync('git', ['commit', '-qm', `promptwheel: ${args.attempt} [improved ${improvedNames.join(', ')}]`], { cwd: repo });
+    result = 'kept'; exit = 0;
+    note = `✓ kept — committed ${git(['rev-parse', '--short', 'HEAD'], repo)} (improved ${improvedNames.join(', ')})`;
+  }
+
+  // stdout carries the value (JSON report or the human table); the decision line goes to
+  // stderr so a loop driver can consume clean stdout.
+  if (args.json) console.log(JSON.stringify({ result, ...report }, null, 2));
+  else printHuman(report);
+  console.error(`  ${note}`);
+  process.exit(exit);
 }
 
 // discard the attempt's changes; keep the .promptwheel outcome record
@@ -230,6 +269,66 @@ function insights(argv) {
   }
   console.log('\n  lever = improved/runs — how reliably this metric actually responds. The');
   console.log('  highest-lever metrics are where an agent loop should spend its attempts.\n');
+}
+
+// ---------------------------------------------------------------------------
+// init — write a starter config so a newcomer isn't staring at a blank page
+// ---------------------------------------------------------------------------
+const LINT_CMD = 'npx eslint . -f unix 2>/dev/null | grep -c " error " || true';
+const PRESETS = {
+  'tests-pass': { desc: 'gate: your test suite still passes (command auto-detected)', metrics: null },
+  'lint': { desc: 'track: lint error count does not climb',
+    metrics: [{ name: 'lint_errors', cmd: LINT_CMD, extract: 'number', direction: 'down', guard: false }] },
+  'bundle-size': { desc: 'track: build output size in kB',
+    metrics: [{ name: 'bundle_kb', cmd: 'du -sk dist 2>/dev/null | cut -f1 || echo 0', extract: 'number', direction: 'down', guard: false }] },
+  'llm-eval': { desc: 'gate: AI-feature eval pass-rate + est $/run (see examples/reliability-sprint)',
+    metrics: [
+      { name: 'eval_pass_rate', cmd: 'node eval.mjs', extract: 'number', direction: 'up', guard: true },
+      { name: 'cost_per_run_usd', cmd: 'node estimate-cost.mjs', extract: 'number', direction: 'down', guard: true },
+    ] },
+};
+
+function detectTestCmd(repo) {
+  const has = (f) => existsSync(join(repo, f));
+  if (has('go.mod')) return 'go test ./...';
+  if (has('Cargo.toml')) return 'cargo test';
+  if (has('pyproject.toml') || has('setup.py') || has('pytest.ini')) return 'pytest -q';
+  if (has('package.json')) return 'npm test --silent';
+  return 'echo "set your test command in promptwheel.config.json" && false';
+}
+
+function init(argv) {
+  if (argv.includes('--list')) {
+    console.log('PromptWheel presets (promptwheel init --preset <name>):\n');
+    for (const [k, p] of Object.entries(PRESETS)) console.log(`  ${k.padEnd(13)} ${p.desc}`);
+    return;
+  }
+  const repo = (() => { try { return git(['rev-parse', '--show-toplevel'], process.cwd()); } catch { return process.cwd(); } })();
+  const out = join(repo, 'promptwheel.config.json');
+  if (existsSync(out) && !argv.includes('--force')) {
+    console.error('promptwheel.config.json already exists — pass --force to overwrite'); process.exit(2);
+  }
+  const pi = argv.indexOf('--preset');
+  const presetName = pi >= 0 ? argv[pi + 1] : null;
+  let metrics, note;
+  if (presetName) {
+    const p = PRESETS[presetName];
+    if (!p) { console.error(`unknown preset "${presetName}" — try: promptwheel init --list`); process.exit(2); }
+    metrics = p.metrics || [{ name: 'tests_pass', cmd: detectTestCmd(repo), extract: 'exit', direction: 'pass', guard: true }];
+    note = presetName;
+  } else {
+    // sensible default: tests-pass (guarded) + lint (info — can't fail a newcomer's first run)
+    const testCmd = detectTestCmd(repo);
+    metrics = [
+      { name: 'tests_pass', cmd: testCmd, extract: 'exit', direction: 'pass', guard: true },
+      { name: 'lint_errors', cmd: LINT_CMD, extract: 'number', direction: 'down', guard: false },
+    ];
+    note = `tests-pass + lint (detected: ${testCmd})`;
+  }
+  writeFileSync(out, JSON.stringify({ repeat: 1, metrics }, null, 2) + '\n');
+  console.log(`✓ wrote promptwheel.config.json — ${note}`);
+  console.log('\n  next:  promptwheel run --working   # gate your uncommitted changes');
+  console.log('         promptwheel init --list     # other presets (llm-eval, bundle-size, …)');
 }
 
 const short = (repo, ref) => { try { return git(['rev-parse', '--short', ref], repo); } catch { return ref; } };
@@ -292,17 +391,20 @@ function main() {
   if (cmd === 'run') run(rest);
   else if (cmd === 'improve') improve(rest);
   else if (cmd === 'insights') insights(rest);
+  else if (cmd === 'init') init(rest);
   else {
     console.log([
-      'PromptWheel — the outcome gate for AI code. Prove every change moved a metric.',
+      'PromptWheel — the per-turn reward for AI coding loops. Prove a change moved a metric.',
       '',
-      '  promptwheel run [--base <ref>] [--head <ref>] [--repeat <N>] [--json]',
-      '  promptwheel run --working                 measure uncommitted changes (HEAD → working tree)',
-      '  promptwheel run --no-record               skip appending to .promptwheel/outcomes.jsonl',
-      '  promptwheel improve --attempt "<cmd>"     run an agent/script, keep the change only if a metric improved',
-      '  promptwheel insights                      summarize the accumulated outcome record (which metrics actually respond)',
+      '  promptwheel init [--preset <name> | --list]  write a starter config for your stack',
+      '  promptwheel run [--base R] [--head R] [--repeat N] [--json|--markdown]',
+      '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
+      '  promptwheel improve --attempt "<cmd>"        run an agent/script; keep only if a metric improved',
+      '                                               exit 0=kept · 1=regression · 3=plateau · add --json',
+      '  promptwheel insights                         which metrics actually respond (loop memory)',
       '',
-      'Config: promptwheel.config.json → { metrics: [{ name, cmd, direction, extract?, guard? }] }',
+      'Loop it:  while promptwheel improve --attempt "$AGENT"; do :; done   # stops on plateau/regression',
+      'Config:   promptwheel.config.json → { metrics:[{ name, cmd, direction, extract?, guard? }] }   (or: promptwheel init)',
     ].join('\n'));
     process.exit(cmd ? 2 : 0);
   }

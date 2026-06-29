@@ -106,7 +106,7 @@ test('improve: keeps on improvement (commits), reverts on regression (no new com
   writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
   const base = rev(d);
   let r = pw(d, ['improve', '--attempt', "sed -i 's| // TODO||' app.js"]);
-  assert.equal(r.code, 0); assert.match(r.out, /kept/);
+  assert.equal(r.code, 0); // exit 0 = kept (the ✓ decision line now goes to stderr)
   const kept = rev(d);
   assert.notEqual(base, kept); // a commit was made
   r = pw(d, ['improve', '--attempt', "echo 'x // TODO' >> app.js"]); // regression
@@ -127,5 +127,56 @@ test('insights: aggregates the reward stream into per-metric stats', () => {
   assert.equal(data.runs, 1);
   assert.equal(data.metrics[0].name, 'todos');
   assert.equal(data.metrics[0].improved, 1);
+  rmSync(d, { recursive: true, force: true });
+});
+
+const jsonOf = (out) => JSON.parse(out.slice(0, out.lastIndexOf('}') + 1)); // strip trailing stderr note
+
+// -------------------------------------- R2: --working sees newly added (untracked) files
+test('run --working: SEES newly added untracked files (the dominant agent action)', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a\nb\n'); commitAll(d, 'base');   // 0 TODOs committed
+  writeFileSync(join(d, 'new.js'), 'x // TODO\n');                    // untracked new file
+  const r = pw(d, ['run', '--working', '--no-record']);
+  assert.equal(r.code, 1);                       // todos 0->1 guarded regression — only visible if untracked is snapshotted
+  assert.ok(existsSync(join(d, 'new.js')));       // working tree untouched
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('improve: KEEPS a turn that adds a new file (used to delete it via clean -fd)', () => {
+  const DONE = { name: 'done', cmd: 'grep -rho DONE . --include=*.js 2>/dev/null | wc -l', extract: 'number', direction: 'up', guard: true };
+  const d = tmpRepo([DONE]);
+  writeFileSync(join(d, 'app.js'), '// start\n'); commitAll(d, 'base');
+  const r = pw(d, ['improve', '--attempt', 'printf "DONE\\n" > done.js']);
+  assert.equal(r.code, 0);                          // exit 0 = kept
+  assert.ok(existsSync(join(d, 'done.js')));       // the new file survived (the bug deleted it)
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ------------------------- R3: improve exit codes express loop progress + --json result
+test('improve: exit 0=kept / 1=regression / 3=plateau, with --json result field', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  let r = pw(d, ['improve', '--json', '--attempt', "sed -i 's| // TODO||' app.js"]); // improves
+  assert.equal(r.code, 0); assert.equal(jsonOf(r.out).result, 'kept');
+  r = pw(d, ['improve', '--json', '--attempt', 'true']);                              // no-op
+  assert.equal(r.code, 3); assert.equal(jsonOf(r.out).result, 'plateau');
+  r = pw(d, ['improve', '--json', '--attempt', "echo 'z // TODO' >> app.js"]);        // regresses
+  assert.equal(r.code, 1); assert.equal(jsonOf(r.out).result, 'regression');
+  rmSync(d, { recursive: true, force: true });
+});
+
+// --------------------------------------------------------------- R4: init + presets
+test('init: writes a starter config for the stack, refuses overwrite without --force', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-init-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'package.json'), '{"name":"x","scripts":{"test":"exit 0"}}');
+  writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
+  let r = pw(d, ['init']);
+  assert.equal(r.code, 0); assert.ok(existsSync(join(d, 'promptwheel.config.json')));
+  assert.ok(JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).metrics.some((m) => m.name === 'tests_pass'));
+  assert.equal(pw(d, ['init']).code, 2);          // refuses overwrite
+  assert.equal(pw(d, ['init', '--list']).code, 0); // catalog
   rmSync(d, { recursive: true, force: true });
 });
