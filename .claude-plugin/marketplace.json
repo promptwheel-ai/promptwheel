@@ -1,0 +1,11 @@
+{
+  "name": "promptwheel-ai",
+  "owner": { "name": "Matthew Owens", "url": "https://github.com/promptwheel-ai" },
+  "plugins": [
+    {
+      "name": "promptwheel",
+      "source": "./plugins/promptwheel",
+      "description": "The trustworthy per-turn reward for AI coding loops — prove a change moved a metric without regressing another. Wraps the promptwheel CLI."
+    }
+  ]
+}

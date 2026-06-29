@@ -1,0 +1,10 @@
+{
+  "name": "promptwheel",
+  "description": "The trustworthy per-turn reward for AI coding loops. Gate a change through PromptWheel — prove it moved a metric without regressing another. Thin wrapper around the `promptwheel` CLI (install: npm i -g promptwheel).",
+  "version": "0.1.0",
+  "author": { "name": "Matthew Owens" },
+  "homepage": "https://github.com/promptwheel-ai/promptwheel",
+  "repository": "https://github.com/promptwheel-ai/promptwheel",
+  "license": "MIT",
+  "keywords": ["evals", "outcome-gate", "agent-loop", "reward-signal", "regression", "ci"]
+}

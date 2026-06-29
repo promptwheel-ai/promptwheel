@@ -61,6 +61,17 @@ npx promptwheel run --working --json    # branch on .verdict / per-metric .statu
 
 The exit code is the contract — `0` kept · `1` regression · `3` plateau — so any driver (`/loop`, a Ralph `while`, a Beads pull-loop) converges without parsing anything. PromptWheel never drives the loop; it only says whether the turn counted.
 
+## In Claude Code — plugin
+
+Bring the gate into Claude Code as slash commands:
+
+```
+/plugin marketplace add promptwheel-ai/promptwheel
+/plugin install promptwheel@promptwheel-ai
+```
+
+Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommitted changes) · `/promptwheel:improve <cmd>` (keep-if-improved) · `/promptwheel:insights`. The plugin wraps the CLI, so install that too (`npm i -g promptwheel`). See [`plugins/promptwheel/`](plugins/promptwheel/).
+
 ## In CI — GitHub Action
 
 Drop this in your repo (it posts a verdict comment on every PR and fails the check on a guarded regression beyond noise):
