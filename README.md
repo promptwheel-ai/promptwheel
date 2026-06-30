@@ -136,6 +136,7 @@ The Action runs straight from its own checkout — no npm install, no build. See
 - **extract** — reduce its output to a number: `number` (last number, default) · `lines` (count non-empty lines) · `exit` (1 if exit 0 else 0) · `{ "regex": "coverage: (\\d+)" }` (first capture).
 - **direction** — `up` (higher better) · `down` (lower better) · `pass` (boolean 0/1).
 - **guard** — `true` = a *trusted* regression **fails** the gate; `false` = informational.
+- **gamingCheck** — `false` exempts a metric from `--detect-gaming`'s source-only re-run. Use it for tripwire / test-side guards (assertion counts, test counts) whose gains legitimately live in test files — otherwise adding real tests would be flagged as gaming. The `antihack` preset sets this on its tripwires.
 
 ## Guardrails & inheritance
 

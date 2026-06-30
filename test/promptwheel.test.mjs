@@ -137,6 +137,25 @@ test('run --detect-gaming: catches a win made by editing the test; passes a real
   rmSync(d, { recursive: true, force: true });
 });
 
+test('run --detect-gaming: a gamingCheck:false guard is exempt from the source-only re-run (no FP on test-side gains)', () => {
+  // tests_pass is the source-proven target; `asserts` is a test-side guard that must NOT be re-proven from source
+  const d = tmpRepo([
+    { name: 'tests_pass', cmd: 'node t.js', extract: 'exit', direction: 'pass', guard: true },
+    { name: 'asserts', cmd: 'grep -roE "ok" x.test.js 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
+  ]);
+  writeFileSync(join(d, 'src.js'), 'module.exports={f:()=>1};\n');
+  writeFileSync(join(d, 't.js'), "const a=require('assert');const{f,g}=require('./src');a.strictEqual(f(),1);a.strictEqual(g(),2);\n"); // g missing → fails
+  writeFileSync(join(d, 'x.test.js'), 'ok\n');
+  commitAll(d, 'base'); const base = rev(d);
+  writeFileSync(join(d, 'src.js'), 'module.exports={f:()=>1,g:()=>2};\n'); // real source fix → tests pass
+  writeFileSync(join(d, 'x.test.js'), 'ok\nok\nok\n');                      // test-side gain (asserts 1→3)
+  commitAll(d, 'head');
+  const r = pw(d, ['run', '--base', base, '--head', 'HEAD', '--detect-gaming', '--no-record']);
+  assert.equal(r.code, 0, r.out);          // PASS — the test-side gain must not be flagged GAMED
+  assert.doesNotMatch(r.out, /GAMED/);
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ------------------------------------------ integration: --working + reward stream
 test('run --working: measures uncommitted change, leaves tree untouched, records outcome', () => {
   const d = tmpRepo([TODOS]);

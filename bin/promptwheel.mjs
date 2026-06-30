@@ -311,6 +311,7 @@ function gate(repo, opts) {
     for (const m of metrics) {
       if (m.status !== 'improved') continue;
       const cm = cfg.metrics.find((c) => c.name === m.name);
+      if (cm.gamingCheck === false) continue;   // tripwire / test-side guards aren't re-proven from source (their gain legitimately lives in test files)
       const j = judgeGaming(m, measureSourceOnly(repo, base, head, cm, linkNM, repeat));
       m.gamed = j.gamed; m.sourceOnly = j.sourceOnly; m.retained = j.retained; m.gamingReason = j.reason;
     }
@@ -434,10 +435,10 @@ const PRESETS = {
   'antihack': { desc: 'catch reward-hacking: a target + tripwires; pairs with `run --detect-gaming` (source-only re-run)',
     metrics: [
       { name: 'tests_pass', cmd: '__TESTCMD__', extract: 'exit', direction: 'pass', guard: true },
-      { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.git . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true },
-      { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|xit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.git . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true },
-      { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa" --exclude-dir=node_modules --exclude-dir=.git . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true },
-      { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert" --exclude-dir=node_modules --exclude-dir=.git . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true },
+      { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.git . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
+      { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|xit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.git . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
+      { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa" --exclude-dir=node_modules --exclude-dir=.git . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
+      { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert" --exclude-dir=node_modules --exclude-dir=.git . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
     ] },
 };
 
