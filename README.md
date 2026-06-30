@@ -29,12 +29,12 @@ PromptWheel  a1b2c3d → e4f5g6h  (×5)
 
 Exit `0` on pass, `1` on fail (CI-friendly). No build step, zero dependencies, Node 18+.
 
-## Catch your agent cheating — `--detect-gaming`
+## Catch your agent cheating — on by default
 
-The headline feature. After the normal gate, every *win* is re-proven using the agent's source edits **alone**: PromptWheel splits the diff into production source vs. `{test, config, grader, golden}` files, rebuilds a clean worktree at the base with **only the source slice** applied, and re-runs the gate. If the win doesn't survive — because it only passed by skipping/deleting a test, mocking the grader, editing a golden, relaxing a config, or the "win" touched zero source files — the verdict is **`GAMED` (exit 2)**:
+The headline feature, and it runs **by default** (in both `run` and `improve`; pass `--no-detect-gaming` for the bare outcome gate). After the normal gate, every *win* is re-proven using the agent's source edits **alone**: PromptWheel splits the diff into production source vs. `{test, config, grader, golden}` files, rebuilds a clean worktree at the base with **only the source slice** applied, and re-runs the gate. If the win doesn't survive — because it only passed by skipping/deleting a test, mocking the grader, editing a golden, relaxing a config, or the "win" touched zero source files — the verdict is **`GAMED` (exit 2)**:
 
 ```
-$ promptwheel run --detect-gaming
+$ promptwheel run
 
 PromptWheel  base → head
   ▲ tests_pass    0 → 1  (+1, improved) [guard✓, high]
@@ -46,7 +46,8 @@ Inline source-file suppressions (`@ts-nocheck`, `eslint-disable`, `# noqa`) are 
 
 ```bash
 npx promptwheel init --preset antihack    # target + tripwire guards
-npx promptwheel run --detect-gaming       # exit 0 = real win · 1 = regression · 2 = GAMED
+npx promptwheel run                       # detection ON by default · exit 0 win · 1 regression · 2 GAMED
+                                          #   (add --no-detect-gaming for just the outcome gate)
 ```
 
 Deterministic, zero-LLM, zero-network: an LLM judge asking "did you cheat?" is itself gameable; this is a diff partition plus a re-run, so a flag is trustworthy without a human in the loop. The 50%-of-gain-survives threshold is the default and is tunable.
@@ -61,7 +62,7 @@ npx promptwheel init                      # detects stack → guarded test metri
 npx promptwheel init --list               # presets: tests-pass · lint · bundle-size · llm-eval · antihack
 
 # measure a change
-npx promptwheel run                       # base = merge-base with main, head = HEAD
+npx promptwheel run                       # base = merge-base with main, head = HEAD · reward-hack detection ON
 npx promptwheel run --working             # measure UNCOMMITTED changes (incl. newly added files)
 npx promptwheel run --repeat 5 --json     # measure 5× to establish a noise band, emit JSON
 

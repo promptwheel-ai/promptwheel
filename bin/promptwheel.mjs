@@ -553,7 +553,7 @@ function renderMarkdown(r) {
 }
 
 function parseArgs(argv) {
-  const a = { json: false };
+  const a = { json: false, detectGaming: true };   // reward-hack detection is ON by default; --no-detect-gaming opts out
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--base') a.base = argv[++i];
     else if (argv[i] === '--head') a.head = argv[++i];
@@ -561,6 +561,7 @@ function parseArgs(argv) {
     else if (argv[i] === '--working') a.working = true;
     else if (argv[i] === '--no-record') a.noRecord = true;
     else if (argv[i] === '--detect-gaming' || argv[i] === '--antihack') a.detectGaming = true;
+    else if (argv[i] === '--no-detect-gaming' || argv[i] === '--no-antihack') a.detectGaming = false;
     else if (argv[i] === '--attempt') a.attempt = argv[++i];
     else if (argv[i] === '--json') a.json = true;
     else if (argv[i] === '--markdown') a.markdown = true;
@@ -585,9 +586,9 @@ function main() {
       '',
       '  promptwheel init [--preset <name> | --list]  write a starter config for your stack',
       '  promptwheel run [--base R] [--head R] [--repeat N] [--json|--markdown]',
+      '       catches reward-hacking BY DEFAULT — re-proves each win from SOURCE edits alone (verdict GAMED,',
+      '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
-      '  promptwheel run --detect-gaming              re-prove each win with SOURCE edits alone — catch reward-hacking',
-      '                                               (verdict GAMED, exit 2, when a metric only moved by editing tests/config/grader)',
       '  promptwheel improve --attempt "<cmd>"        run an agent/script; keep only if a metric improved',
       '                                               exit 0=kept · 1=regression · 3=plateau · add --json',
       '  promptwheel insights                         which metrics actually respond (loop memory)',
