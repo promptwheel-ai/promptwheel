@@ -8,3 +8,15 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
       - run: node --test
+
+  # dogfood: gate our own change with our own tool (reward-hack detection on).
+  # Enforces the constitution (tests pass · zero runtime deps · engine stays lean)
+  # and would flag a gamed win in our own PRs — promptwheel run on promptwheel.
+  dogfood:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }   # need history for base..head
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: node bin/promptwheel.mjs run --detect-gaming

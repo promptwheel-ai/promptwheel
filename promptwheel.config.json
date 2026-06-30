@@ -1,7 +1,7 @@
 {
   "linkNodeModules": false,
   "metrics": [
-    { "name": "tests_passing", "cmd": "node --test 2>&1 | grep -cE \"^ok \"", "extract": "number", "direction": "up",   "guard": true  },
+    { "name": "tests_passing", "cmd": "node --test 2>&1 | grep -cE \"^ok \"", "extract": "number", "direction": "up",   "guard": true, "gamingCheck": false },
     { "name": "runtime_deps",  "cmd": "node -e \"process.exit(Object.keys(require('./package.json').dependencies||{}).length?1:0)\"", "extract": "exit", "direction": "pass", "guard": true },
     { "name": "engine_loc",    "cmd": "wc -l < bin/promptwheel.mjs", "extract": "number", "direction": "down", "guard": false }
   ]

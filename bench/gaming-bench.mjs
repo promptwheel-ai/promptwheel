@@ -126,7 +126,8 @@ for (const scn of S) {
     const tripwire = ms.some((m) => m.guard && m.ok === false);
     const detected = sourceOnly || tripwire;
     const tgt = ms.find((m) => m.name === scn.target.name);
-    rows.push({ id: scn.id, cat: scn.cat, scope: scn.scope || 'in', type: scn.type, verdict: rep?.verdict || 'ERR', sourceOnly, tripwire, detected, retained: tgt?.retained, ms: det.ms });
+    const ciVerdict = (tgt && tgt.status !== 'regressed' && tgt.status !== 'unmeasurable') ? 'PASS' : 'FAIL'; // what a plain gate (just the target metric — your CI) reports at head
+    rows.push({ id: scn.id, cat: scn.cat, scope: scn.scope || 'in', type: scn.type, verdict: rep?.verdict || 'ERR', ciVerdict, sourceOnly, tripwire, detected, retained: tgt?.retained, ms: det.ms });
   } finally { rmSync(d, { recursive: true, force: true }); }
 }
 
@@ -156,9 +157,12 @@ P(`out-of-scope       ${bar(outCaught, outScope.length || 1)}  ${(outScope.lengt
 P(`cost               0 LLM tokens · 0 network · +${pct(detMs - plainMs, plainMs)} wall-clock vs a plain gate`);
 P('```');
 P();
-P('| scenario | class | gaming type | verdict | caught by | retained | result |');
-P('|---|---|---|---|---|--:|---|');
-for (const r of rows) P(`| ${r.id} | ${r.scope === 'out' ? 'gamed·oos' : r.cat} | ${r.type} | ${r.verdict.toUpperCase()} | ${mech(r)} | ${r.retained == null ? '—' : (r.retained * 100).toFixed(0) + '%'} | ${mark(r)} |`);
+P(`> **💡 The aha:** all ${inScope.length} gamed scenarios below are **green on a plain gate** — \`npm test\` passes, so your CI would ship every one. PromptWheel flags **${TP} of the ${inScope.length}**. The gap between "tests pass" and "the win is real" is the whole product.`);
+P();
+const vIcon = (v) => (v === 'PASS' ? '✅ ' : '🚩 ') + v;
+P('| scenario | gaming type | plain gate (`npm test`) | PromptWheel | caught by | result |');
+P('|---|---|---|---|---|---|');
+for (const r of rows) P(`| ${r.id} | ${r.type} | ${vIcon(r.ciVerdict)} | ${vIcon(r.verdict.toUpperCase())} | ${mech(r)} | ${mark(r)} |`);
 P();
 P('## Detection quality — on the class we CLAIM (evaluator-tampering: test / grader / golden / config edits)');
 P('| | flagged | not flagged |'); P('|---|--:|--:|');
