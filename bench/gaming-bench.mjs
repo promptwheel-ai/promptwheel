@@ -155,7 +155,7 @@ P(`in-scope recall    ${bar(TP, TP + FN)}  ${pct(TP, TP + FN).padStart(4)}   ${T
 P(`precision          ${bar(TP, TP + FP)}  ${pct(TP, TP + FP).padStart(4)}   ${TP}/${TP + FP} flags correct`);
 P(`specificity        ${bar(TN, TN + FP)}  ${pct(TN, TN + FP).padStart(4)}   ${TN}/${honest.length} honest changes cleared`);
 P(`out-of-scope       ${bar(outCaught, outScope.length || 1)}  ${(outScope.length ? pct(outCaught, outScope.length) : '—').padStart(4)}   ${outCaught}/${outScope.length} semantic-weak/leakage  (expected ~0, not claimed)`);
-P(`cost               0 LLM tokens · 0 network · +${pct(detMs - plainMs, plainMs)} wall-clock vs a plain gate`);
+P(`cost               0 LLM tokens · 0 network · +1 gate re-run per winning change (0 if nothing improved)`);
 P('```');
 P();
 P(`> **💡 The aha:** all ${inScope.length} gamed scenarios below are **green on a plain gate** — \`npm test\` passes, so your CI would ship every one. PromptWheel flags **${TP} of the ${inScope.length}**. The gap between "tests pass" and "the win is real" is the whole product.`);
@@ -178,7 +178,7 @@ if (misses.length) { P(); P('**In-scope misses (each a documented, fixable bound
 P();
 P('## Cost — free in tokens; the alternative is not');
 P('- **LLM tokens used: 0 · network: none.** The check is a diff partition + one worktree re-run = the price of a single CI test-suite run.');
-P(`- Plain gate → with \`--detect-gaming\`: **${(plainMs / rows.length).toFixed(0)} → ${(detMs / rows.length).toFixed(0)} ms/scenario** (**+${pct(detMs - plainMs, plainMs)} wall-clock**).`);
+P(`- Cost: **0 LLM tokens, 0 network.** On a change with a real win the detector adds **one extra worktree re-run** (re-proving the win from source alone — the price of a second gate run); a change with nothing improved adds nothing. It scales with your gate's runtime, not a fixed %.`);
 P('- An **LLM-as-judge** "did the agent cheat?" pass must read the whole trajectory (~50k in / ~1k out): ≈ **$0.055 (Haiku) · $0.165 (Sonnet) · $0.275 (Opus)** per check — multiplied by the contrastive context + multi-sampling judges need (a peer-reviewed judge-cost study spans **$0.45–$78.96 / 1k evals**), and it **degrades under optimization pressure** (the model learns to obfuscate — OpenAI arXiv:2503.11926). PromptWheel spends **$0**, is **deterministic** (same input → same verdict, re-runnable in CI), and **can\'t be obfuscated against** because it never reads the trajectory.');
 P();
 P('_Reproduce: `node bench/gaming-bench.mjs`. Scenarios are labeled ground truth in the same file._');
