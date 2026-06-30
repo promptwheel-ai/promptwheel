@@ -28,10 +28,14 @@ The accumulated, per-repo record of **which change-types move which metrics** is
 
 ## Positioning
 
-**PromptWheel — the trustworthy per-turn reward for AI coding loops** (and the outcome gate for AI code in CI). Prove a turn moved a metric without regressing another.
+**PromptWheel — catch your agent cheating.** The deterministic auditor that flags when an AI coding agent gamed its own success metric: it re-proves every "win" from the agent's **source edits alone** (`--detect-gaming` + the `antihack` preset, both shipped; measured recall in `bench/RESULTS.md`), and if the gate only went green because the agent edited the test, mocked the grader, or suppressed the error, the win evaporates → `VERDICT GAMED`. No LLM in the loop — a diff partition plus a re-run. The question it leads with: *is the win real?*
+
+> **Reposition (2026-06-29):** lead with detection; the outcome gate remains the foundation, not retired.
+
+The lead sits on a foundation — **an outcome gate** (and the outcome gate for AI code in CI): for any change it re-runs your metric commands before and after in throwaway worktrees and proves a real number moved without regressing another. That gate works for *any* change, human or agent; detection is the layer that proves the win was earned.
 
 - Audience: teams running AI changes in a loop (`/loop`, Ralph, agents) who can't tell improvement from churn (AI code ships ~1.7× more issues; the "feel 20% faster, are 19% slower" paradox).
-- Wedge: the **cross-metric, noise-aware reward** a loop consumes — it composes single-axis gates (Codspeed/Bencher) into one "did X improve without regressing Y" verdict; in CI it fails a PR on a guarded regression beyond noise.
+- Use case — the per-turn reward: the gate's verdict is the **cross-metric, noise-aware reward** a loop consumes — it composes single-axis gates (Codspeed/Bencher) into one "did X improve without regressing Y" verdict; in CI it fails a PR on a guarded regression beyond noise. It's a reward you **can't cheat**, because `--detect-gaming` catches the gaming a naive numeric reward would happily pay out.
 - Boundary (a feature, not a gap): it is for **graded numeric outcomes**; a change with no number is correctly out of scope, and it is the *signal*, never the loop driver.
 
 ## Business model — open-core
@@ -41,4 +45,6 @@ The accumulated, per-repo record of **which change-types move which metrics** is
 
 ## The honest risk
 
-The window is **narrow and closing** — Anthropic's Auto-Memory + Routines are creeping toward this, and an ACE-grade native memory/outcome feature would shut it. Viability requires three things, in this order: **ship now**, **stay radically thin** (ride the platform), and **demonstrably compound** (prove the outcome record makes an agent loop measurably better). If we can't show compounding, this is a feature, not a company — and that's an acceptable outcome to learn fast.
+The window is **narrow and closing** — Anthropic's Auto-Memory + Routines are creeping toward this, and an ACE-grade native memory/outcome feature would shut it. Viability requires three things, in this order: **ship now**, **stay radically thin** (ride the platform), and **demonstrably compound** (prove the outcome record makes an agent loop measurably better).
+
+PromptWheel is **not the bread-and-butter** — that is AI-reliability **consulting**. PromptWheel is its **lead magnet + neutral-auditor brand**: a deterministic, no-LLM tool that earns the right to ask "is the win real?" out loud, and on those terms it has already paid off (shipped, npm `promptwheel@0.1.0`, the gaming benchmark). Its **breakout** into a standalone product is gated on something the founder doesn't control — the **volume of autonomous agent merges** that actually need a deterministic auditor. If that volume arrives, the brand + the accumulated outcome record are the wedge; if it doesn't, this stays a sharp lead magnet, which is a fine outcome to learn fast.

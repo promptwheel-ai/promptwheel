@@ -20,7 +20,7 @@ Sequenced so each phase ships something usable and feeds the next. The ordering 
 ## Phase 3 — distribution (the OSS front) ✅
 - **GitHub Action / PR-comment wrapper:** run the gate on every PR, post a verdict comment, set a status check. ✅ (`action.yml`, `--markdown`, zero-install via the action's own checkout)
 - `npx promptwheel` zero-install path; a 60-second quickstart. ✅ (README)
-- _Remaining: **publish to npm** (`v0` tag already pushed) so `npx promptwheel` resolves — the lead-magnet launch gate._
+- **Published to npm** ✅ (`promptwheel@0.1.0`, 2026-06) so `npx promptwheel` resolves — the lead-magnet launch gate, shipped.
 
 ## Phase 4 — close the loop ✅
 - Agent loop: **propose change → gate → keep only if a metric improved (beyond noise)**. ✅ `improve --attempt "<cmd>"` — agent-agnostic (claude -p / aider / any script); keeps on improvement, reverts on regression or no-op.
@@ -33,6 +33,9 @@ Sequenced so each phase ships something usable and feeds the next. The ordering 
 ## Phase 4.6 — guardrail observability + inheritance ✅
 - `promptwheel guards`: show the **effective** guardrails (enforced vs info) with provenance + each guard's flag record from the stream.
 - `extends`: inherit guardrails from a shared base config (path or array); local metrics override by name. A team keeps one `promptwheel.base.json`; every repo inherits it. *(The hosted cross-repo/fleet view — one org base, aggregated compliance across all repos — stays the paid tier.)*
+
+## Phase 4.7 — reward-hack detection ✅
+- **reward-hack detection ✅** (`--detect-gaming` + `antihack` preset + benchmark + `DETECTION-LAYERS`/`ENFORCEMENT`): re-prove each win from the agent's source slice alone — a win that only survives because it edited the test/grader/golden/config is `GAMED`. This is the lead/wedge built *on* the gate, and what turns the reward stream into a reward you **can't cheat** (a naive numeric reward gets gamed; this catches the gaming). Measured in [`bench/RESULTS.md`](../bench/RESULTS.md): in-scope recall 89%, 0 LLM tokens.
 
 ## Phase 5 — learning & discovery 🌱 seeded (full build gated on data)
 
@@ -47,7 +50,7 @@ Sequenced so each phase ships something usable and feeds the next. The ordering 
 
 Disciplines the earlier verification projects actually shipped; they protect the gate's own credibility and are the basis of the paid tier. See `../../explorations/ripcut-backup.md`.
 
-- **Golden self-eval + accuracy-regression canary.** A labeled `test/fixtures/` of changes with known outcomes (a true win, a true no-op, a true regression, a deliberately flaky benchmark) + `promptwheel selfcheck` that asserts the gate's own verdict accuracy, and a CI canary that fails if an engine change degrades it. (securitychecks shipped recall/precision-bench + a benchmark-canary.) We measure the change; we don't yet prove our verdict is right.
+- **Golden self-eval + accuracy-regression canary.** A labeled `test/fixtures/` of changes with known outcomes (a true win, a true no-op, a true regression, a deliberately flaky benchmark) + `promptwheel selfcheck` that asserts the gate's own verdict accuracy, and a CI canary that fails if an engine change degrades it. (securitychecks shipped recall/precision-bench + a benchmark-canary.) **Partly shipped:** the gaming-recall benchmark ([`bench/RESULTS.md`](../bench/RESULTS.md)) now proves `--detect-gaming`'s verdict accuracy on a labeled set; the broader golden self-eval (a true win / true no-op / true regression / a deliberately flaky benchmark) + a `selfcheck` canary over the *gate's own* verdict is still pending.
 - **Portable attestation artifact.** Make each outcome record a self-contained, hashable/signable bundle (cmd + env fingerprint + raw repeat samples + median + band + verdict) that a third party / the future cloud can independently re-verify *without the repo*. Turns "prove" into "produce a checkable proof"; the technical basis of the paid cross-repo tier.
 - **Pre-flight `unmeasurable` gate.** Classify a change with no derivable metric/extract target as `unmeasurable` and skip the worktree experiment before spending compute, rather than emitting a junk verdict.
 

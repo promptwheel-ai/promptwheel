@@ -36,6 +36,15 @@ The mechanisms are genuinely different: PromptWheel re-proves the win from the a
 \* config tampering is caught when the file is recognized as non-source; a generic threshold file outside the classifier is a known coverage gap (declare it, or extend the classifier).
 ✅ = caught · 〰️ = sometimes / unreliable · ❌ = structurally blind · — = N/A
 
+## Versus LLM code reviewers (CodeRabbit, Claude Code review)
+
+These tools are the **LLM-judge** column above — and they're complements, not competitors, because they answer a *different question:*
+
+- **CodeRabbit / Claude review ask "is the code good?"** — correctness, security, conventions, intent. Semantic, broad, and genuinely *better than PromptWheel* at anything that needs **reading** the change — including the semantic-weak and leakage buckets PromptWheel is blind to. (CodeRabbit *Learnings* goes further still, into "remember our team's preferences" — a learned style memory, not a gaming check.)
+- **PromptWheel asks "is the win real?"** — did the measured improvement come from the source, or from editing the goalposts? It answers by **re-running, not reading.**
+
+Honest overlap: a good LLM reviewer *will* flag the obvious gaming (commenting out tests is glaring), so PromptWheel's value is **not** "catches cheating they miss." It's the set of properties an LLM judge structurally can't offer — **deterministic** (same input → same verdict), **$0 / zero-token**, **auditable** (the revert diff + re-run log *are* the evidence), **un-obfuscatable** (it never reads the trajectory, so there's nothing to fool), and runnable as a **hard CI gate with no model** — plus the **unattended-loop** case, where invoking an LLM reviewer every turn is too slow and expensive and there's no PR review at all. The right posture is to run both: PromptWheel as the cheap deterministic gate, the reviewer for the semantic call only it can make.
+
 ## Why PromptWheel is the layer to add *first*
 
 1. **It catches the cheapest, most common class.** Editing a test or relaxing a gate is the lowest-effort way to fake a green, and it's exactly what unattended loops do under pressure. Automating it removes the bulk of the "checking for cheating" load.

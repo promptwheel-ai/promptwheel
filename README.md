@@ -8,9 +8,9 @@ PromptWheel re-proves every "win" using the agent's **source edits alone**. If t
 
 It's built on an **outcome gate**: for any change it re-runs your metric commands (tests, lint, `tsc`, coverage, bundle, eval) in throwaway git worktrees before and after, and refuses to trust a delta inside the measurement noise. The gate everyone ships asks *"did the number move?"* — PromptWheel also asks *"did the agent **earn** it?"*
 
-PromptWheel is the **signal, not the loop driver**: wire it as the verifier inside Claude Code `/loop`, a Ralph `while`-loop, or a Beads pull-loop. Each turn it measures your real repo metrics in throwaway worktrees, refuses to trust a delta inside the noise, and answers one question — *did this turn earn its keep?* — so the loop improves instead of confidently degrading. (In CI it's the **outcome gate for AI code**: the same verdict, as a PR check.)
+PromptWheel is the **signal, not the loop driver**: wire it as the verifier inside Claude Code `/loop`, a Ralph `while`-loop, or a Beads pull-loop. Each turn it answers one question — *did this turn earn its keep, and did the agent earn it honestly?* — so the loop improves instead of confidently degrading. (In CI it's the **outcome gate for AI code**: the same verdict, as a PR check.)
 
-> Same name, new meaning. The "wheel" is the **improvement flywheel**: every turn only counts if it **provably moved a metric without regressing another.** Orchestration (the old "wheel of prompts") is a solved, commoditized problem; the trustworthy reward signal is the open one.
+> Same name, new meaning. The "wheel" is the **improvement flywheel**: every turn only counts if it **provably moved a metric without regressing another.** Orchestration (the old "wheel of prompts") *and the outcome gate itself* are now solved, commoditized problems; the open one is **catching when the agent games that gate** — making the reward signal one you can't cheat.
 
 AI coding agents (and humans) declare success when a change *compiles and tests pass*. They almost never verify that a change **improved a real measurable thing without regressing another** — and outcome data rots in dashboards (DORA, Swarmia) disconnected from the change that caused it. PromptWheel closes that loop.
 
@@ -187,7 +187,7 @@ The accumulated record of **which change-types move which metrics** is the asset
 ## Develop
 
 ```bash
-npm test     # 36 dep-free tests (node:test) — unit + integration, no dependencies
+npm test     # 37 dep-free tests (node:test) — unit + integration, no dependencies
 ```
 
 The engine is one importable file; pure helpers are exported for unit tests, the CLI runs only when invoked directly. Add a test with every behavior change.
@@ -204,6 +204,7 @@ The engine is one importable file; pure helpers are exported for unit tests, the
 - [x] `promptwheel init` + presets — zero-config onboarding
 - [x] `insights` — reward-stream aggregation (Phase-5 seed)
 - [x] `--detect-gaming` — reward-hack detection: re-prove the win from source edits alone + `antihack` preset
-- [ ] npm publish (the lead magnet) · ACE-style learning + UCB work-discovery (**frozen** — gated on data + ≥1 paid engagement; see [docs/LEARNING.md](docs/LEARNING.md))
+- [x] npm publish — `promptwheel@0.1.0` (the lead magnet, shipped 2026-06)
+- [ ] ACE-style learning + UCB work-discovery (**frozen** — gated on data + ≥1 paid engagement; see [docs/LEARNING.md](docs/LEARNING.md))
 
-> Status: v0, runnable, all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.
+> Status: **published v0.1.0** — the consulting lead magnet (npm `promptwheel@0.1.0`), all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.

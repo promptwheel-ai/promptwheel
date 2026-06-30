@@ -37,6 +37,9 @@ The working tree is **never** touched — every read happens in a temp worktree 
 ### Reward stream
 Every gated run (unless `--no-record` or `record:false`) appends one JSON line to `.promptwheel/outcomes.jsonl`: `{ ts, base, head, repeat, mode, verdict, metrics }`. Commit it to accumulate the per-repo "what moves what" record; `insights` reads it.
 
+### detect-gaming (antihack)
+`run --detect-gaming` re-proves every *win* from the agent's source edits **alone**. After the normal gate, it partitions the head diff into **production source** vs. **`{test, config, grader, golden}`** files, rebuilds a clean worktree at the base with **only the source slice** applied, and re-runs the gate. If a guarded win does **not** survive that source-only re-run — because it passed by editing/skipping a test, mocking the grader, editing a golden, relaxing config, or touching zero source files — the verdict is **`GAMED`** (exit 2). Metrics with `gamingCheck: false` are exempt from the re-run (test-side tripwires whose gains legitimately live in test files; the `antihack` preset sets this). Deterministic, zero-LLM: a diff partition plus a re-run, so every flag is reproducible with a human-readable reason. The 50%-of-gain-survives threshold is the default and is tunable. See `DETECTION-LAYERS.md` for scope and `../bench/RESULTS.md` for measured recall.
+
 ## Config schema — `promptwheel.config.json`
 
 ```jsonc
@@ -51,6 +54,7 @@ Every gated run (unless `--no-record` or `record:false`) appends one JSON line t
       "extract": "number",     // number | lines | exit | { "regex": "coverage: (\\d+)" }
       "direction": "down",     // up (higher better) | down (lower better) | pass (boolean 0/1)
       "guard": true,           // true = a trusted regression FAILS the gate; false = informational
+      "gamingCheck": true,     // (default true) include this metric in --detect-gaming's source-only re-run; false exempts test-side tripwires whose gains legitimately live in test files (the antihack preset sets this on its tripwires)
       "timeoutSec": 300
     }
   ]
@@ -86,7 +90,8 @@ So `--repeat` is how you trade time for trust: it earns a real confidence label 
 
 ```jsonc
 {
-  "base": "a1b2c3d", "head": "e4f5g6h", "repeat": 5, "mode": "refs", "verdict": "pass",
+  "base": "a1b2c3d", "head": "e4f5g6h", "repeat": 5, "mode": "refs",
+  "verdict": "pass",             // pass | fail | gamed  (gamed only with --detect-gaming)
   "metrics": [
     { "name": "lint_errors", "direction": "down", "guard": true,
       "before": 12, "after": 7, "delta": -5,
@@ -98,11 +103,11 @@ So `--repeat` is how you trade time for trust: it earns a real confidence label 
 }
 ```
 
-Exit code: `0` = pass, `1` = fail (a guarded metric had a trusted regression), `2` = config/usage error. This is the JSON that later becomes the persisted reward stream (Roadmap Phase 2).
+Exit code: `0` = pass, `1` = fail (a guarded metric had a trusted regression), `2` = config/usage error **or `GAMED`** (with `--detect-gaming`, a win that didn't survive the source-only re-run — this currently **overloads** the exit-2 config/usage code). This is the JSON that later becomes the persisted reward stream (Roadmap Phase 2).
 
 ## Testing
 
-`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` — **25 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
+`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` — **37 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
 
 ## Design constraints
 - **Zero runtime dependencies, no build.** Node 18+, ESM, runs straight from source.
