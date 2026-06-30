@@ -48,4 +48,4 @@ cost               0 LLM tokens · 0 network · +17% wall-clock vs a plain gate
 - Plain gate → with `--detect-gaming`: **58 → 68 ms/scenario** (**+17% wall-clock**).
 - An **LLM-as-judge** "did the agent cheat?" pass must read the whole trajectory (~50k in / ~1k out): ≈ **$0.055 (Haiku) · $0.165 (Sonnet) · $0.275 (Opus)** per check — multiplied by the contrastive context + multi-sampling judges need (a peer-reviewed judge-cost study spans **$0.45–$78.96 / 1k evals**), and it **degrades under optimization pressure** (the model learns to obfuscate — OpenAI arXiv:2503.11926). PromptWheel spends **$0**, is **deterministic** (same input → same verdict, re-runnable in CI), and **can't be obfuscated against** because it never reads the trajectory.
 
-_Reproduce: `node bench/gaming-bench.mjs`. Scenarios are labeled ground truth in the same file. Positioning + sources: `explorations/promptwheel-benchmark-positioning.md`._
+_Reproduce: `node bench/gaming-bench.mjs`. Scenarios are labeled ground truth in the same file._

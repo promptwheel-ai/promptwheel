@@ -11,7 +11,7 @@ This is the *speculative* layer. It is deliberately **not built** beyond the `in
 ## What Phase 5 becomes (only once there's data)
 
 ### 1. Outcome-driven learning — an ACE-style playbook
-Per the research (`../../explorations/research/`), the only learning approach that ships as open-core (no RL training) is a **structured, deduped, decaying playbook**, not free-text appended to CLAUDE.md. Adapt **ACE** (Agentic Context Engineering, Stanford 2510.04618): a Generator/Reflector/Curator loop that maintains versioned tactics keyed by `(subsystem, metric, change-type)`, each entry earned from a **measured** outcome ("refactoring X reliably cut p95; touching Y reliably regressed lint"). The reward stream is the training signal; entries decay if they stop predicting.
+The only learning approach that ships as open-core (no RL training) is a **structured, deduped, decaying playbook**, not free-text appended to CLAUDE.md. Adapt **ACE** (Agentic Context Engineering, Stanford 2510.04618): a Generator/Reflector/Curator loop that maintains versioned tactics keyed by `(subsystem, metric, change-type)`, each entry earned from a **measured** outcome ("refactoring X reliably cut p95; touching Y reliably regressed lint"). The reward stream is the training signal; entries decay if they stop predicting.
 
 ### 2. Work-discovery — UCB over the lever scores
 The unowned gap is **principled prioritization** (nobody publishes a work-selection policy). Use the `insights` lever scores as priors in a **UCB/bandit** loop: propose the next change against the highest expected-improvement metric, balanced by exploration. This is the one place PromptWheel's archived orchestrator had a real idea (UCB1 formula rotation) worth carrying forward — but now grounded in *measured outcomes*, not heuristics.
@@ -21,7 +21,7 @@ Cross-repo aggregation of the playbook + lever data ("change-types that reliably
 
 ## Harvested data-quality guards (from the securitychecks/blockspool lineage, 2026-06-26)
 
-The reward stream and any future playbook are only as good as the data feeding them. Three disciplines the earlier projects learned the hard way (see `../../explorations/ripcut-backup.md`), to build *before* the playbook:
+The reward stream and any future playbook are only as good as the data feeding them. Three disciplines the earlier projects learned the hard way, to build *before* the playbook:
 
 - **Typed override reasons gate what feeds learning.** When a human overrides a verdict, require a typed reason (`false_signal` / `flaky_metric` / `acceptable_tradeoff` / `duplicate`). Only `false_signal`/`flaky_metric` may adjust a metric's noise model or lever score; an `acceptable_tradeoff` must **never** teach "this change-type is bad." A `VERDICT_MAP` from typed action → reward, never free-text. (securitychecks: "don't auto-learn from generic waive — risk of learning to suppress real issues.")
 - **Cohort-segmented reliability, not one global number.** Fingerprint each outcome with an environment/cohort tag (CI vs local, benchmark-class, machine) and segment lever scores + noise bands by cohort. securitychecks precision was ~100% on SaaS repos but ~30–50% on frameworks — "don't chase a single universal FP rate." Also a marketing-honesty guard: don't claim "works on any repo."

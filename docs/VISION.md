@@ -7,7 +7,7 @@ PromptWheel was an autonomous agent orchestrator (scout → scored tickets → p
 - **Claude Code**: Dynamic Workflows (GA May 2026), subagents, background agents, ~26-event hooks, Plan mode, cloud Routines (cron/API/GitHub), an official `ralph-wiggum` loop plugin + `/loop`, and shallow Auto-Memory.
 - **Cursor** (~$2B ARR): Background Agents + Bugbot.
 
-Building any of that as a product = building next quarter's free base-tool feature. The casualties confirm it: Sweep pivoted off issue→PR, Continue was acqui-hired, Roo wound down. (Full landscape: `../explorations/research/agentic-landscape-2026.md`.)
+Building any of that as a product = building next quarter's free base-tool feature. The casualties confirm it: Sweep pivoted off issue→PR, Continue was acqui-hired, Roo wound down.
 
 ## The surviving thesis
 
@@ -22,7 +22,7 @@ This is the **keystone** — concretely, the **per-turn reward an agentic coding
 
 So PromptWheel builds the keystone first.
 
-## The moat
+## The compounding asset
 
 The accumulated, per-repo record of **which change-types move which metrics** is a compounding asset the base vendor cannot replicate — it's specific to *your* codebase and *your* history. That record is also the reward stream a learning/discovery loop would later train on. Code is copyable; the outcome history is not.
 
@@ -47,4 +47,4 @@ The lead sits on a foundation — **an outcome gate** (and the outcome gate for 
 
 The window is **narrow and closing** — Anthropic's Auto-Memory + Routines are creeping toward this, and an ACE-grade native memory/outcome feature would shut it. Viability requires three things, in this order: **ship now**, **stay radically thin** (ride the platform), and **demonstrably compound** (prove the outcome record makes an agent loop measurably better).
 
-PromptWheel is **not the bread-and-butter** — that is AI-reliability **consulting**. PromptWheel is its **lead magnet + neutral-auditor brand**: a deterministic, no-LLM tool that earns the right to ask "is the win real?" out loud, and on those terms it has already paid off (shipped, npm `promptwheel@0.1.0`, the gaming benchmark). Its **breakout** into a standalone product is gated on something the founder doesn't control — the **volume of autonomous agent merges** that actually need a deterministic auditor. If that volume arrives, the brand + the accumulated outcome record are the wedge; if it doesn't, this stays a sharp lead magnet, which is a fine outcome to learn fast.
+And the honest ceiling: this may be a **feature, not a company** — worth knowing up front. Its breakout into a standalone product depends on something outside our control: the **volume of *autonomous* agent merges** that actually need a deterministic, independent auditor. If that arrives, the neutral-auditor positioning + the accumulated outcome record are the wedge; if it doesn't, it stays a sharp, honest tool that does one thing well — a fine outcome to learn fast and cheaply.

@@ -48,7 +48,7 @@ Sequenced so each phase ships something usable and feeds the next. The ordering 
 
 ## Phase 6 — credibility & evidence (harvested from the securitychecks/blockspool lineage, 2026-06-26)
 
-Disciplines the earlier verification projects actually shipped; they protect the gate's own credibility and are the basis of the paid tier. See `../../explorations/ripcut-backup.md`.
+Disciplines the earlier verification projects actually shipped; they protect the gate's own credibility and are the basis of the paid tier.
 
 - **Golden self-eval + accuracy-regression canary.** A labeled `test/fixtures/` of changes with known outcomes (a true win, a true no-op, a true regression, a deliberately flaky benchmark) + `promptwheel selfcheck` that asserts the gate's own verdict accuracy, and a CI canary that fails if an engine change degrades it. (securitychecks shipped recall/precision-bench + a benchmark-canary.) **Partly shipped:** the gaming-recall benchmark ([`bench/RESULTS.md`](../bench/RESULTS.md)) now proves `--detect-gaming`'s verdict accuracy on a labeled set; the broader golden self-eval (a true win / true no-op / true regression / a deliberately flaky benchmark) + a `selfcheck` canary over the *gate's own* verdict is still pending.
 - **Portable attestation artifact.** Make each outcome record a self-contained, hashable/signable bundle (cmd + env fingerprint + raw repeat samples + median + band + verdict) that a third party / the future cloud can independently re-verify *without the repo*. Turns "prove" into "produce a checkable proof"; the technical basis of the paid cross-repo tier.

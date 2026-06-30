@@ -80,7 +80,7 @@ agent change
 - **Semantically-weak / overfit** wins that pass an honest-but-weak gate — needs a **held-out** dimension PromptWheel doesn't ship.
 - **Intent** — it measures *what changed*, never *why*.
 
-This scoping isn't a weakness to hide; it's what makes the in-scope claim trustworthy. See `bench/RESULTS.md` for the measured numbers (in-scope recall, precision, specificity, and the explicit out-of-scope row) and `explorations/promptwheel-benchmark-positioning.md` (outside the repo) for the full cited positioning.
+This scoping isn't a weakness to hide; it's what makes the in-scope claim trustworthy. See `bench/RESULTS.md` for the measured numbers — in-scope recall, precision, specificity, and the explicit out-of-scope row.
 
 ## Sources
 
