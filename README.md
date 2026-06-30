@@ -51,6 +51,8 @@ npx promptwheel run --detect-gaming       # exit 0 = real win · 1 = regression 
 
 Deterministic, zero-LLM, zero-network: an LLM judge asking "did you cheat?" is itself gameable; this is a diff partition plus a re-run, so a flag is trustworthy without a human in the loop. The 50%-of-gain-survives threshold is the default and is tunable.
 
+This is **one layer**, not a silver bullet: it catches the evaluator-tampering class (test/grader/golden/config edits) deterministically and for free, so the expensive layers — held-out tests for semantically-weak wins, an LLM judge or a human for intent and leakage — are reserved for the calls only they can make. See **[docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md)** for the coverage matrix and honest scope, and **[bench/RESULTS.md](bench/RESULTS.md)** for the measured numbers (`node bench/gaming-bench.mjs` to reproduce).
+
 ## Use
 
 ```bash
@@ -174,6 +176,7 @@ The accumulated record of **which change-types move which metrics** is the asset
 
 ## Docs
 
+- [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md) — how `--detect-gaming` fits as the **deterministic layer** alongside held-out tests, LLM judges, and human review: the coverage matrix, the compose-as-a-pipeline model, and the honest in/out-of-scope boundary.
 - [docs/VISION.md](docs/VISION.md) — why we pivoted from orchestrator to outcome gate, the thesis, the moat, the open-core model.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — the phased plan and the ship-now/stay-thin guardrails.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the engine works: schemas, extract modes, the trust/noise model.
