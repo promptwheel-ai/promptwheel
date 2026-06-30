@@ -15,7 +15,7 @@
 
 ## Layout
 
-- `bin/promptwheel.mjs` — the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict; commands run/improve/insights/init/guards). ~500 LOC.
+- `bin/promptwheel.mjs` — the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict + `--detect-gaming` source-only re-run; commands run/improve/insights/init/guards). ~600 LOC.
 - `promptwheel.config.json` — example metrics config.
 - `docs/VISION.md` — why we pivoted, the thesis, the moat, open-core model.
 - `docs/ROADMAP.md` — phased plan + the guardrails (ship thin, the window is closing).
@@ -25,7 +25,7 @@
 
 ```bash
 node bin/promptwheel.mjs run --base <ref> --head <ref> [--repeat N] [--json]
-npm test          # 20 dep-free node:test tests (unit + integration)
+npm test          # 37 dep-free node:test tests (unit + integration)
 ```
 
 Tests live in `test/promptwheel.test.mjs` — keep them **dep-free** (`node:test`): import the pure helpers for unit tests, shell out to the CLI for integration. `bin/promptwheel.mjs` is the single source of behavior; **add/adjust a test with every behavior change**. The engine is importable (pure helpers exported; the CLI runs only when invoked directly) — don't break that, the tests rely on it.

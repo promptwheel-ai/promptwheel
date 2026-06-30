@@ -334,7 +334,7 @@ function run(argv) {
   process.exit(report.verdict === 'pass' ? 0 : report.verdict === 'gamed' ? 2 : 1);
 }
 
-// the moat: append every gated run to a per-repo outcome record (best-effort, never fails the gate)
+// persisted record: append every gated run to a per-repo outcome record (best-effort, never fails the gate)
 function recordOutcome(repo, report) {
   try {
     const dir = join(repo, '.promptwheel');
@@ -343,7 +343,7 @@ function recordOutcome(repo, report) {
   } catch { /* recording must never break the gate */ }
 }
 
-// the flywheel: run any agent/script, gate the result, keep the change ONLY if a metric improved
+// keep-if-improved: run any agent/script, gate the result, keep the change ONLY if a metric improved
 function improve(argv) {
   const args = parseArgs(argv);
   if (!args.attempt) { console.error('improve requires --attempt "<command that changes the repo>"'); process.exit(2); }
