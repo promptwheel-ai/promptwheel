@@ -52,7 +52,7 @@ npx promptwheel run                       # detection ON by default · exit 0 wi
 
 Deterministic, zero-LLM, zero-network: an LLM judge asking "did you cheat?" is itself gameable; this is a diff partition plus a re-run, so a flag is trustworthy without a human in the loop. The 50%-of-gain-survives threshold is the default and is tunable.
 
-This is **one layer**, not a silver bullet: it catches the evaluator-tampering class (test/grader/golden/config edits) deterministically and for free, so the expensive layers — held-out tests for semantically-weak wins, an LLM judge or a human for intent and leakage — are reserved for the calls only they can make. See **[docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md)** for the coverage matrix and honest scope, and **[bench/RESULTS.md](bench/RESULTS.md)** for the measured numbers (`node bench/gaming-bench.mjs` to reproduce).
+This is **one layer**, not a silver bullet: it catches the evaluator-tampering class (test/grader/golden/config edits) deterministically and for free, so the expensive layers — held-out tests for semantically-weak wins, an LLM judge or a human for intent and leakage — are reserved for the calls only they can make. See **[docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md)** for the coverage matrix and honest scope, and **[bench/RESULTS.md](bench/RESULTS.md)** for the measured numbers (`node bench/gaming-bench.mjs` to reproduce — it includes a cross-stack table with a real pytest run + a numeric eval-pass-rate metric). **Gate your own stack** — pytest · tsc · coverage · bundle · llm-eval — copy a config from **[examples/](examples/)**.
 
 ## Use
 
