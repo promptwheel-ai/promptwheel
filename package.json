@@ -1,7 +1,7 @@
 {
   "name": "promptwheel",
-  "version": "0.1.0",
-  "description": "The trustworthy per-turn reward for AI coding loops — prove a change moved a metric without regressing another. Before/after in an isolated worktree, regression-guarded, noise-aware.",
+  "version": "0.1.1",
+  "description": "Catch your agent cheating — a deterministic, zero-LLM CLI that flags when an AI coding agent gamed its own metric (re-proves the win from the agent's source edits alone). Built on an outcome gate; runs in CI or a Claude Code hook.",
   "type": "module",
   "bin": {
     "promptwheel": "bin/promptwheel.mjs",
@@ -18,5 +18,5 @@
   "bugs": { "url": "https://github.com/promptwheel-ai/promptwheel/issues" },
   "author": "Matthew Owens",
   "license": "MIT",
-  "keywords": ["agent", "ci", "regression", "metrics", "verification", "ai-coding", "outcome", "evals", "loop", "promptwheel"]
+  "keywords": ["agent", "ci", "regression", "metrics", "verification", "ai-coding", "outcome", "evals", "loop", "promptwheel", "reward-hacking", "detect-gaming", "reward-hack-detection"]
 }
