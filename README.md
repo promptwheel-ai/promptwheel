@@ -89,6 +89,8 @@ npx promptwheel run --working --json    # branch on .verdict / per-metric .statu
 
 The exit code is the contract — `0` kept · `1` regression · `3` plateau — so any driver (`/loop`, a Ralph `while`, a Beads pull-loop) converges without parsing anything. PromptWheel never drives the loop; it only says whether the turn counted.
 
+**Two callers, by design.** Your *agent* consumes the verdict — it's the loop's per-turn reward (`improve` / `run --working --json`; exit `0` kept · `1`/`2` reverted · `3` plateau). The *harness* (a Stop-hook or CI) runs `--detect-gaming` — the audit the agent **can't self-clear**, because a contestant can't referee itself (see [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md)). Same tool; *who calls it* is the difference between a reward and an audit.
+
 ## In Claude Code — plugin
 
 Bring the gate into Claude Code as slash commands:
@@ -157,6 +159,8 @@ Teams keep one shared base config and have every repo inherit it via `extends`:
 ```
 
 `extends` takes a path (or array of paths) to base configs: a repo **inherits** their guardrails, and a local metric of the same name **overrides** the inherited one (tighten, loosen, or disable). `promptwheel guards` shows the effective set with provenance — `inherited ← base.json`, `local`, or `local override` — plus each guard's flag record from the outcome stream.
+
+Read this way, `extends` is **the shared invariants — the "business rules" — your agents inherit and are held to**: enforced as *measured guards* (a trusted regression fails the gate / reverts the commit), not advisory text an agent can quietly ignore. (Natural-language conventions belong in `AGENTS.md`; only deterministic, measurable guards belong here.)
 
 ## Trust model — the point of the whole thing
 

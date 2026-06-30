@@ -36,6 +36,7 @@ cost               0 LLM tokens · 0 network · +17% wall-clock vs a plain gate
 | **honest** (3) | 1 ✗ FP | 2 ✓ TN |
 
 - **Recall** (in-scope gamed caught): 89%  ·  **Precision**: 89%  ·  **Specificity** (honest cleared): 67%
+- **Dual reading:** as an *audit* (the harness runs it), **recall 89%** is the headline — how many gamed wins you catch. As a *loop reward* (the agent consumes it), **specificity 67%** is load-bearing — a false positive makes the improve-loop revert honest work and stall.
 - **Out-of-scope** (semantic-weak / leakage): 0/1 caught — **expected ~0, and not claimed.** A source-revert can't fire when no protected file was edited; catching these needs held-out tests (cf. SpecBench, SWE-bench+).
 
 **In-scope misses (each a documented, fixable boundary):**

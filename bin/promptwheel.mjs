@@ -581,7 +581,7 @@ function main() {
   else if (cmd === 'guards') guards(rest);
   else {
     console.log([
-      'PromptWheel — the per-turn reward for AI coding loops. Prove a change moved a metric.',
+      'PromptWheel — catch your agent cheating. Prove a change moved a real metric (and that the agent earned it, not gamed it). The per-turn reward + source-only audit for AI coding loops.',
       '',
       '  promptwheel init [--preset <name> | --list]  write a starter config for your stack',
       '  promptwheel run [--base R] [--head R] [--repeat N] [--json|--markdown]',
