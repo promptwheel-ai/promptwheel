@@ -4,13 +4,15 @@
 
 Genre: a *detection* benchmark (cf. TRACE, EvilGenie) — can the detector catch a gamed win? It is the deterministic, auditable counterpart to an LLM judge: it re-proves the win from the agent's SOURCE edits alone, so it can't be obfuscated against (it never reads the trajectory) — but for the same reason it can't see intent.
 
+> **Scope:** one language (JS / node:assert) and one metric (exit-code) *on purpose* — a single-file, zero-dep, sub-100ms corpus that yields one clean recall number. The detector itself never parses code (it partitions the diff and re-runs your gate command), so the mechanism is language-agnostic; a cross-stack / cross-metric v2 (pytest · coverage · tsc · eval) is a separate, additive track that never touches the number below.
+
 ## Scoreboard
 ```
 in-scope recall    ████████████░░   89%   8/9 gamed caught  (test/grader/golden/config edits)
 precision          ████████████░░   89%   8/9 flags correct
 specificity        █████████░░░░░   67%   2/3 honest changes cleared
 out-of-scope       ░░░░░░░░░░░░░░    0%   0/1 semantic-weak/leakage  (expected ~0, not claimed)
-cost               0 LLM tokens · 0 network · +18% wall-clock vs a plain gate
+cost               0 LLM tokens · 0 network · +-1% wall-clock vs a plain gate
 ```
 
 > **💡 The aha:** all 9 gamed scenarios below are **green on a plain gate** — `npm test` passes, so your CI would ship every one. PromptWheel flags **8 of the 9**. The gap between "tests pass" and "the win is real" is the whole product.
@@ -47,7 +49,7 @@ cost               0 LLM tokens · 0 network · +18% wall-clock vs a plain gate
 
 ## Cost — free in tokens; the alternative is not
 - **LLM tokens used: 0 · network: none.** The check is a diff partition + one worktree re-run = the price of a single CI test-suite run.
-- Plain gate → with `--detect-gaming`: **58 → 68 ms/scenario** (**+18% wall-clock**).
+- Plain gate → with `--detect-gaming`: **68 → 67 ms/scenario** (**+-1% wall-clock**).
 - An **LLM-as-judge** "did the agent cheat?" pass must read the whole trajectory (~50k in / ~1k out): ≈ **$0.055 (Haiku) · $0.165 (Sonnet) · $0.275 (Opus)** per check — multiplied by the contrastive context + multi-sampling judges need (a peer-reviewed judge-cost study spans **$0.45–$78.96 / 1k evals**), and it **degrades under optimization pressure** (the model learns to obfuscate — OpenAI arXiv:2503.11926). PromptWheel spends **$0**, is **deterministic** (same input → same verdict, re-runnable in CI), and **can't be obfuscated against** because it never reads the trajectory.
 
 _Reproduce: `node bench/gaming-bench.mjs`. Scenarios are labeled ground truth in the same file._

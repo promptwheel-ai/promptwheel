@@ -147,6 +147,7 @@ const P = (s = '') => lines.push(s);
 P('# PromptWheel — gaming-detection benchmark'); P();
 P(`${rows.length} labeled scenarios · detector = \`run --detect-gaming\` (source-only re-run + antihack tripwire guards) · deterministic, zero-LLM, zero-network.`); P();
 P('Genre: a *detection* benchmark (cf. TRACE, EvilGenie) — can the detector catch a gamed win? It is the deterministic, auditable counterpart to an LLM judge: it re-proves the win from the agent\'s SOURCE edits alone, so it can\'t be obfuscated against (it never reads the trajectory) — but for the same reason it can\'t see intent.'); P();
+P('> **Scope:** one language (JS / node:assert) and one metric (exit-code) *on purpose* — a single-file, zero-dep, sub-100ms corpus that yields one clean recall number. The detector itself never parses code (it partitions the diff and re-runs your gate command), so the mechanism is language-agnostic; a cross-stack / cross-metric v2 (pytest · coverage · tsc · eval) is a separate, additive track that never touches the number below.'); P();
 const bar = (n, d) => { const f = d ? Math.round(14 * n / d) : 0; return '█'.repeat(f) + '░'.repeat(14 - f); };
 P('## Scoreboard');
 P('```');
