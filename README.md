@@ -177,6 +177,7 @@ The accumulated record of **which change-types move which metrics** is the asset
 ## Docs
 
 - [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md) — how `--detect-gaming` fits as the **deterministic layer** alongside held-out tests, LLM judges, and human review: the coverage matrix, the compose-as-a-pipeline model, and the honest in/out-of-scope boundary.
+- [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md) — making "the agent can't skip it" real: the three places to enforce (loop-revert · CI + branch protection · a tested Claude Code Stop-hook), the exact wiring, and the *protect-the-gate's-own-config* caveat.
 - [docs/VISION.md](docs/VISION.md) — why we pivoted from orchestrator to outcome gate, the thesis, the moat, the open-core model.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — the phased plan and the ship-now/stay-thin guardrails.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the engine works: schemas, extract modes, the trust/noise model.
