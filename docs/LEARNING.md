@@ -35,6 +35,10 @@ The record currently fills only from *forward* gated runs. Three harvest paths, 
 2. **Attribution from conversations (enrich only).** Agent transcripts / `.claude` history supply the *change-type* that caused an outcome (the deferred `attempt`/`label` field, R6) — never the measurement. They make `insights` answer "which change-TYPES move which metrics," but they presuppose a measured outcome; they cannot replace execution.
 3. **Instant deterministic artifact (the graphify analog).** `insights` is already a pure, deterministic, instant aggregation over the record; a static HTML render of it ("lever scores + which change-types reliably help") is the `graph.html`-style wow — instant *given the record*. The record is execution-earned, not free static analysis: **PromptWheel proves outcomes (dynamic), graphify proves structure (static).** Don't promise structure-grade instancy for outcome data — the honesty *is* the credibility feature.
 
+## Mechanism-test harness (decided 2026-07-02, doc-only)
+
+When the gates below are met and Phase 5 is built, its machinery (dedup, decay, Beta-smoothed levers, cohort tags) gets verified against the **stranger-repo corpus harness** (the 100-repo distribution sweep used to harden 0.2.x) — real, diverse repos we did not author, replayed through the curator/scorer as **test fixtures, never training data**. Corpus/probe rows are tautologies (outcomes designed by the probe that produced them) and cross-sectional (one visit per repo); the playbook trains ONLY on longitudinal records from repos under real development. Synthetic volume satisfies the letter of the data gate while defeating its purpose — the record's value is that it is a trace of actual use.
+
 ## Hard gates before building any of this
 - **≥ a few hundred gated runs** of real outcome data in a real repo (else the playbook overfits to noise).
 - **Proof of compounding**: an `improve` loop using the playbook must beat the same loop without it, *measured by the gate itself*. If it doesn't, this layer is a research dead-end and we stop — cheaply.
