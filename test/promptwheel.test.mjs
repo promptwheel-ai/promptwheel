@@ -15,6 +15,8 @@ test('extract: number = last number in output', () => assert.equal(extract('erro
 test('extract: exit code → 1/0', () => { assert.equal(extract('x', 0, 'exit'), 1); assert.equal(extract('x', 2, 'exit'), 0); });
 test('extract: lines counts non-empty lines', () => assert.equal(extract('a\n\nb\n', 0, 'lines'), 2));
 test('extract: regex first capture', () => assert.equal(extract('coverage: 88%', 0, { regex: 'coverage: (\\d+)' }), 88));
+test('extract: regex capture wins over last-number fallback', () =>
+  assert.equal(extract('coverage: 88% of 200 lines', 0, { regex: 'coverage: (\\d+)' }), 88));
 test('extract: null when no number', () => assert.equal(extract('nothing here', 0), null));
 
 // ------------------------------------------------------------ unit: median/spread
@@ -49,6 +51,10 @@ test('evaluate: deterministic extract → high even on a single read', () => {
 });
 test('evaluate: non-guard informational metric never fails', () => {
   assert.equal(evaluate(m({ guard: false }), [5, 5], [9, 9], 2).ok, true);
+});
+test('evaluate: one missing side → unmeasurable, never regressed', () => {
+  const ev = evaluate(m(), [], [5, 5], 2);
+  assert.equal(ev.status, 'unmeasurable'); assert.equal(ev.delta, null);
 });
 
 // ------------------------------------------------------------- unit: renderMarkdown
@@ -114,6 +120,10 @@ test('judgeGaming: source reproduces the full win → not gamed', () => {
 test('judgeGaming: source reproduces <half the win → gamed', () => {
   const j = judgeGaming({ before: 100, after: 40, direction: 'down' }, { hadSourceChange: true, samples: [85] });
   assert.equal(j.gamed, true); assert.equal(j.retained, 0.25);
+});
+test('judgeGaming: exactly half the gain retained → NOT gamed (boundary)', () => {
+  const j = judgeGaming({ before: 100, after: 60, direction: 'down' }, { hadSourceChange: true, samples: [80] });
+  assert.equal(j.retained, 0.5); assert.equal(j.gamed, false);
 });
 
 // ------------------------------------------ integration: --detect-gaming end-to-end
