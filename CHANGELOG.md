@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2 — 2026-07-02 — 100-repo distribution sweep
+
+Ran the gate across ~100 public repos (TS/JS libs, Next.js apps, Python, Go, Rust; 5-way parallel, per-language installs, three probes each: clean baseline · syntax-break · suppression-cheat). Aggregate: 0 hangs, cheat caught 72/72 on JS/TS/Next/Python; every break-probe miss on live suites triaged to uncovered-file probe picks — except one real class, plus one pattern gap:
+
+- **Python editable installs can blind the gate — now detected and warned.** With src-layout `pip install -e .`, the worktree's tests import the ORIGINAL checkout at both refs, so every delta reads 0 (confirmed by controlled repro: a broken working tree measured `0 → 0 unchanged` while clean HEAD should read 1). The gate now detects an editable install of the measured repo (`__editable__*`/`.pth`/`.egg-link` in the active python's site-packages) and prints a loud warning with the workaround. A Node CLI cannot fix Python import semantics; refusing to pretend beats silently lying.
+- **Suppression tripwire now covers Go and Rust** (`//nolint`, `#![allow(...)]`) — measured 0/27 caught before the fix, confirmed caught on a live Go repo after.
+- Corpus context for honesty: many stranger repos' suites don't run under a fresh `--ignore-scripts` install (workspace links, build steps, missing env) — the 0.2.1 inert-guard warning fired correctly on all of these rather than reporting fake green.
+
 ## 0.2.1 — 2026-07-02 — corpus-hardened
 
 Ran the gate against a 10-repo public corpus (Next.js apps, vitest/jest/ava TS libs, pnpm monorepos): 10/10 `init` correct, 10/10 scripted cheats caught, 0 hangs. Three failure classes found and fixed:

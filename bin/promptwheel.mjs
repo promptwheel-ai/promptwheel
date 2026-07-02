@@ -287,9 +287,31 @@ function selfHeal(repo) {
   } catch { /* cleanup must never block the gate */ }
 }
 
+// Python editable installs (src-layout `pip install -e .`) can pin imports to the ORIGINAL
+// checkout: the worktree's tests then import your current tree at BOTH refs and every delta
+// reads 0 — the gate is structurally blind on that repo shape. Undetectable from the verdict
+// (it looks like "unchanged"), so detect the editable install itself and warn. Verified by a
+// controlled repro (CHANGELOG 0.2.2).
+function warnEditableInstall(repo) {
+  if (!existsSync(join(repo, 'pyproject.toml')) && !existsSync(join(repo, 'setup.py'))) return;
+  try {
+    const probe = [
+      'import site,glob,os,sys',
+      'repo=os.path.realpath(sys.argv[1])',
+      'sps=set(site.getsitepackages()+[site.getusersitepackages()])',
+      'files=[f for sp in sps for pat in ("__editable__*","*.egg-link","*.pth") for f in glob.glob(os.path.join(sp,pat)) if os.path.isfile(f)]',
+      'hit=any(repo in open(f,errors="ignore").read() for f in files)',
+      'print("HIT" if hit else "")',
+    ].join('\n');
+    const out = execFileSync('python3', ['-c', probe, repo], { encoding: 'utf8', timeout: 5000 }).trim();
+    if (out === 'HIT') console.error('⚠ editable install of this repo detected (pip install -e): worktree measurements may import your ORIGINAL checkout, not the measured ref — deltas can read 0. Use a non-editable install in the measuring venv, or put the worktree src on PYTHONPATH.');
+  } catch { /* no python / cannot tell — stay quiet */ }
+}
+
 // the shared core: measure a change (base→head) and return the structured report
 function gate(repo, opts) {
   selfHeal(repo);
+  warnEditableInstall(repo);
   const cfg = loadConfig(repo);
   const repeat = Math.max(1, opts.repeat ?? cfg.repeat ?? 1);
   const linkNM = cfg.linkNodeModules !== false;
@@ -445,7 +467,7 @@ const PRESETS = {
       { name: 'tests_pass', cmd: '__TESTCMD__', extract: 'exit', direction: 'pass', guard: true },
       { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.git --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
       { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|xit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.git --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
-      { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa" --exclude-dir=node_modules --exclude-dir=.git --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
+      { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa|//nolint|#!?\\[allow\\(" --exclude-dir=node_modules --exclude-dir=.git --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
       { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert|\\bt\\.(is|deepEqual|throws|truthy|falsy|not|ok) ?\\(" --exclude-dir=node_modules --exclude-dir=.git --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
     ] },
 };

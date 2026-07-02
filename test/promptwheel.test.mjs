@@ -340,6 +340,22 @@ test('init: package.json WITHOUT a test script gets the self-describing placehol
   rmSync(d, { recursive: true, force: true });
 });
 
+// ------------------------- corpus finding: suppression tripwire must cover go + rust
+test('suppressions tripwire counts //nolint (go) and #![allow] (rust) too', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-sup-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'a.go'), 'package a\n//nolint:all\n');
+  writeFileSync(join(d, 'b.rs'), '#![allow(dead_code)]\n');
+  writeFileSync(join(d, 'c.js'), '// eslint-disable-next-line\n');
+  assert.equal(pw(d, ['init']).code, 0);
+  const cmd = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'))
+    .metrics.find((m) => m.name === 'suppressions').cmd;
+  const n = execFileSync('bash', ['-c', cmd], { cwd: d, encoding: 'utf8' }).trim();
+  assert.equal(n, '3');
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---------------------------------------- self-heal: orphaned worktrees from a crashed run
 test('self-heal: a stale /tmp worktree from a crashed run is cleaned on the next run', () => {
   const orphan = join(tmpdir(), 'promptwheel-ORPHANTEST');
