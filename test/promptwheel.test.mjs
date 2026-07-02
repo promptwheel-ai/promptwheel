@@ -125,6 +125,11 @@ test('judgeGaming: exactly half the gain retained → NOT gamed (boundary)', () 
   const j = judgeGaming({ before: 100, after: 60, direction: 'down' }, { hadSourceChange: true, samples: [80] });
   assert.equal(j.retained, 0.5); assert.equal(j.gamed, false);
 });
+test('judgeGaming: gamingThreshold is honored (same retention, different verdicts)', () => {
+  const src = { hadSourceChange: true, samples: [80] }; // retained 0.5
+  assert.equal(judgeGaming({ before: 100, after: 60, direction: 'down' }, src, 0.6).gamed, true);
+  assert.equal(judgeGaming({ before: 100, after: 60, direction: 'down' }, src, 0.4).gamed, false);
+});
 
 // ------------------------------------------ integration: --detect-gaming end-to-end
 test('run --detect-gaming: catches a win made by editing the test; passes a real source fix', () => {
@@ -253,10 +258,57 @@ test('init: writes a starter config for the stack, refuses overwrite without --f
   writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
   let r = pw(d, ['init']);
   assert.equal(r.code, 0); assert.ok(existsSync(join(d, 'promptwheel.config.json')));
-  assert.ok(JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).metrics.some((m) => m.name === 'tests_pass'));
+  const written = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).metrics;
+  assert.ok(written.some((m) => m.name === 'tests_pass'));
+  assert.ok(written.some((m) => m.name === 'assertions'), 'default config includes antihack tripwires');
+  assert.ok(!written.some((m) => m.name === 'lint_errors'), 'no lint metric when eslint is absent');
   assert.equal(pw(d, ['init']).code, 2);          // refuses overwrite
   assert.equal(pw(d, ['init', '--list']).code, 0); // catalog
   rmSync(d, { recursive: true, force: true });
+});
+
+// ---------------------- the newcomer's first cheat: gut the tests, metric stays flat
+test('default init config: weakening the suite (flat metric) FAILS via tripwires', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-gut-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+  writeFileSync(join(d, 'package.json'), '{"name":"x","scripts":{"test":"node --test"}}');
+  writeFileSync(join(d, 'src.mjs'), 'export const add=(a,b)=>a+b;\n');
+  writeFileSync(join(d, 'x.test.mjs'), "import {test} from 'node:test'; import assert from 'node:assert'; import {add} from './src.mjs';\ntest('a', () => assert.equal(add(1,2),3));\ntest('b', () => assert.equal(add(2,2),4));\n");
+  assert.equal(pw(d, ['init']).code, 0);
+  commitAll(d, 'base');
+  // gut the suite: tests_pass stays 1 → 1, but assertions/test_count drop
+  writeFileSync(join(d, 'x.test.mjs'), "import {test} from 'node:test';\ntest('trivial', () => {});\n");
+  const r = pw(d, ['run', '--working', '--no-record']);
+  assert.equal(r.code, 1, r.out);               // guarded tripwire regression — not a silent PASS
+  assert.match(r.out, /FAIL/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ---------------------- config-level gamingThreshold flows through the gate
+test('run --detect-gaming: gamingThreshold from config flips a half-retained win to GAMED', () => {
+  const DONE = { name: 'done', cmd: 'grep -rho DONE . --include=*.js --include=*.mjs 2>/dev/null | wc -l', extract: 'number', direction: 'up', guard: true };
+  const mk = (threshold) => {
+    const d = tmpRepo([DONE]);
+    if (threshold != null) {
+      const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+      writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...cfg, gamingThreshold: threshold }));
+    }
+    writeFileSync(join(d, 'src.js'), '// start\n');
+    writeFileSync(join(d, 'x.test.js'), '// tests\n');
+    commitAll(d, 'base'); const base = rev(d);
+    writeFileSync(join(d, 'src.js'), '// DONE\n');      // half the gain from source…
+    writeFileSync(join(d, 'x.test.js'), '// DONE\n');   // …half from a test file
+    commitAll(d, 'head');
+    const r = pw(d, ['run', '--base', base, '--head', 'HEAD', '--detect-gaming', '--no-record']);
+    rmSync(d, { recursive: true, force: true });
+    return r;
+  };
+  assert.equal(mk(null).code, 0);                 // default 0.5: retained 0.5 → earned
+  const r = mk(0.6);
+  assert.equal(r.code, 2, r.out);                 // threshold 0.6: same change → GAMED
+  assert.match(r.out, /GAMED/);
 });
 
 // ---------------------------------------- self-heal: orphaned worktrees from a crashed run

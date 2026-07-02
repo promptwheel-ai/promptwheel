@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.0 — 2026-07-02 — the polished gate
+
+- **Default `init` config now includes the antihack tripwires** (`test_count`, `skipped_tests`, `suppressions`, `assertions`). The quiet cheat — weaken the suite while the target metric stays flat — previously PASSED under the default config because gaming detection only audits *wins*; now it fails the gate out of the box. "Catch your agent cheating" is true without a preset.
+- **`gamingThreshold` is now actually tunable** (config-level scalar or per-metric; inherited through `extends`), as the README already claimed. Default unchanged at `0.5`; the GAMED reason string names the threshold in effect.
+- **`init` only writes the `lint_errors` metric when eslint is actually set up** (config file or dependency). Previously it reported a constant `0 (unverified)` on repos without eslint — a metric that can't move is noise, not signal.
+- Tests: gamed-verdict boundary (`retained === 0.5` → earned), unmeasurable-guard short-circuit, regex-extract fixture that distinguishes the regex path from the last-number fallback, threshold end-to-end, and the gut-the-suite scenario against the default config. Suite: 43 tests. (Several of these gaps were found by mutation-testing the gate itself — the tool's own medicine.)
+
+## 0.1.2 — 2026-06-30
+
+- **Reward-hack detection ON by default** in `run` and `improve`; `--no-detect-gaming` opts out. Exit `2` = GAMED.
+- Benchmark: cross-stack/cross-metric track (real pytest + numeric eval-pass-rate); cost stated structurally (one gate re-run per win).
+- CI dogfoods the gate; bench surfaces the plain-CI-PASS vs PromptWheel-GAMED contrast.
+
+## 0.1.1 — 2026-06-28
+
+- Fix: tripwire-guard false positive (test-side gains are exempt from the source-only re-run via `gamingCheck: false`).
+- Gaming-detection benchmark + scoreboard (`bench/RESULTS.md`).
+
+## 0.1.0 — 2026-06-27 — reward-hack detection
+
+- **`--detect-gaming`**: re-prove every win from the agent's source edits alone; verdict **GAMED** when the gain came from editing tests/config/grader/golden. `antihack` preset (target + tripwires).
+- **`extends`** config inheritance (diamond-safe cycle detection) + **`guards`** observability command with provenance and flag record.
+- Self-heal for orphaned worktrees/temp indexes from hard-killed runs; empty-repo `--working` guard; npm metadata. First npm publish.
+
 ## 0.0.2 — 2026-06-26 — roadmap phases 1–5
 
 - **`--working` mode** — measure uncommitted (tracked) changes via `git stash create`; never disturbs the working tree.

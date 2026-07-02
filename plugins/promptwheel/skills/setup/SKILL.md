@@ -7,8 +7,8 @@ allowed-tools: ["Bash"]
 Set up PromptWheel for this repo.
 
 1. Run via Bash: `promptwheel init $ARGUMENTS`
-   - no args: detects the stack (npm / go / pyproject / cargo) and writes a guarded test metric + lint.
-   - `--list`: show available presets (`tests-pass`, `lint`, `bundle-size`, `llm-eval`).
+   - no args: detects the stack (npm / go / pyproject / cargo) and writes a guarded test metric + the antihack tripwires (+ lint when eslint is set up).
+   - `--list`: show available presets (`tests-pass`, `lint`, `bundle-size`, `llm-eval`, `antihack`).
    - `--preset <name>`: write a specific preset.
 2. If `promptwheel` is not found, tell me to install it (`npm install -g promptwheel`) and stop.
 3. Show the resulting `promptwheel.config.json`, then suggest the next step: `/promptwheel:gate`.

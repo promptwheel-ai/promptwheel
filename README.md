@@ -42,15 +42,15 @@ PromptWheel  base → head
   VERDICT: GAMED  — a metric "improved" by editing the goalposts, not the source
 ```
 
-Inline source-file suppressions (`@ts-nocheck`, `eslint-disable`, `# noqa`) are a different shape, caught by the **`antihack` preset** — a target metric plus tripwire guards (`test_count`, `skipped_tests`, `suppressions`, `assertions`) that fail when a "win" introduces them:
+Inline source-file suppressions (`@ts-nocheck`, `eslint-disable`, `# noqa`) — and the quieter cheat of *weakening the suite while the metric stays flat* — are a different shape, caught by **tripwire guards** (`test_count`, `skipped_tests`, `suppressions`, `assertions`) that fail when a "win" introduces them. The plain `init` default includes these tripwires, so gutting a test file fails the gate out of the box:
 
 ```bash
-npx promptwheel init --preset antihack    # target + tripwire guards
+npx promptwheel init                      # guarded tests + antihack tripwires by default
 npx promptwheel run                       # detection ON by default · exit 0 win · 1 regression · 2 GAMED
                                           #   (add --no-detect-gaming for just the outcome gate)
 ```
 
-Deterministic, zero-LLM, zero-network: an LLM judge asking "did you cheat?" is itself gameable; this is a diff partition plus a re-run, so a flag is trustworthy without a human in the loop. The 50%-of-gain-survives threshold is the default and is tunable.
+Deterministic, zero-LLM, zero-network: an LLM judge asking "did you cheat?" is itself gameable; this is a diff partition plus a re-run, so a flag is trustworthy without a human in the loop. The 50%-of-gain-survives threshold is the default and is tunable via `gamingThreshold` (config-level, or per-metric).
 
 This is **one layer**, not a silver bullet: it catches the evaluator-tampering class (test/grader/golden/config edits) deterministically and for free, so the expensive layers — held-out tests for semantically-weak wins, an LLM judge or a human for intent and leakage — are reserved for the calls only they can make. See **[docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md)** for the coverage matrix and honest scope, and **[bench/RESULTS.md](bench/RESULTS.md)** for the measured numbers (`node bench/gaming-bench.mjs` to reproduce — it includes a cross-stack table with a real pytest run + a numeric eval-pass-rate metric). **Gate your own stack** — pytest · tsc · coverage · bundle · llm-eval — copy a config from **[examples/](examples/)**.
 
@@ -58,7 +58,7 @@ This is **one layer**, not a silver bullet: it catches the evaluator-tampering c
 
 ```bash
 # 0. write a starter config for your stack (or hand-write promptwheel.config.json)
-npx promptwheel init                      # detects stack → guarded test metric + lint
+npx promptwheel init                      # detects stack → guarded tests + antihack tripwires (+ lint if eslint is set up)
 npx promptwheel init --list               # presets: tests-pass · lint · bundle-size · llm-eval · antihack
 
 # measure a change
@@ -142,6 +142,7 @@ The Action runs straight from its own checkout — no npm install, no build. See
 - **direction** — `up` (higher better) · `down` (lower better) · `pass` (boolean 0/1).
 - **guard** — `true` = a *trusted* regression **fails** the gate; `false` = informational.
 - **gamingCheck** — `false` exempts a metric from `--detect-gaming`'s source-only re-run. Use it for tripwire / test-side guards (assertion counts, test counts) whose gains legitimately live in test files — otherwise adding real tests would be flagged as gaming. The `antihack` preset sets this on its tripwires.
+- **gamingThreshold** — the fraction of a win that must survive the source-only re-run to count as earned (default `0.5`). Config-level scalar, overridable per metric; inherited through `extends` like `repeat`.
 
 ## Guardrails & inheritance
 
@@ -192,7 +193,7 @@ The accumulated record of **which change-types move which metrics** is the asset
 ## Develop
 
 ```bash
-npm test     # 37 dep-free tests (node:test) — unit + integration, no dependencies
+npm test     # the dep-free suite (node:test) — unit + integration, no dependencies
 ```
 
 The engine is one importable file; pure helpers are exported for unit tests, the CLI runs only when invoked directly. Add a test with every behavior change.
@@ -212,4 +213,4 @@ The engine is one importable file; pure helpers are exported for unit tests, the
 - [x] npm publish — `promptwheel@0.1.0` (the lead magnet, shipped 2026-06)
 - [ ] ACE-style learning + UCB work-discovery (**frozen** — gated on data + ≥1 paid engagement; see [docs/LEARNING.md](docs/LEARNING.md))
 
-> Status: **published v0.1.0** — the consulting lead magnet (npm `promptwheel@0.1.0`), all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.
+> Status: **published** (npm `promptwheel`, v0.2.0) — all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.
