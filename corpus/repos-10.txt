@@ -1,0 +1,10 @@
+vercel/ms
+lukeed/clsx
+sindresorhus/p-limit
+pmndrs/zustand
+colinhacks/zod
+honojs/hono
+vercel/swr
+shadcn-ui/taxonomy
+vercel/nextjs-subscription-payments
+t3-oss/create-t3-app
