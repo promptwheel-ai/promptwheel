@@ -152,7 +152,10 @@ function evaluate(m, beforeS, afterS, repeat) {
 
   // guards fail only on a TRUSTED regression (within-noise regressions are not failures)
   const ok = m.guard ? !regressed : true;
-  return { before, after, delta, status, ok, confidence, noise };
+  // a guarded pass-metric that never passes is protecting NOTHING (broken test cmd,
+  // missing script, failed install) — surface it instead of folding into a green verdict.
+  const inert = !!m.guard && dir === 'pass' && before === 0 && after === 0;
+  return { before, after, delta, status, ok, confidence, noise, ...(inert ? { inert: true } : {}) };
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +172,11 @@ const NON_SOURCE = [
   /(^|\/)test_[^/]*\.py$/i, /_test\.py$/i, /(^|\/)conftest\.py$/i,
   /\.snap$/i, /(^|\/)golden[^/]*$/i, /\.golden$/i,
   /(^|\/)(eval|grader|score)[^/]*\.[cm]?[jt]s$/i,
-  /(^|\/)(jest|vitest|playwright|cypress|karma|babel|eslint|tsconfig|pytest)[^/]*\.(json|[cm]?[jt]s|ya?ml|ini|cfg|toml)$/i,
+  // config files only — require a .config/.conf/.setup segment so PRODUCTION source that
+  // happens to be named after a tool (e.g. src/installers/eslint.ts) is NOT swept out of
+  // the source slice (a false sweep here can flag an honest win as GAMED).
+  /(^|\/)(jest|vitest|playwright|cypress|karma|babel|eslint|pytest)[^/]*\.(config|conf|setup)\.[^/]+$/i,
+  /(^|\/)tsconfig[^/]*\.json$/i,
   /(^|\/)\.(eslintrc|babelrc|prettierrc)[^/]*$/i,
   /(^|\/)(pytest\.ini|setup\.cfg|\.flake8|tox\.ini|eslint\.config\.[cm]?js)$/i,
 ];
@@ -439,7 +446,7 @@ const PRESETS = {
       { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.git --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
       { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|xit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.git --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
       { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa" --exclude-dir=node_modules --exclude-dir=.git --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
-      { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert" --exclude-dir=node_modules --exclude-dir=.git --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
+      { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert|\\bt\\.(is|deepEqual|throws|truthy|falsy|not|ok) ?\\(" --exclude-dir=node_modules --exclude-dir=.git --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
     ] },
 };
 
@@ -448,7 +455,11 @@ function detectTestCmd(repo) {
   if (has('go.mod')) return 'go test ./...';
   if (has('Cargo.toml')) return 'cargo test';
   if (has('pyproject.toml') || has('setup.py') || has('pytest.ini')) return 'pytest -q';
-  if (has('package.json')) return 'npm test --silent';
+  // only trust `npm test` when a test script actually exists — otherwise the metric can
+  // never pass and the gate would "protect" nothing (very common in Next.js app repos)
+  try {
+    if (JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts?.test) return 'npm test --silent';
+  } catch { /* no or unparsable package.json — fall through */ }
   return 'echo "set your test command in promptwheel.config.json" && false';
 }
 
@@ -537,6 +548,7 @@ function printHuman(r) {
     const tag = m.guard ? (m.ok ? 'guard✓' : 'GUARD✗') : 'info';
     const d = m.delta == null ? '—' : (m.delta > 0 ? `+${m.delta}` : `${m.delta}`);
     console.log(`  ${arrowFor(m)} ${m.name.padEnd(18)} ${String(m.before).padStart(8)} → ${String(m.after).padStart(8)}  (${d}, ${m.status}) [${tag}, ${m.confidence}]`);
+    if (m.inert) console.log('      ⚠ never passed at either ref — this guard is protecting nothing (check its command)');
     if (m.gamed === true) console.log(`      🚩 GAMED — ${m.gamingReason}`);
   }
   console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? '  — a guarded metric regressed (beyond noise)' : r.verdict === 'gamed' ? '  — a metric "improved" by editing the goalposts, not the source' : ''}\n`);
@@ -548,7 +560,7 @@ function renderMarkdown(r) {
   const sIcon = { improved: '🟢', regressed: '🔴', unchanged: '⚪', inconclusive: '🟡', unmeasurable: '⚫' };
   const rows = r.metrics.map((m) => {
     const d = m.delta == null ? '—' : (m.delta > 0 ? `+${m.delta}` : `${m.delta}`);
-    const status = m.gamed === true ? `🚩 gamed (${(m.retained * 100).toFixed(0)}% survives source-only)` : `${sIcon[m.status] || ''} ${m.status}`;
+    const status = m.gamed === true ? `🚩 gamed (${(m.retained * 100).toFixed(0)}% survives source-only)` : `${sIcon[m.status] || ''} ${m.status}${m.inert ? ' ⚠ never passes' : ''}`;
     return `| ${m.guard ? '🛡️ ' : ''}${m.name} | ${m.before} | ${m.after} | ${d} | ${status} | ${m.confidence} |`;
   }).join('\n');
   return [

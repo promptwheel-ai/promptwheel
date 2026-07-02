@@ -105,6 +105,12 @@ test('isNonSource: real production source is NOT non-source', () => {
   for (const p of ['src/app.js', 'lib/handler.ts', 'index.mjs', 'latest.js', 'mytest.js', 'contest.py'])
     assert.equal(isNonSource(p), false, p);
 });
+test('isNonSource: tool-named CONFIG is non-source; tool-named SOURCE is source', () => {
+  for (const p of ['jest.config.ts', 'eslint.config.mjs', 'playwright.config.js', 'karma.conf.js', 'jest.setup.ts', 'tsconfig.base.json'])
+    assert.equal(isNonSource(p), true, p);
+  for (const p of ['cli/src/installers/eslint.ts', 'src/vitest-helpers.ts', 'lib/babel.ts'])
+    assert.equal(isNonSource(p), false, p);  // corpus finding: production file named after a tool must stay in the source slice
+});
 test('gain: directional improvement', () => {
   assert.equal(gain({ direction: 'up' }, 5, 8), 3);
   assert.equal(gain({ direction: 'down' }, 8, 5), 3);
@@ -309,6 +315,29 @@ test('run --detect-gaming: gamingThreshold from config flips a half-retained win
   const r = mk(0.6);
   assert.equal(r.code, 2, r.out);                 // threshold 0.6: same change → GAMED
   assert.match(r.out, /GAMED/);
+});
+
+// ------------------------- corpus finding: the fake-green class (inert guard)
+test('run: a guarded pass metric that never passes warns loudly instead of silent green', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'false', extract: 'exit', direction: 'pass', guard: true }]);
+  writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'a.js'), '2\n'); commitAll(d, 'c1');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 0);                        // not a regression — but not silent either
+  assert.match(r.out, /never passed at either ref/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('init: package.json WITHOUT a test script gets the self-describing placeholder', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-nots-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'package.json'), '{"name":"x"}');   // no scripts.test
+  writeFileSync(join(d, 'a.js'), '1\n');
+  assert.equal(pw(d, ['init']).code, 0);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  assert.match(cfg.metrics.find((m) => m.name === 'tests_pass').cmd, /set your test command/);
+  rmSync(d, { recursive: true, force: true });
 });
 
 // ---------------------------------------- self-heal: orphaned worktrees from a crashed run

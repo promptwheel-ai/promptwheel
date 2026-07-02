@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 — 2026-07-02 — corpus-hardened
+
+Ran the gate against a 10-repo public corpus (Next.js apps, vitest/jest/ava TS libs, pnpm monorepos): 10/10 `init` correct, 10/10 scripted cheats caught, 0 hangs. Three failure classes found and fixed:
+
+- **Inert-guard warning (the fake-green class).** A guarded `pass` metric that is 0 at *both* refs (broken test command, missing script, failed install — 5/10 corpus repos) now prints `⚠ never passed at either ref — this guard is protecting nothing` in human and markdown output instead of folding silently into a green verdict.
+- **`init` writes the self-describing placeholder when `package.json` has no test script** (very common in app repos), instead of a `npm test` command that can never pass.
+- **`NON_SOURCE` no longer sweeps tool-named production source.** Config detection now requires a `.config`/`.conf`/`.setup` segment (plus `tsconfig*.json`), so a real source file like `src/installers/eslint.ts` stays in the source slice — previously an honest win there could be flagged GAMED.
+- Minor: the `assertions` tripwire now also counts ava-style `t.is()`/`t.deepEqual()` assertions.
+
 ## 0.2.0 — 2026-07-02 — the polished gate
 
 - **Default `init` config now includes the antihack tripwires** (`test_count`, `skipped_tests`, `suppressions`, `assertions`). The quiet cheat — weaken the suite while the target metric stays flat — previously PASSED under the default config because gaming detection only audits *wins*; now it fails the gate out of the box. "Catch your agent cheating" is true without a preset.
