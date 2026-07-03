@@ -3,7 +3,7 @@
 # Probes per repo: baseline (clean) · break (syntax error in source — does the gate SEE it?)
 #                  · cheat (per-language suppression — do tripwires fire?)
 set -u
-PW=${PW:-$(dirname $0)/../bin/promptwheel.mjs}
+PW=${PW:-$(cd "$(dirname "$0")/../bin" && pwd)/promptwheel.mjs}  # absolute: run_gate cd's into the repo before using it
 W=${W:-/tmp/pw-corpus-100}
 GO_BIN=${GO_BIN:-$(dirname $(command -v go 2>/dev/null) 2>/dev/null)}
 TB_CLONE=240; TB_INSTALL=480; TB_GATE=240
@@ -100,6 +100,6 @@ run_one() {
 
 if [ "${1:-}" = one ]; then run_one "$2" "$3"; exit 0; fi
 
-xargs -P 5 -n 2 bash "$0" one < $(dirname $0)/repos-100.txt
+xargs -P 5 -n 2 bash "$0" one < "${LIST:-$(dirname $0)/repos-100.txt}"
 cat $W/results/*.json > $W/corpus100-results.jsonl
 echo "DONE $(wc -l < $W/corpus100-results.jsonl) repos"
