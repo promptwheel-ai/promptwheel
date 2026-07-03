@@ -419,7 +419,7 @@ function revert(repo) {
 }
 
 // Phase-5 seed: turn the accumulated reward stream into signal. Thin on purpose —
-// this is the substrate a future ACE playbook / UCB work-discovery loop trains on,
+// this is the substrate a future outcome-curated playbook / UCB work-discovery loop trains on,
 // NOT that loop itself. Just honest aggregation, no model.
 function insights(argv) {
   const args = parseArgs(argv);

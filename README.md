@@ -187,7 +187,7 @@ The accumulated record of **which change-types move which metrics** is the asset
 - [docs/VISION.md](docs/VISION.md) — why we pivoted from orchestrator to outcome gate, the thesis, the moat, the open-core model.
 - [docs/ROADMAP.md](docs/ROADMAP.md) — the phased plan and the ship-now/stay-thin guardrails.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the engine works: schemas, extract modes, the trust/noise model.
-- [docs/LEARNING.md](docs/LEARNING.md) — the (research-gated) Phase-5 design: ACE-style playbook + UCB work-discovery.
+- [docs/LEARNING.md](docs/LEARNING.md) — the (research-gated) Phase-5 design: outcome-curated playbook (Agentic Context Engineering, Stanford 2510.04618) + UCB work-discovery.
 - [CLAUDE.md](CLAUDE.md) — the constitution for anyone (human or agent) working in this repo.
 
 ## Develop
@@ -211,6 +211,6 @@ The engine is one importable file; pure helpers are exported for unit tests, the
 - [x] `insights` — reward-stream aggregation (Phase-5 seed)
 - [x] `--detect-gaming` — reward-hack detection: re-prove the win from source edits alone + `antihack` preset
 - [x] npm publish — `promptwheel@0.1.0` (the lead magnet, shipped 2026-06)
-- [ ] ACE-style learning + UCB work-discovery (**frozen** — gated on data + ≥1 paid engagement; see [docs/LEARNING.md](docs/LEARNING.md))
+- [ ] outcome-curated learning + UCB work-discovery (**frozen** — gated on data + ≥1 paid engagement; see [docs/LEARNING.md](docs/LEARNING.md))
 
 > Status: **published** (npm `promptwheel`, v0.2.0) — all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.

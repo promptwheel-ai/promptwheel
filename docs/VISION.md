@@ -45,6 +45,6 @@ The lead sits on a foundation — **an outcome gate** (and the outcome gate for 
 
 ## The honest risk
 
-The window is **narrow and closing** — Anthropic's Auto-Memory + Routines are creeping toward this, and an ACE-grade native memory/outcome feature would shut it. Viability requires three things, in this order: **ship now**, **stay radically thin** (ride the platform), and **demonstrably compound** (prove the outcome record makes an agent loop measurably better).
+The window is **narrow and closing** — Anthropic's Auto-Memory + Routines are creeping toward this, and a native memory/outcome feature of that grade would shut it. Viability requires three things, in this order: **ship now**, **stay radically thin** (ride the platform), and **demonstrably compound** (prove the outcome record makes an agent loop measurably better).
 
 And the honest ceiling: this may be a **feature, not a company** — worth knowing up front. Its breakout into a standalone product depends on something outside our control: the **volume of *autonomous* agent merges** that actually need a deterministic, independent auditor. If that arrives, the neutral-auditor positioning + the accumulated outcome record are the wedge; if it doesn't, it stays a sharp, honest tool that does one thing well — a fine outcome to learn fast and cheaply.

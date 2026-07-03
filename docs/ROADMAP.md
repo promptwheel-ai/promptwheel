@@ -39,10 +39,10 @@ Sequenced so each phase ships something usable and feeds the next. The ordering 
 
 ## Phase 5 — learning & discovery 🌱 seeded (full build gated on data)
 
-> **FROZEN (DECISIONS D7):** beyond the shipped `insights` seed, no Phase 5/6 engine work until **≥1 paid engagement** OR the LEARNING.md data + compounding gate is met. Building selfcheck / attestation / ACE / UCB now is roadmap-costume procrastination.
+> **FROZEN (DECISIONS D7):** beyond the shipped `insights` seed, no Phase 5/6 engine work until **≥1 paid engagement** OR the LEARNING.md data + compounding gate is met. Building selfcheck / attestation / the outcome-curated playbook / UCB now is roadmap-costume procrastination.
 
 - ✅ **Seed shipped:** `promptwheel insights` aggregates the reward stream into per-metric lever scores (`improved/runs`) — the honest substrate, no model. Design in [`LEARNING.md`](LEARNING.md).
-- **Learning:** an ACE-style (Stanford 2510.04618) structured, deduped, decaying "what moves what" playbook keyed by subsystem/failure-mode — *driven by the Phase 2 outcome record*, not free-text in CLAUDE.md.
+- **Learning:** an outcome-curated (Agentic Context Engineering, Stanford 2510.04618) structured, deduped, decaying "what moves what" playbook keyed by subsystem/failure-mode — *driven by the Phase 2 outcome record*, not free-text in CLAUDE.md.
 - **Work-discovery:** UCB/bandit-scored proposal of the next high-value change, scored against the outcome record (the principled prioritization nobody publishes).
 - **Paid:** hosted cross-repo intelligence + dashboards over the aggregate.
 
