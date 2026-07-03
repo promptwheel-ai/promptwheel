@@ -573,7 +573,9 @@ function printHuman(r) {
     if (m.inert) console.log('      ⚠ never passed at either ref — this guard is protecting nothing (check its command)');
     if (m.gamed === true) console.log(`      🚩 GAMED — ${m.gamingReason}`);
   }
-  console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? '  — a guarded metric regressed (beyond noise)' : r.verdict === 'gamed' ? '  — a metric "improved" by editing the goalposts, not the source' : ''}\n`);
+  console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? '  — a guarded metric regressed (beyond noise)' : r.verdict === 'gamed' ? '  — a metric "improved" by editing the goalposts, not the source' : ''}`);
+  if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name) — `promptwheel guards` shows the effective set');
+  console.log('');
 }
 
 // PR-comment markdown (rendering lives in the tool so the GitHub Action stays thin)

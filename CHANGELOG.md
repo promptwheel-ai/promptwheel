@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3 — 2026-07-02 — usage replay
+
+Replayed 136 real merged commits from 22 live-suite corpus repos through the gate as a user would (`run --base <c>~1 --head <c>`, detection on, default config): **123 PASS · 9 FAIL · 1 GAMED · 3 TIMEOUT — a 7.5% block rate on presumptively-honest commits**, under the 10% ship bar, with most blocks semantically correct (commits that genuinely added suppressions/skips, suites red at one ref, one red→green achieved purely via test-file edits — flagged GAMED, accurately). One refinement from the data:
+
+- **FAIL verdicts now coach the intentional case** — one line pointing at loosening the specific guard locally (`guard:false` / named override) and at `promptwheel guards` — so a maintainer who *meant* to add that suppression knows the escape hatch instead of feeling gate-harassed.
+
 ## 0.2.2 — 2026-07-02 — 100-repo distribution sweep
 
 Ran the gate across ~100 public repos (TS/JS libs, Next.js apps, Python, Go, Rust; 5-way parallel, per-language installs, three probes each: clean baseline · syntax-break · suppression-cheat). Aggregate: 0 hangs, cheat caught 72/72 on JS/TS/Next/Python; every break-probe miss on live suites triaged to uncovered-file probe picks — except one real class, plus one pattern gap:
