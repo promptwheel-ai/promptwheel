@@ -1,8 +1,8 @@
-# Learning & discovery (Phase 5) — design, gated on data
+# Learning & discovery (Phase 5) — built (experimental), claims still gated on data
 
-> **FROZEN — not built** (only the `insights` seed exists). Gated on **≥ a few hundred real gated runs + proof of compounding**; unfreezes only on that data gate *or* ≥1 paid engagement (see DECISIONS **D7** / the Phase 5–6 freeze). The loop-native reframe does **not** unfreeze this.
+> **UNFROZEN 2026-07-02** — explicit founder decision overriding D7 (recorded in the decision log) after the 0.2.x hardening arc. **The build gate was lifted; the CLAIM gate was not:** `playbook` and `suggest` ship as experimental, evidence-gated views, and no public compounding claim is made until `bench/compounding-ab.mjs` shows the playbook arm beating the control arm on real usage data. If it never does, this layer is a documented dead-end and the code is cheap to delete.
 
-This is the *speculative* layer. It is deliberately **not built** beyond the `insights` seed command, because the research is clear that the value here is unproven until the reward stream (Phase 2) holds real per-repo data. Build order is non-negotiable: **outcomes first, learning second.**
+Built as a **pure deterministic view** over the append-only ledger: no curator state file, no model — the playbook re-derives from `.promptwheel/outcomes.jsonl` on every read, with decay applied at read time (half-life 20 runs). A key (`metric` · `metric @ subsystem` · `metric # label`) earns a rendered claim only past 3 weighted moved-observations; below that it is counted, not asserted. Cohorts (ci vs local) that disagree in sign are flagged, never averaged.
 
 ## What exists now (the seed)
 

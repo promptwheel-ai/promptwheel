@@ -37,14 +37,15 @@ Sequenced so each phase ships something usable and feeds the next. The ordering 
 ## Phase 4.7 — reward-hack detection ✅
 - **reward-hack detection ✅** (`--detect-gaming` + `antihack` preset + benchmark + `DETECTION-LAYERS`/`ENFORCEMENT`): re-prove each win from the agent's source slice alone — a win that only survives because it edited the test/grader/golden/config is `GAMED`. This is the lead/wedge built *on* the gate, and what turns the reward stream into a reward you **can't cheat** (a naive numeric reward gets gamed; this catches the gaming). Measured in [`bench/RESULTS.md`](../bench/RESULTS.md): in-scope recall 89%, 0 LLM tokens.
 
-## Phase 5 — learning & discovery 🌱 seeded (full build gated on data)
+## Phase 5 — learning & discovery ⚗️ built, experimental (claims gated on data)
 
-> **FROZEN (DECISIONS D7):** beyond the shipped `insights` seed, no Phase 5/6 engine work until **≥1 paid engagement** OR the LEARNING.md data + compounding gate is met. Building selfcheck / attestation / the outcome-curated playbook / UCB now is roadmap-costume procrastination.
+> **D7 overturned 2026-07-02 by explicit founder decision** (recorded in the decision log). Built as pure, evidence-gated views over the outcome record. **The claim gate survives the overturn:** no public "the loop learns" statement until `bench/compounding-ab.mjs` shows the playbook arm beating the control arm on real usage data.
 
-- ✅ **Seed shipped:** `promptwheel insights` aggregates the reward stream into per-metric lever scores (`improved/runs`) — the honest substrate, no model. Design in [`LEARNING.md`](LEARNING.md).
-- **Learning:** an outcome-curated (Agentic Context Engineering, Stanford 2510.04618) structured, deduped, decaying "what moves what" playbook keyed by subsystem/failure-mode — *driven by the Phase 2 outcome record*, not free-text in CLAUDE.md.
-- **Work-discovery:** UCB/bandit-scored proposal of the next high-value change, scored against the outcome record (the principled prioritization nobody publishes).
-- **Paid:** hosted cross-repo intelligence + dashboards over the aggregate.
+- ✅ `promptwheel insights` — raw per-metric counts (the honest substrate, no model).
+- ✅ **Learning:** `promptwheel playbook` — outcome-curated (Agentic Context Engineering, Stanford 2510.04618) decayed/deduped/evidence-gated claims keyed by `metric` / `@ subsystem` / `# label`, re-derived from the ledger on every read (no curator state). Design + constraints in [`LEARNING.md`](LEARNING.md).
+- ✅ **Work-discovery:** `promptwheel suggest` — UCB over the lever scores; proposes measured targets, never code advice.
+- ✅ **Acceptance harness:** `bench/compounding-ab.mjs` (self-tested) — the only path to a compounding claim.
+- **Paid (still gated on demand):** hosted cross-repo intelligence + dashboards over the aggregate.
 
 ## Phase 6 — credibility & evidence (harvested from the securitychecks/blockspool lineage, 2026-06-26)
 

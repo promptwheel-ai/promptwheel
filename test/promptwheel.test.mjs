@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extract, evaluate, median, spread, renderMarkdown, isNonSource, gain, judgeGaming } from '../bin/promptwheel.mjs';
+import { extract, evaluate, median, spread, renderMarkdown, isNonSource, gain, judgeGaming, foldOutcomes, betaMean, scoreKey } from '../bin/promptwheel.mjs';
 
 const ENGINE = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'promptwheel.mjs');
 
@@ -353,6 +353,78 @@ test('suppressions tripwire counts //nolint (go) and #![allow] (rust) too', () =
     .metrics.find((m) => m.name === 'suppressions').cmd;
   const n = execFileSync('bash', ['-c', cmd], { cwd: d, encoding: 'utf8' }).trim();
   assert.equal(n, '3');
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------- Phase 5: playbook fold/score math
+const runRow = (status, extra = {}) => ({ ts: '2026-07-02T00:00:00Z', cohort: 'local',
+  metrics: [{ name: 'lint', status, delta: status === 'improved' ? -2 : status === 'regressed' ? 2 : 0 }], ...extra });
+
+test('foldOutcomes: keys by metric, subsystem, and label; counts moved evidence', () => {
+  const runs = [
+    runRow('improved', { subsystems: ['src'], label: 'fix lint' }),
+    runRow('improved', { subsystems: ['src'] }),
+    runRow('regressed', { subsystems: ['docs'] }),
+    runRow('unchanged'),
+  ];
+  const byKey = Object.fromEntries(foldOutcomes(runs).map((k) => [k.key, k]));
+  assert.ok(byKey['lint'].imp > byKey['lint'].reg);
+  assert.ok(byKey['lint @ src']);          // subsystem arm exists
+  assert.ok(byKey['lint # fix lint']);     // label arm exists
+  assert.equal(byKey['lint'].n, 4);
+  assert.ok(byKey['lint'].moved < byKey['lint'].w); // unchanged run adds weight but not movement
+});
+
+test('foldOutcomes: decay — recent outcomes outweigh old ones (order flips the verdict)', () => {
+  const oldGoodNewBad = [...Array(30).fill(0).map(() => runRow('improved')), ...Array(30).fill(0).map(() => runRow('regressed'))];
+  const oldBadNewGood = [...Array(30).fill(0).map(() => runRow('regressed')), ...Array(30).fill(0).map(() => runRow('improved'))];
+  const p1 = betaMean(foldOutcomes(oldGoodNewBad)[0].imp, foldOutcomes(oldGoodNewBad)[0].reg);
+  const p2 = betaMean(foldOutcomes(oldBadNewGood)[0].imp, foldOutcomes(oldBadNewGood)[0].reg);
+  assert.ok(p1 < 0.5, `recent regressions must dominate (p=${p1})`);
+  assert.ok(p2 > 0.5, `recent improvements must dominate (p=${p2})`);
+});
+
+test('betaMean: smoothed toward 0.5 at low evidence', () => {
+  assert.equal(betaMean(0, 0), 0.5);
+  assert.ok(betaMean(1, 0) < 1 && betaMean(1, 0) > 0.5);
+});
+
+test('scoreKey: UCB gives unexplored arms a bonus over equally-levered explored ones', () => {
+  const explored = { imp: 8, reg: 2, moved: 10, w: 20, effects: [] };
+  const fresh = { imp: 0.8, reg: 0.2, moved: 1, w: 2, effects: [] };
+  const s1 = scoreKey(explored, 100), s2 = scoreKey(fresh, 100);
+  assert.ok(s2.ucb - s2.lever > s1.ucb - s1.lever, 'exploration bonus must shrink with evidence');
+});
+
+// ------------------------------------- Phase 5: commands + record enrichment end-to-end
+test('record carries cohort + subsystems; playbook and suggest run over a real ledger', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, '.gitignore'), '');                      // record is committed-visible
+  writeFileSync(join(d, 'src'), ''); rmSync(join(d, 'src'));     // noop
+  mkdirSync(join(d, 'app'), { recursive: true });
+  writeFileSync(join(d, 'app/x.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app/x.js'), 'a\nb\n'); commitAll(d, 'improve');
+  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--label', 'remove todos']);
+  const row = JSON.parse(readFileSync(join(d, '.promptwheel', 'outcomes.jsonl'), 'utf8').trim().split('\n').pop());
+  assert.equal(row.cohort, process.env.CI ? 'ci' : 'local');
+  assert.deepEqual(row.subsystems, ['app']);
+  assert.equal(row.label, 'remove todos');
+  // thin ledger: playbook renders the honest "nothing earned yet" path, exit 0
+  let r = pw(d, ['playbook']);
+  assert.equal(r.code, 0); assert.match(r.out, /Nothing has earned a claim yet|Earned playbook/);
+  // fatten the ledger past MIN_MOVED: two more real improvements
+  writeFileSync(join(d, 'app/x.js'), 'a\nb // TODO\nc // TODO\n'); commitAll(d, 'regress2');
+  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  writeFileSync(join(d, 'app/x.js'), 'a\nb\nc\n'); commitAll(d, 'improve2');
+  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  writeFileSync(join(d, 'app/x.js'), 'a // TODO\n'); commitAll(d, 'regress3'); // movement, not a no-op
+  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  r = pw(d, ['playbook']);
+  assert.equal(r.code, 0); assert.match(r.out, /todos/);         // the earned claim renders
+  r = pw(d, ['suggest', '--json']);
+  assert.equal(r.code, 0);
+  const arms = JSON.parse(r.out).arms;
+  assert.ok(arms.length >= 1 && typeof arms[0].ucb === 'number');
   rmSync(d, { recursive: true, force: true });
 });
 

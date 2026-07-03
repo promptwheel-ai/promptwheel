@@ -72,7 +72,13 @@ npx promptwheel improve --attempt "claude -p 'reduce lint errors'"
 
 # what's actually responding in this repo? (aggregates .promptwheel/outcomes.jsonl)
 npx promptwheel insights
+
+# EXPERIMENTAL (Phase 5): the earned playbook + where the next attempt should go
+npx promptwheel playbook                  # decayed, evidence-gated claims distilled from the record
+npx promptwheel suggest                   # UCB over the lever scores — proven levers vs under-explored arms
 ```
+
+**The consequence ledger.** git records *what changed*; PromptWheel records *what the change did* — same trust model (local, deterministic, append-only, no server, no LLM in the verdict). `playbook` and `suggest` are pure re-derivations over that ledger: every rendered line was measured by the gate, decays unless re-earned, and stays hidden below an evidence threshold. No compounding claim is made for them until the A/B acceptance test (`bench/compounding-ab.mjs`) passes on real usage data.
 
 **Footprint:** it never touches your working tree — every measurement runs in a throwaway git worktree **in your system temp dir** (one at a time; `node_modules` is symlinked, not copied), removed when the run finishes. The only thing PromptWheel writes to your repo is the optional `.promptwheel/outcomes.jsonl` record — commit it to build the per-repo "what moves what" history, or `.gitignore` it (`--no-record` to skip entirely). A hard-killed run can't leave clutter behind: the next run **self-heals** any orphaned worktree (stale registry entry + abandoned temp checkout).
 
@@ -211,6 +217,6 @@ The engine is one importable file; pure helpers are exported for unit tests, the
 - [x] `insights` — reward-stream aggregation (Phase-5 seed)
 - [x] `--detect-gaming` — reward-hack detection: re-prove the win from source edits alone + `antihack` preset
 - [x] npm publish — `promptwheel@0.1.0` (the lead magnet, shipped 2026-06)
-- [ ] outcome-curated learning + UCB work-discovery (**frozen** — gated on data + ≥1 paid engagement; see [docs/LEARNING.md](docs/LEARNING.md))
+- [x] outcome-curated learning + UCB work-discovery — `playbook` + `suggest` + the compounding A/B harness (**experimental**; compounding *claims* stay gated on real-data proof — see [docs/LEARNING.md](docs/LEARNING.md))
 
 > Status: **published** (npm `promptwheel`, v0.2.0) — all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.

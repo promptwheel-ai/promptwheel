@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — 2026-07-02 — Phase 5, experimental (D7 overturned by explicit founder decision)
+
+The learning layer, built under the constraints that survive the unfreeze — pure view, evidence-gated, claim-gated:
+
+- **`promptwheel playbook`** — the outcome-curated playbook (adapting Agentic Context Engineering, Stanford 2510.04618): decayed (half-life 20 runs), Beta-smoothed, evidence-gated claims re-derived from `.promptwheel/outcomes.jsonl` on every read. No curator state, no model. Keys: `metric`, `metric @ subsystem`, `metric # label`; cohorts that disagree are flagged, not averaged. `--json` / markdown output for agent consumption.
+- **`promptwheel suggest`** — UCB work-discovery over the lever scores: proposes where the next attempt should go (measured targets only, never code advice). Thin records are labeled as such.
+- **Record enrichment** — every outcome row now carries `cohort` (ci/local), `subsystems` (top source dirs of the diff), and `label` (`--label`, or the `improve` attempt command) — the keys the playbook learns over.
+- **`bench/compounding-ab.mjs`** — the acceptance harness: playbook arm vs control arm through `improve`, judged by the gate. Self-test included. **The claim gate: no public compounding statement until this passes on real usage data.**
+
 ## 0.2.3 — 2026-07-02 — usage replay
 
 Replayed 136 real merged commits from 22 live-suite corpus repos through the gate as a user would (`run --base <c>~1 --head <c>`, detection on, default config): **123 PASS · 9 FAIL · 1 GAMED · 3 TIMEOUT — a 7.5% block rate on presumptively-honest commits**, under the 10% ship bar, with most blocks semantically correct (commits that genuinely added suppressions/skips, suites red at one ref, one red→green achieved purely via test-file edits — flagged GAMED, accurately). One refinement from the data:
