@@ -318,13 +318,51 @@ test('run --detect-gaming: gamingThreshold from config flips a half-retained win
 });
 
 // ------------------------- corpus finding: the fake-green class (inert guard)
-test('run: a guarded pass metric that never passes warns loudly instead of silent green', () => {
+test('run: a guarded pass metric that never passes → INCONCLUSIVE (exit 3), never silent green', () => {
   const d = tmpRepo([{ name: 'tests_pass', cmd: 'false', extract: 'exit', direction: 'pass', guard: true }]);
   writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
   writeFileSync(join(d, 'a.js'), '2\n'); commitAll(d, 'c1');
   const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
-  assert.equal(r.code, 0);                        // not a regression — but not silent either
-  assert.match(r.out, /never passed at either ref/);
+  assert.equal(r.code, 3);                        // an inert guard verifies nothing — not a pass, not a regression
+  assert.match(r.out, /INCONCLUSIVE/);
+  assert.match(r.out, /never passed at either ref/);   // still names the specific broken guard
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ------------------- generalized measurement env: linkDirs + env({wt}) + per-ref setup
+test('measure env: linkDirs symlink + env ({wt} substituted) + setup all reach the worktree', () => {
+  const d = tmpRepo([{ name: 'x', cmd: 'true', extract: 'exit', direction: 'pass', guard: false }]);
+  mkdirSync(join(d, 'deps')); writeFileSync(join(d, 'deps', 'marker.txt'), '5\n'); // uncommitted dep dir, must be symlinked in
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({
+    linkNodeModules: false,
+    linkDirs: ['deps'],
+    env: { STAMP: '7', WT: '{wt}' },
+    setup: 'echo $STAMP > built.txt; [ -d "$WT/deps" ] && echo 1 > wtok.txt',
+    metrics: [
+      { name: 'dep',   cmd: 'cat deps/marker.txt', extract: 'number', direction: 'up', guard: false },
+      { name: 'built', cmd: 'cat built.txt',        extract: 'number', direction: 'up', guard: false },
+      { name: 'wtok',  cmd: 'cat wtok.txt',         extract: 'number', direction: 'up', guard: false },
+    ],
+  }));
+  writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'a.js'), '2\n'); commitAll(d, 'head');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  const after = (n) => JSON.parse(r.out).metrics.find((m) => m.name === n).after;
+  assert.equal(after('dep'), 5);    // linkDirs symlinked deps/ into the worktree
+  assert.equal(after('built'), 7);  // setup ran in the worktree; env STAMP reached it
+  assert.equal(after('wtok'), 1);   // {wt} was substituted to the real worktree path
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('init: a Python stack auto-writes venv linkDirs + PYTHONPATH (so tests_pass is not structurally inert)', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-pyinit-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'pyproject.toml'), '[project]\nname = "x"\n');
+  assert.equal(pw(d, ['init']).code, 0);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  assert.deepEqual(cfg.linkDirs, ['.venv']);
+  assert.match(cfg.env.PYTHONPATH, /\{wt\}/);
   rmSync(d, { recursive: true, force: true });
 });
 

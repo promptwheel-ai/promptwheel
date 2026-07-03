@@ -51,12 +51,12 @@ function resolveConfig(p, repo, label, seen) {
       if (!existsSync(bp)) { console.error(`extends target not found: ${ref} (from ${relOf(repo, p)})`); process.exit(2); }
       const base = resolveConfig(bp, repo, relOf(repo, bp), seen);
       for (const m of base.metrics) byName.set(m.name, m);
-      for (const k of ['repeat', 'linkNodeModules', 'record', 'gamingThreshold']) if (base[k] !== undefined) scalars[k] = base[k];
+      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold']) if (base[k] !== undefined) scalars[k] = base[k];
     }
     for (const m of (cfg.metrics || [])) {
       byName.set(m.name, { ...m, __src: label, __override: byName.has(m.name) });
     }
-    for (const k of ['repeat', 'linkNodeModules', 'record', 'gamingThreshold']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
+    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
     return { ...scalars, metrics: [...byName.values()] };
   } finally {
     seen.delete(abs); // only ACTIVE ancestors are a cycle — a diamond (a base reached two ways) is fine
@@ -82,10 +82,10 @@ function resolveBase(repo, base) {
   return git(['rev-parse', 'HEAD~1'], repo);
 }
 
-function runMetric(cwd, m) {
+function runMetric(cwd, m, env) {
   let stdout = '', code = 0;
   try {
-    stdout = execSync(m.cmd, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: (m.timeoutSec ?? 300) * 1000 });
+    stdout = execSync(m.cmd, { cwd, env: env || process.env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: (m.timeoutSec ?? 300) * 1000 });
   } catch (e) { code = e.status ?? 1; stdout = `${e.stdout || ''}${e.stderr || ''}`; }
   return extract(stdout, code, m.extract);
 }
@@ -103,18 +103,41 @@ function extract(stdout, code, mode) {
   return nums ? Number(nums[nums.length - 1]) : null;
 }
 
+// bridge a measurement worktree to the deps that live OUTSIDE git (node_modules, .venv, target,
+// …) and the env a test command needs. Returns the env for runMetric. Generalizes the old
+// node_modules-only symlink: `linkDirs` says what to link (default ['node_modules']; back-compat
+// with linkNodeModules:false → link nothing); `env` sets vars ({wt} → the worktree path, so a
+// Python run can put the measured ref FIRST on PYTHONPATH). Ecosystem knowledge lives in config,
+// not here — the engine stays ecosystem-agnostic.
+function bridgeEnv(repo, wt, cfg) {
+  const linkDirs = Array.isArray(cfg.linkDirs) ? cfg.linkDirs : (cfg.linkNodeModules === false ? [] : ['node_modules']);
+  for (const d of linkDirs) {
+    if (existsSync(join(repo, d)) && !existsSync(join(wt, d))) {
+      try { symlinkSync(join(repo, d), join(wt, d)); } catch { /* best effort */ }
+    }
+  }
+  if (!cfg.env) return process.env;
+  return { ...process.env, ...Object.fromEntries(Object.entries(cfg.env).map(([k, v]) => [k, String(v).replaceAll('{wt}', wt)])) };
+}
+// an optional per-ref build/install (e.g. `npm run build`, `pip install -e .`). Best-effort: a
+// failed setup just leaves the metric inert → INCONCLUSIVE (never a false green). Run by the
+// caller AFTER any source patch, so it builds the tree actually being measured.
+function runSetup(wt, cfg, env) {
+  if (!cfg.setup) return;
+  try { execSync(cfg.setup, { cwd: wt, env, stdio: 'ignore', timeout: 300_000 }); } catch { /* inert → inconclusive */ }
+}
+
 // measure every metric `repeat` times at a ref, in a throwaway worktree (never touches your tree)
-function measureAt(repo, ref, metrics, linkNodeModules, repeat) {
+function measureAt(repo, ref, cfg, repeat) {
   const wt = mkdtempSync(join(tmpdir(), 'promptwheel-'));
   git(['worktree', 'add', '--quiet', '--detach', wt, ref], repo);
   try {
-    if (linkNodeModules && existsSync(join(repo, 'node_modules')) && !existsSync(join(wt, 'node_modules'))) {
-      try { symlinkSync(join(repo, 'node_modules'), join(wt, 'node_modules')); } catch { /* best effort */ }
-    }
+    const env = bridgeEnv(repo, wt, cfg);
+    runSetup(wt, cfg, env);
     const out = {};
-    for (const m of metrics) {
+    for (const m of cfg.metrics) {
       const samples = [];
-      for (let i = 0; i < repeat; i++) samples.push(runMetric(wt, m));
+      for (let i = 0; i < repeat; i++) samples.push(runMetric(wt, m, env));
       out[m.name] = samples;
     }
     return out;
@@ -201,23 +224,22 @@ function subsystemsOf(repo, base, head) {
 }
 
 // measure `metric` in a worktree at `base` with ONLY the source slice of base→head applied.
-function measureSourceOnly(repo, base, head, metric, linkNM, repeat) {
+function measureSourceOnly(repo, base, head, metric, cfg, repeat) {
   const { source } = changedSourcePaths(repo, base, head);
   if (!source.length) return { samples: [], hadSourceChange: false }; // a "win" with zero source edits = goalposts moved
   const wt = mkdtempSync(join(tmpdir(), 'promptwheel-src-'));
   git(['worktree', 'add', '--quiet', '--detach', wt, base], repo);
   try {
-    if (linkNM && existsSync(join(repo, 'node_modules')) && !existsSync(join(wt, 'node_modules'))) {
-      try { symlinkSync(join(repo, 'node_modules'), join(wt, 'node_modules')); } catch { /* */ }
-    }
+    const env = bridgeEnv(repo, wt, cfg);
     const patch = git(['diff', base, head, '--', ...source], repo);
     if (patch.trim()) {
       const tryApply = (extra) => { execFileSync('git', ['apply', '--whitespace=nowarn', ...extra], { cwd: wt, input: patch + '\n', encoding: 'utf8' }); };
       try { tryApply(['--3way']); }
       catch { try { tryApply([]); } catch { return { samples: [], hadSourceChange: true, applyFailed: true }; } }
     }
+    runSetup(wt, cfg, env); // build the patched tree, so a build-gated metric measures the source edit
     const samples = [];
-    for (let i = 0; i < repeat; i++) samples.push(runMetric(wt, metric));
+    for (let i = 0; i < repeat; i++) samples.push(runMetric(wt, metric, env));
     return { samples, hadSourceChange: true };
   } finally {
     try { git(['worktree', 'remove', '--force', wt], repo); } catch { rmSync(wt, { recursive: true, force: true }); }
@@ -326,7 +348,6 @@ function gate(repo, opts) {
   warnEditableInstall(repo);
   const cfg = loadConfig(repo);
   const repeat = Math.max(1, opts.repeat ?? cfg.repeat ?? 1);
-  const linkNM = cfg.linkNodeModules !== false;
 
   let base, head;
   if (opts.working) {
@@ -342,8 +363,8 @@ function gate(repo, opts) {
     head = opts.head || 'HEAD';
   }
 
-  const before = measureAt(repo, base, cfg.metrics, linkNM, repeat);
-  const after = measureAt(repo, head, cfg.metrics, linkNM, repeat);
+  const before = measureAt(repo, base, cfg, repeat);
+  const after = measureAt(repo, head, cfg, repeat);
   const metrics = cfg.metrics.map((m) => {
     const ev = evaluate(m, before[m.name], after[m.name], repeat);
     return { name: m.name, direction: m.direction || 'up', guard: !!m.guard, ...ev };
@@ -354,13 +375,16 @@ function gate(repo, opts) {
       if (m.status !== 'improved') continue;
       const cm = cfg.metrics.find((c) => c.name === m.name);
       if (cm.gamingCheck === false) continue;   // tripwire / test-side guards aren't re-proven from source (their gain legitimately lives in test files)
-      const j = judgeGaming(m, measureSourceOnly(repo, base, head, cm, linkNM, repeat), cm.gamingThreshold ?? cfg.gamingThreshold ?? 0.5);
+      const j = judgeGaming(m, measureSourceOnly(repo, base, head, cm, cfg, repeat), cm.gamingThreshold ?? cfg.gamingThreshold ?? 0.5);
       m.gamed = j.gamed; m.sourceOnly = j.sourceOnly; m.retained = j.retained; m.gamingReason = j.reason;
     }
   }
   const failed = metrics.some((m) => m.guard && !m.ok);
   const gamed = metrics.some((m) => m.gamed === true);
-  const verdict = failed ? 'fail' : gamed ? 'gamed' : 'pass';
+  // a guard that never runs (inert: a pass/fail metric stuck at 0 across both refs) verifies
+  // nothing — don't launder that into a green PASS. The honest verdict is "couldn't measure".
+  const inconclusive = !failed && !gamed && metrics.some((m) => m.inert);
+  const verdict = failed ? 'fail' : gamed ? 'gamed' : inconclusive ? 'inconclusive' : 'pass';
   const report = {
     base: short(repo, base), head: short(repo, head), repeat, mode: opts.working ? 'working' : 'refs',
     // learning-substrate fields (Phase 5): cohort segments reliability by environment,
@@ -381,7 +405,7 @@ function run(argv) {
   if (args.json) console.log(JSON.stringify(report, null, 2));
   else if (args.markdown) console.log(renderMarkdown(report));
   else printHuman(report);
-  process.exit(report.verdict === 'pass' ? 0 : report.verdict === 'gamed' ? 2 : 1);
+  process.exit(report.verdict === 'pass' ? 0 : report.verdict === 'gamed' ? 2 : report.verdict === 'inconclusive' ? 3 : 1);
 }
 
 // persisted record: append every gated run to a per-repo outcome record (best-effort, never fails the gate)
@@ -410,10 +434,11 @@ function improve(argv) {
   const improvedNames = report.metrics.filter((m) => m.status === 'improved').map((m) => m.name);
 
   // result + exit code express loop progress so `while improve; do :; done` converges:
-  //   0 = kept a real win · 1 = guarded regression (reverted) · 3 = plateau/no-op (reverted)
+  //   0 = kept a real win · 1 = guarded regression (reverted) · 3 = plateau/no-op OR inconclusive (reverted)
   let result, exit, note;
   if (report.verdict === 'fail') { result = 'regression'; exit = 1; revert(repo); note = '✗ guarded regression — reverted'; }
   else if (report.verdict === 'gamed') { result = 'gamed'; exit = 1; revert(repo); note = '🚩 gamed — a metric "improved" by editing tests/config, not source — reverted'; }
+  else if (report.verdict === 'inconclusive') { result = 'inconclusive'; exit = 3; revert(repo); note = '≈ inconclusive — a guard measured nothing (inert); reverted'; }
   else if (noChange || improvedNames.length === 0) {
     result = 'plateau'; exit = 3; revert(repo);
     note = noChange ? '= no metric moved — reverted' : '= nothing improved beyond noise — reverted';
@@ -639,13 +664,24 @@ function detectTestCmd(repo) {
   const has = (f) => existsSync(join(repo, f));
   if (has('go.mod')) return 'go test ./...';
   if (has('Cargo.toml')) return 'cargo test';
-  if (has('pyproject.toml') || has('setup.py') || has('pytest.ini')) return 'pytest -q';
+  if (has('pyproject.toml') || has('setup.py') || has('pytest.ini')) return has('.venv/bin/pytest') ? '.venv/bin/pytest -q' : 'pytest -q';
   // only trust `npm test` when a test script actually exists — otherwise the metric can
   // never pass and the gate would "protect" nothing (very common in Next.js app repos)
   try {
     if (JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts?.test) return 'npm test --silent';
   } catch { /* no or unparsable package.json — fall through */ }
   return 'echo "set your test command in promptwheel.config.json" && false';
+}
+
+// deps that live outside git + the env a test needs, defaulted per stack. init writes these into
+// config; the measurement bridge (bridgeEnv/runSetup) consumes them — keeps the engine agnostic.
+function detectEnv(repo) {
+  const has = (f) => existsSync(join(repo, f));
+  // Python: link the venv (3rd-party deps) and put the worktree src FIRST on PYTHONPATH, so imports
+  // resolve the MEASURED ref instead of an editable install pointing back at your original checkout.
+  if (has('pyproject.toml') || has('setup.py') || has('pytest.ini')) return { linkDirs: ['.venv'], env: { PYTHONPATH: '{wt}/src:{wt}' } }; // src/ AND flat layouts; worktree src wins over an editable install
+  if (has('Cargo.toml')) return { linkDirs: ['target'] };
+  return {};
 }
 
 // only offer the lint metric where eslint actually exists — otherwise it reads 0 forever
@@ -690,7 +726,9 @@ function init(argv) {
     if (lint) metrics = [...metrics, { name: 'lint_errors', cmd: LINT_CMD, extract: 'number', direction: 'down', guard: false }];
     note = `tests + antihack tripwires${lint ? ' + lint' : ''} (detected: ${testCmd})`;
   }
-  writeFileSync(out, JSON.stringify({ repeat: 1, metrics }, null, 2) + '\n');
+  const envCfg = presetName ? {} : detectEnv(repo);
+  if (envCfg.linkDirs) note += ` · linking ${envCfg.linkDirs.join(', ')}`;
+  writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, metrics }, null, 2) + '\n');
   console.log(`✓ wrote promptwheel.config.json — ${note}`);
   console.log('\n  next:  promptwheel run --working   # gate your uncommitted changes');
   console.log('         promptwheel init --list     # other presets (llm-eval, bundle-size, …)');
@@ -736,14 +774,14 @@ function printHuman(r) {
     if (m.inert) console.log('      ⚠ never passed at either ref — this guard is protecting nothing (check its command)');
     if (m.gamed === true) console.log(`      🚩 GAMED — ${m.gamingReason}`);
   }
-  console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? '  — a guarded metric regressed (beyond noise)' : r.verdict === 'gamed' ? '  — a metric "improved" by editing the goalposts, not the source' : ''}`);
+  console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? '  — a guarded metric regressed (beyond noise)' : r.verdict === 'gamed' ? '  — a metric "improved" by editing the goalposts, not the source' : r.verdict === 'inconclusive' ? '  — a guard is inert (measured nothing); a pass cannot be certified' : ''}`);
   if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name) — `promptwheel guards` shows the effective set');
   console.log('');
 }
 
 // PR-comment markdown (rendering lives in the tool so the GitHub Action stays thin)
 function renderMarkdown(r) {
-  const icon = r.verdict === 'pass' ? '✅' : r.verdict === 'gamed' ? '🚩' : '❌';
+  const icon = r.verdict === 'pass' ? '✅' : r.verdict === 'gamed' ? '🚩' : r.verdict === 'inconclusive' ? '🟡' : '❌';
   const sIcon = { improved: '🟢', regressed: '🔴', unchanged: '⚪', inconclusive: '🟡', unmeasurable: '⚫' };
   const rows = r.metrics.map((m) => {
     const d = m.delta == null ? '—' : (m.delta > 0 ? `+${m.delta}` : `${m.delta}`);
@@ -759,7 +797,7 @@ function renderMarkdown(r) {
     '|---|--:|--:|--:|---|---|',
     rows,
     '',
-    r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader — not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? '> ❌ A 🛡️ guarded metric regressed beyond the noise band.' : '> ✅ No guarded metric regressed.',
+    r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader — not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? '> ❌ A 🛡️ guarded metric regressed beyond the noise band.' : r.verdict === 'inconclusive' ? '> 🟡 A 🛡️ guarded check is **inert** — it never runs, so nothing was actually verified. Fix its command before trusting a pass.' : '> ✅ No guarded metric regressed.',
     '',
     '<sub>🛡️ = guard · _prove every change moved a metric_ · [PromptWheel](https://github.com/promptwheel-ai/promptwheel)</sub>',
   ].join('\n');
