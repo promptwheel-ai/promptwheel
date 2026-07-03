@@ -365,7 +365,7 @@ function gate(repo, opts) {
     base: short(repo, base), head: short(repo, head), repeat, mode: opts.working ? 'working' : 'refs',
     // learning-substrate fields (Phase 5): cohort segments reliability by environment,
     // label attributes a change-type, subsystems fingerprint WHERE the change landed.
-    cohort: process.env.CI ? 'ci' : 'local',
+    cohort: opts.cohort ?? (process.env.CI ? 'ci' : 'local'),
     ...(opts.label ? { label: opts.label } : {}),
     subsystems: subsystemsOf(repo, base, head),
     verdict, metrics,
@@ -582,6 +582,34 @@ function suggest(argv) {
   console.log('\n  score = lever + exploration bonus — high scores are either proven levers or under-explored arms.\n');
 }
 
+// backfill — seed the ledger from git history: replay past commits through the CURRENT
+// metrics (LEARNING.md harvest path 1). Deterministic, no LLM. Rows are cohort-tagged
+// 'backfill' — historical human commits are NOT live agent-loop evidence; the cohort
+// machinery segments them and flags disagreement rather than averaging it away. The
+// conventional-commit type (fix/feat/refactor/…) becomes the change-type label for free.
+function backfill(argv) {
+  const args = parseArgs(argv);
+  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
+  const listArgs = ['rev-list', '--no-merges'];
+  if (args.since) listArgs.push(`${args.since}..HEAD`); else listArgs.push('-n', String(args.n ?? 30), 'HEAD');
+  const commits = git(listArgs, repo).split('\n').filter(Boolean).reverse(); // oldest first → ledger stays chronological, decay stays honest
+  if (!commits.length) { console.error('no commits to backfill'); process.exit(2); }
+  const seen = new Set(readLedger(repo).filter((r) => r.cohort === 'backfill').map((r) => r.head));
+  let done = 0, skipped = 0;
+  console.log(`\nbackfilling ${commits.length} commits through the current metrics (gaming detection ${args.dgExplicit && args.detectGaming ? 'ON' : 'off — pass --detect-gaming to audit history too'})\n`);
+  for (const c of commits) {
+    try { git(['rev-parse', `${c}~1`], repo); } catch { skipped++; continue; }        // root commit
+    if (seen.has(short(repo, c))) { skipped++; continue; }                            // already recorded
+    const subj = git(['log', '-1', '--format=%s', c], repo);
+    const type = /^(feat|fix|docs|test|chore|refactor|perf|ci|build|style)\b/i.exec(subj)?.[1]?.toLowerCase();
+    const report = gate(repo, { base: `${c}~1`, head: c, repeat: args.repeat, detectGaming: args.dgExplicit ? args.detectGaming : false, label: type, cohort: 'backfill' });
+    console.log(`  ${report.head} ${report.verdict.toUpperCase().padEnd(6)} ${type ? `#${type}`.padEnd(10) : ''.padEnd(10)} ${subj.slice(0, 56)}`);
+    done++;
+  }
+  console.log(`\n  backfilled ${done}${skipped ? ` (skipped ${skipped}: root or already recorded)` : ''} — old commits that no longer build record as unmeasurable, never faked.`);
+  console.log('  next:  promptwheel playbook   ·   promptwheel suggest\n');
+}
+
 // ---------------------------------------------------------------------------
 // init — write a starter config so a newcomer isn't staring at a blank page
 // ---------------------------------------------------------------------------
@@ -745,8 +773,10 @@ function parseArgs(argv) {
     else if (argv[i] === '--repeat') a.repeat = parseInt(argv[++i], 10);
     else if (argv[i] === '--working') a.working = true;
     else if (argv[i] === '--no-record') a.noRecord = true;
-    else if (argv[i] === '--detect-gaming' || argv[i] === '--antihack') a.detectGaming = true;
-    else if (argv[i] === '--no-detect-gaming' || argv[i] === '--no-antihack') a.detectGaming = false;
+    else if (argv[i] === '--detect-gaming' || argv[i] === '--antihack') { a.detectGaming = true; a.dgExplicit = true; }
+    else if (argv[i] === '--no-detect-gaming' || argv[i] === '--no-antihack') { a.detectGaming = false; a.dgExplicit = true; }
+    else if (argv[i] === '--since') a.since = argv[++i];
+    else if (argv[i] === '-n' || argv[i] === '--limit') a.n = parseInt(argv[++i], 10);
     else if (argv[i] === '--attempt') a.attempt = argv[++i];
     else if (argv[i] === '--label') a.label = argv[++i];
     else if (argv[i] === '--json') a.json = true;
@@ -766,6 +796,7 @@ function main() {
   else if (cmd === 'insights') insights(rest);
   else if (cmd === 'playbook') playbook(rest);
   else if (cmd === 'suggest') suggest(rest);
+  else if (cmd === 'backfill') backfill(rest);
   else if (cmd === 'init') init(rest);
   else if (cmd === 'guards') guards(rest);
   else {
@@ -782,6 +813,7 @@ function main() {
       '  promptwheel insights                         which metrics actually respond (raw counts)',
       '  promptwheel playbook [--json]                the earned playbook: decayed, evidence-gated claims distilled from the record',
       '  promptwheel suggest [--json]                 UCB work-discovery: where the next attempt should go (experimental)',
+      '  promptwheel backfill [-n N | --since <ref>]  seed the ledger from git history (cohort-tagged; commit types become labels)',
       '  promptwheel guards                           show the effective guardrails (incl. inherited) + flag record',
       '',
       'Loop it:  while promptwheel improve --attempt "$AGENT"; do :; done   # stops on plateau/regression',

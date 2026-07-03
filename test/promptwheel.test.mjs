@@ -428,6 +428,29 @@ test('record carries cohort + subsystems; playbook and suggest run over a real l
   rmSync(d, { recursive: true, force: true });
 });
 
+// ---------------------------------------------------- Phase 5: backfill from git history
+test('backfill: seeds the ledger chronologically, cohort-tagged, commit types as labels, idempotent', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'x.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'x.js'), 'a\nb // TODO\n'); commitAll(d, 'fix: remove a todo');
+  writeFileSync(join(d, 'x.js'), 'a\nb // TODO\nc // TODO\n'); commitAll(d, 'feat: add thing');
+  writeFileSync(join(d, 'x.js'), 'a\nb\nc\n'); commitAll(d, 'refactor: clean up');
+  writeFileSync(join(d, 'x.js'), 'a // TODO\nb\nc\n'); commitAll(d, 'test: reintroduce one'); // 4th moved row clears the decayed evidence threshold
+  let r = pw(d, ['backfill', '-n', '10']);
+  assert.equal(r.code, 0, r.out);
+  const rows = readFileSync(join(d, '.promptwheel', 'outcomes.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(rows.length, 4);                                 // root commit skipped
+  assert.ok(rows.every((x) => x.cohort === 'backfill'));
+  assert.deepEqual(rows.map((x) => x.label), ['fix', 'feat', 'refactor', 'test']);  // oldest-first, typed
+  assert.deepEqual(rows.map((x) => x.metrics[0].status), ['improved', 'regressed', 'improved', 'regressed']);
+  r = pw(d, ['backfill', '-n', '10']);                          // idempotent: everything already recorded
+  assert.equal(r.code, 0);
+  assert.equal(readFileSync(join(d, '.promptwheel', 'outcomes.jsonl'), 'utf8').trim().split('\n').length, 4);
+  r = pw(d, ['playbook']);                                      // the seeded ledger renders
+  assert.equal(r.code, 0); assert.match(r.out, /todos/);
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---------------------------------------- self-heal: orphaned worktrees from a crashed run
 test('self-heal: a stale /tmp worktree from a crashed run is cleaned on the next run', () => {
   const orphan = join(tmpdir(), 'promptwheel-ORPHANTEST');

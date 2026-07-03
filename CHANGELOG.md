@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0 — 2026-07-03 — backfill: the cold-start harvest
+
+- **`promptwheel backfill [-n N | --since <ref>]`** — seed the ledger by replaying git history through the *current* metrics (LEARNING.md harvest path 1), so `playbook`/`suggest`/`insights` are useful on day one instead of starting empty. Deterministic, no LLM. Rows are **cohort-tagged `backfill`** (historical human commits are not live agent-loop evidence — segmented, flagged on disagreement, never averaged in), the **conventional-commit type becomes the change-type label** for free (`fix`/`feat`/`refactor`/…), commits replay oldest-first so decay stays honest, re-runs are idempotent, root commits are skipped, and commits that no longer build record as `unmeasurable` — never faked. Gaming detection is off by default for history (`--detect-gaming` to audit the past too).
+- Plugin `setup` skill: Claude now *proposes* repo-specific metrics at config time (build → `bundle_kb`, evals → `eval_pass_rate`, …) and offers the backfill — the LLM is the discovery layer only; every metric is a deterministic shell command and the engine stays LLM-free.
+
 ## 0.3.0 — 2026-07-02 — Phase 5, experimental (D7 overturned by explicit founder decision)
 
 The learning layer, built under the constraints that survive the unfreeze — pure view, evidence-gated, claim-gated:

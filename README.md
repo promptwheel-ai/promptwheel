@@ -76,6 +76,7 @@ npx promptwheel insights
 # EXPERIMENTAL (Phase 5): the earned playbook + where the next attempt should go
 npx promptwheel playbook                  # decayed, evidence-gated claims distilled from the record
 npx promptwheel suggest                   # UCB over the lever scores — proven levers vs under-explored arms
+npx promptwheel backfill -n 30            # cold start: seed the record from git history (cohort-tagged, commit types → labels)
 ```
 
 **The consequence ledger.** git records *what changed*; PromptWheel records *what the change did* — same trust model (local, deterministic, append-only, no server, no LLM in the verdict). `playbook` and `suggest` are pure re-derivations over that ledger: every rendered line was measured by the gate, decays unless re-earned, and stays hidden below an evidence threshold. No compounding claim is made for them until the A/B acceptance test (`bench/compounding-ab.mjs`) passes on real usage data.
