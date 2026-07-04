@@ -2,7 +2,7 @@
 
 PromptWheel works on any change in any language. It **never parses your code** — it splits the git diff into *source* vs *test / config / grader / golden*, applies only the source slice onto a clean worktree, and re-runs **your** gate command. So pick your stack, drop a `promptwheel.config.json`, and `npx promptwheel run` catches reward-hacking by default.
 
-> `npx promptwheel init` autodetects **pytest / go test / cargo test / npm test** and writes a starter for you. Below are the copy-paste references + what `--detect-gaming` catches in each. Add `--preset antihack` for the suppression / skipped-test / assertion tripwire guards on top.
+> `npx promptwheel init` autodetects **pytest / go test / cargo test / npm test** and writes a starter for you. Below are the copy-paste references + what `--detect-gaming` catches in each. Plain `init` already writes the suppression / skipped-test / assertion tripwire guards by default; `--preset antihack` is just the explicit spelling of that default.
 
 ## Node / JS — tests
 ```json
