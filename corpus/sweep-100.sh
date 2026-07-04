@@ -56,10 +56,22 @@ run_one() {
         (cd "$d" && timeout $TB_INSTALL npm i --ignore-scripts --no-audit --no-fund >/dev/null 2>&1) || inst=false
       fi ;;
     py) pm=pip
-      (cd "$d" && timeout $TB_INSTALL python3 -m venv .venv >/dev/null 2>&1 \
-        && { .venv/bin/pip -q install -e . pytest >/dev/null 2>&1 \
-             || { [ -f requirements.txt ] && .venv/bin/pip -q install -r requirements.txt pytest >/dev/null 2>&1; } \
-             || .venv/bin/pip -q install pytest >/dev/null 2>&1; }) || inst=false
+      (cd "$d" && python3 -m venv .venv >/dev/null 2>&1 && timeout $TB_INSTALL bash -c '
+          pip=.venv/bin/pip
+          # install the package WITH its test extras + any dev/test requirement files, so test-only
+          # deps (pytest plugins, click, …) are present — else the suite errors on import and the
+          # gate reads inert (measuring the TOOL fairly needs the suite to actually run).
+          $pip -q install -e ".[test]" pytest >/dev/null 2>&1 \
+            || $pip -q install -e ".[tests]" pytest >/dev/null 2>&1 \
+            || $pip -q install -e ".[dev]" pytest >/dev/null 2>&1 \
+            || $pip -q install -e . pytest >/dev/null 2>&1 \
+            || { [ -f requirements.txt ] && $pip -q install -r requirements.txt pytest >/dev/null 2>&1; } \
+            || $pip -q install pytest >/dev/null 2>&1
+          for rf in requirements-dev.txt requirements-test.txt test-requirements.txt dev-requirements.txt requirements/dev.txt requirements/test.txt; do
+            [ -f "$rf" ] && $pip -q install -r "$rf" >/dev/null 2>&1
+          done
+          $pip -q install pytest-asyncio pytest-mock >/dev/null 2>&1 || true
+        ') || inst=false
       xp="$d/.venv/bin:" ;;
     go) pm=go; xp="$GO_BIN:" ;;
     rs) pm=cargo ;;
@@ -68,6 +80,12 @@ run_one() {
 
   # ---- init (with language PATH so detectTestCmd sees the right world)
   local init_out; init_out=$(cd "$d" && PATH="$xp$PATH" node $PW init 2>&1); local init_code=$?
+  # if a JS/TS repo needs a build to test, wire the per-ref `setup` so the measuring worktree
+  # compiles the ref it measures (devDeps like tsc live in the linked node_modules).
+  if [ -f "$d/package.json" ] && [ -f "$d/promptwheel.config.json" ] \
+     && node -e "process.exit(((require('$d/package.json').scripts)||{}).build?0:1)" 2>/dev/null; then
+    node -e "const f='$d/promptwheel.config.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f,'utf8'));c.setup='npm run build --if-present';fs.writeFileSync(f,JSON.stringify(c,null,2)+'\n')" 2>/dev/null
+  fi
   git -C "$d" add -A >/dev/null 2>&1; git -C "$d" commit -qm pw-base >/dev/null 2>&1
 
   local baseline=$(run_gate "$d" "$xp" baseline)
