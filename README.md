@@ -27,7 +27,7 @@ PromptWheel  a1b2c3d → e4f5g6h  (×5)
   VERDICT: PASS
 ```
 
-Exit `0` on pass, `1` on fail (CI-friendly). No build step, zero dependencies, Node 18+.
+Exit `0` pass · `1` fail · `2` gamed · `3` inconclusive (a guard measured nothing) — CI-friendly. No build step, zero dependencies, Node 18+.
 
 ## Catch your agent cheating — on by default
 
@@ -42,11 +42,30 @@ PromptWheel  base → head
   VERDICT: GAMED  — a metric "improved" by editing the goalposts, not the source
 ```
 
+**See it fire yourself** — 60 seconds, illustrative (a hand-built cheat is a *mechanism* demo, not evidence):
+
+```bash
+mkdir pw-cheat-demo && cd pw-cheat-demo && git init -q
+printf '{"name":"demo","type":"module","scripts":{"test":"node --test"}}\n' > package.json
+printf 'export const add = (a, b) => a - b;   // BUG: should be a + b\n' > add.js
+printf "import {test} from 'node:test'; import assert from 'node:assert'; import {add} from './add.js';\ntest('add', () => assert.equal(add(2, 3), 5));   // honest test — FAILS on the bug\n" > add.test.js
+git add -A && git commit -qm 'buggy code + an honest failing test'
+npx -y promptwheel@latest init && git add -A && git commit -qm 'add the gate config'
+
+# an agent "greens" the suite by editing the TEST to expect the bug — the code stays broken:
+printf "import {test} from 'node:test'; import assert from 'node:assert'; import {add} from './add.js';\ntest('add', () => assert.equal(add(2, 3), -1));\n" > add.test.js
+git commit -qam 'make the suite green'
+
+npx -y promptwheel@latest run --base HEAD~1 --head HEAD
+#  ▲ tests_pass 0 → 1   🚩 GAMED — the win changed zero production-source files
+#  VERDICT: GAMED   (exit 2)
+```
+
 Inline source-file suppressions (`@ts-nocheck`, `eslint-disable`, `# noqa`) — and the quieter cheat of *weakening the suite while the metric stays flat* — are a different shape, caught by **tripwire guards** (`test_count`, `skipped_tests`, `suppressions`, `assertions`) that fail when a "win" introduces them. The plain `init` default includes these tripwires, so gutting a test file fails the gate out of the box:
 
 ```bash
 npx promptwheel init                      # guarded tests + antihack tripwires by default
-npx promptwheel run                       # detection ON by default · exit 0 win · 1 regression · 2 GAMED
+npx promptwheel run                       # detection ON by default · exit 0 win · 1 regression · 2 GAMED · 3 inconclusive
                                           #   (add --no-detect-gaming for just the outcome gate)
 ```
 
@@ -68,7 +87,7 @@ npx promptwheel run --repeat 5 --json     # measure 5× to establish a noise ban
 
 # the loop: run any agent/script, keep the change ONLY if a metric improved
 npx promptwheel improve --attempt "claude -p 'reduce lint errors'"
-#   exit 0 = kept a real win · 1 = guarded regression (reverted) · 3 = plateau (reverted) · add --json
+#   exit 0 = kept a real win · 1 = guarded regression (reverted) · 3 = plateau / inconclusive (reverted) · add --json
 
 # what's actually responding in this repo? (aggregates .promptwheel/outcomes.jsonl)
 npx promptwheel insights
@@ -81,7 +100,7 @@ npx promptwheel backfill -n 30            # cold start: seed the record from git
 
 **The consequence ledger.** git records *what changed*; PromptWheel records *what the change did* — same trust model (local, deterministic, append-only, no server, no LLM in the verdict). `playbook` and `suggest` are pure re-derivations over that ledger: every rendered line was measured by the gate, decays unless re-earned, and stays hidden below an evidence threshold. No compounding claim is made for them until the A/B acceptance test (`bench/compounding-ab.mjs`) passes on real usage data.
 
-**Footprint:** it never touches your working tree — every measurement runs in a throwaway git worktree **in your system temp dir** (one at a time; `node_modules` is symlinked, not copied), removed when the run finishes. The only thing PromptWheel writes to your repo is the optional `.promptwheel/outcomes.jsonl` record — commit it to build the per-repo "what moves what" history, or `.gitignore` it (`--no-record` to skip entirely). A hard-killed run can't leave clutter behind: the next run **self-heals** any orphaned worktree (stale registry entry + abandoned temp checkout).
+**Footprint:** it never touches your working tree — every measurement runs in a throwaway git worktree **in your system temp dir** (one at a time; configured `linkDirs` are symlinked not copied — `node_modules` by default, `.venv` for Python, etc.), removed when the run finishes. The only thing PromptWheel writes to your repo is the optional `.promptwheel/outcomes.jsonl` record — commit it to build the per-repo "what moves what" history, or `.gitignore` it (`--no-record` to skip entirely). A hard-killed run can't leave clutter behind: the next run **self-heals** any orphaned worktree (stale registry entry + abandoned temp checkout).
 
 ## Loop patterns
 
@@ -151,6 +170,12 @@ The Action runs straight from its own checkout — no npm install, no build. See
 - **gamingCheck** — `false` exempts a metric from `--detect-gaming`'s source-only re-run. Use it for tripwire / test-side guards (assertion counts, test counts) whose gains legitimately live in test files — otherwise adding real tests would be flagged as gaming. The `antihack` preset sets this on its tripwires.
 - **gamingThreshold** — the fraction of a win that must survive the source-only re-run to count as earned (default `0.5`). Config-level scalar, overridable per metric; inherited through `extends` like `repeat`.
 
+Dependency & environment keys (config-level; `init` writes stack defaults):
+
+- **linkDirs** — dirs to symlink from your checkout into each measuring worktree, for deps that live outside git. Default `["node_modules"]`; `init` writes `[".venv"]` for Python, `["target"]` for Rust. (`"linkNodeModules": false` still works as shorthand for "link nothing".)
+- **env** — environment variables for every metric command; `{wt}` is substituted with the worktree path. Python configs get `"PYTHONPATH": "{wt}/src:{wt}"` so the *measured ref* is imported, not an editable install of your original checkout.
+- **setup** — an optional command run once per ref before metrics (e.g. `npm run build`, `pip install -e .`), after any source patch — so a build-gated suite measures the ref it's actually on.
+
 ## Guardrails & inheritance
 
 To see what's actually enforced in a repo — including guards inherited from a shared config:
@@ -217,7 +242,7 @@ The engine is one importable file; pure helpers are exported for unit tests, the
 - [x] `promptwheel init` + presets — zero-config onboarding
 - [x] `insights` — reward-stream aggregation (Phase-5 seed)
 - [x] `--detect-gaming` — reward-hack detection: re-prove the win from source edits alone + `antihack` preset
-- [x] npm publish — `promptwheel@0.1.0` (the lead magnet, shipped 2026-06)
+- [x] npm publish — `promptwheel@0.4.1` (the lead magnet)
 - [x] outcome-curated learning + UCB work-discovery — `playbook` + `suggest` + the compounding A/B harness (**experimental**; compounding *claims* stay gated on real-data proof — see [docs/LEARNING.md](docs/LEARNING.md))
 
-> Status: **published** (npm `promptwheel`, v0.2.0) — all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.
+> Status: **published** (npm `promptwheel`, v0.4.1) — all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.

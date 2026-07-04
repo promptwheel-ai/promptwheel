@@ -1,6 +1,6 @@
 {
   "name": "promptwheel",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Catch your agent cheating — a deterministic, zero-LLM CLI that flags when an AI coding agent gamed its own metric (re-proves the win from the agent's source edits alone). Built on an outcome gate; runs in CI or a Claude Code hook.",
   "type": "module",
   "bin": {

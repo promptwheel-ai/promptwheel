@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 — 2026-07-03 — honest verdicts + cross-ecosystem measurement
+
+- **Inert guards no longer report a green PASS.** A guarded pass/fail metric that never actually runs (stuck at 0 across both refs — a missing or misconfigured test command) now yields `VERDICT: INCONCLUSIVE` (exit 3) instead of a misleading `PASS` with a buried warning. `improve` reverts on it; PR/markdown gets a yellow state. A gate must not certify a pass it never measured. *(Surfaced by the 150-repo sweep, where ~76% of real repos were silently reading a fake green.)*
+- **Generalized the worktree dependency-bridge beyond `node_modules`.** New config keys: `linkDirs` (dirs to symlink into the measuring worktree; default `["node_modules"]`), `env` (vars for metric commands; `{wt}` → worktree path), and `setup` (a per-ref build/install, run after the source patch). `init` auto-writes stack defaults — Python: `linkDirs:['.venv']` + `PYTHONPATH="{wt}/src:{wt}"` + `.venv/bin/pytest` (fixes editable-install blindness on `src/`-layout repos, so the *measured ref* is imported, not your original checkout); Rust: `linkDirs:['target']`. `linkNodeModules` kept as back-compat.
+- **Corpus:** distribution regression matrix extended to 150 repos; sweep parametrized (`LIST`), the `PW` path made absolute, and the Python/JS install path now pulls test deps + wires the per-ref `setup` build so the gate measures a real suite.
+
 ## 0.4.0 — 2026-07-03 — backfill: the cold-start harvest
 
 - **`promptwheel backfill [-n N | --since <ref>]`** — seed the ledger by replaying git history through the *current* metrics (LEARNING.md harvest path 1), so `playbook`/`suggest`/`insights` are useful on day one instead of starting empty. Deterministic, no LLM. Rows are **cohort-tagged `backfill`** (historical human commits are not live agent-loop evidence — segmented, flagged on disagreement, never averaged in), the **conventional-commit type becomes the change-type label** for free (`fix`/`feat`/`refactor`/…), commits replay oldest-first so decay stays honest, re-runs are idempotent, root commits are skipped, and commits that no longer build record as `unmeasurable` — never faked. Gaming detection is off by default for history (`--detect-gaming` to audit the past too).

@@ -71,6 +71,8 @@ agent change
 [ LLM judge / human ]  intent, novelty, quality  ──▶ the calls only they can make
 ```
 
+A guard that can't actually run — an inert pass/fail metric that reads 0 at both refs (broken test command, missing script, failed install/build) — verifies nothing, so PromptWheel returns **`inconclusive`** (exit 3) rather than laundering "couldn't measure" into a false green. Fix the guard's command before trusting a pass.
+
 ## What PromptWheel does and does not claim
 
 **Claims (in-scope, caught deterministically):** evaluator tampering — test-file edits, grader/scorer tampering, golden/snapshot rewriting, config/threshold relaxation, harness-exit hacks.

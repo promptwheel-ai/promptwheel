@@ -1,6 +1,6 @@
 # Architecture (v0)
 
-The whole engine is `bin/promptwheel.mjs` (~500 LOC, Node ESM, zero deps). It is intentionally a single file — importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
+The whole engine is `bin/promptwheel.mjs` (~870 LOC, Node ESM, zero deps). It is intentionally a single file — importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
 
 ## Flow
 
@@ -15,7 +15,7 @@ config (promptwheel.config.json)
         │
    evaluate → { delta, status, confidence, ok }
         │
-   verdict = any guard failed ? "fail" : "pass"   →   print (human | --json)   →   exit (0 | 1)
+   verdict = guard failed ? "fail" : gamed ? "gamed" : inert guard ? "inconclusive" : "pass"   →   print (human | --json | --markdown)   →   exit (0|1|2|3)
 ```
 
 The working tree is **never** touched — every read happens in a temp worktree that is removed afterward.
@@ -25,11 +25,15 @@ The working tree is **never** touched — every read happens in a temp worktree 
 | command | what it does |
 |---|---|
 | `run [--base R] [--head R] [--repeat N] [--json\|--markdown]` | gate a change between two refs |
+| `run --detect-gaming` / `--no-detect-gaming` | antihack is **on by default**: re-prove each win from source edits alone (verdict `gamed`, exit 2); `--no-detect-gaming` for the bare gate. `--markdown` emits a PR-comment table |
 | `run --working` | gate **uncommitted** changes incl. newly added files (temp-index `write-tree`/`commit-tree` snapshot; real index + tree untouched) |
 | `run --no-record` | don't append to the reward stream |
 | `improve --attempt "<cmd>"` | run any agent/script, gate, **keep only if a metric improved** (commit) else revert. Exit `0` kept / `1` regression / `3` plateau; `--json` adds a top-level `result` |
 | `insights [--json]` | aggregate `.promptwheel/outcomes.jsonl` into per-metric lever scores |
-| `init [--preset <name> \| --list]` | write a starter config (detect stack; presets `tests-pass`/`lint`/`bundle-size`/`llm-eval`) |
+| `playbook [--json]` | the earned playbook: decayed, evidence-gated claims distilled from the outcome record |
+| `suggest [--json]` | UCB work-discovery: where the next attempt should go (experimental) |
+| `backfill [-n N \| --since <ref>]` | seed the ledger from git history (cohort-tagged `backfill`; conventional-commit types become labels) |
+| `init [--preset <name> \| --list]` | write a starter config (detect stack; presets `tests-pass`/`lint`/`bundle-size`/`llm-eval`/`antihack`) |
 | `guards [--json]` | list the effective guardrails (incl. inherited via `extends`) with provenance + each guard's flag record |
 
 `run` and `improve` share one `gate(repo, opts)` core. `improve` requires a clean tree (ignoring `.promptwheel/`), runs the attempt, gates working-vs-HEAD, then **commits** on a real improvement or reverts (`git reset --hard` + `git clean -fd -e .promptwheel`) on a regression / no-op.
@@ -46,7 +50,9 @@ Every gated run (unless `--no-record` or `record:false`) appends one JSON line t
 {
   "extends": "./promptwheel.base.json",  // optional: inherit guardrails from a shared base (path or array)
   "repeat": 1,                 // default sample count (overridden by --repeat)
-  "linkNodeModules": true,     // symlink repo node_modules into worktrees (fast; default true)
+  "linkDirs": ["node_modules"], // dirs symlinked from the repo into each measuring worktree (deps that live outside git, e.g. node_modules / .venv / target); default ["node_modules"]. Back-compat: linkNodeModules:false links nothing.
+  "env": { "PYTHONPATH": "{wt}/src:{wt}" }, // optional env vars for metric commands; {wt} substitutes to the worktree path
+  "setup": "npm run build",    // optional per-ref build/install run after any source patch (best-effort; a failed setup leaves the metric inert → inconclusive)
   "metrics": [
     {
       "name": "lint_errors",
@@ -91,7 +97,7 @@ So `--repeat` is how you trade time for trust: it earns a real confidence label 
 ```jsonc
 {
   "base": "a1b2c3d", "head": "e4f5g6h", "repeat": 5, "mode": "refs",
-  "verdict": "pass",             // pass | fail | gamed  (gamed only with --detect-gaming)
+  "verdict": "pass",             // pass | fail | gamed | inconclusive  (gamed only with --detect-gaming; inconclusive = an inert guard measured nothing — exit 3)
   "metrics": [
     { "name": "lint_errors", "direction": "down", "guard": true,
       "before": 12, "after": 7, "delta": -5,
@@ -103,11 +109,11 @@ So `--repeat` is how you trade time for trust: it earns a real confidence label 
 }
 ```
 
-Exit code: `0` = pass, `1` = fail (a guarded metric had a trusted regression), `2` = config/usage error **or `GAMED`** (with `--detect-gaming`, a win that didn't survive the source-only re-run — this currently **overloads** the exit-2 config/usage code). This is the JSON that later becomes the persisted reward stream (Roadmap Phase 2).
+Exit code: `0` = pass · `1` = fail (a guarded metric had a trusted regression) · `2` = **`GAMED`** (a win that didn't survive the source-only re-run) or a config/usage error (this **overloads** exit 2) · `3` = **inconclusive** (an inert guard measured nothing) — also the code `improve` returns for a plateau/no-op. This JSON is the persisted reward stream (`.promptwheel/outcomes.jsonl`), appended once per gated run.
 
 ## Testing
 
-`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` — **37 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
+`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` — **55 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
 
 ## Design constraints
 - **Zero runtime dependencies, no build.** Node 18+, ESM, runs straight from source.
