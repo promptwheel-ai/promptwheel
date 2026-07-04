@@ -117,7 +117,7 @@ function bridgeEnv(repo, wt, cfg) {
     }
   }
   if (!cfg.env) return process.env;
-  return { ...process.env, ...Object.fromEntries(Object.entries(cfg.env).map(([k, v]) => [k, String(v).replaceAll('{wt}', wt)])) };
+  return { ...process.env, ...Object.fromEntries(Object.entries(cfg.env).map(([k, v]) => [k, String(v).replaceAll('{wt}', () => wt)])) }; // fn replacement: a literal wt avoids $-pattern interpretation
 }
 // an optional per-ref build/install (e.g. `npm run build`, `pip install -e .`). Best-effort: a
 // failed setup just leaves the metric inert → INCONCLUSIVE (never a false green). Run by the
@@ -383,7 +383,9 @@ function gate(repo, opts) {
   const gamed = metrics.some((m) => m.gamed === true);
   // a guard that never runs (inert: a pass/fail metric stuck at 0 across both refs) verifies
   // nothing — don't launder that into a green PASS. The honest verdict is "couldn't measure".
-  const inconclusive = !failed && !gamed && metrics.some((m) => m.inert);
+  // BUT scope it to a bare no-op run: an inert guard must NOT bury a genuine, measured win
+  // elsewhere (that would make `improve` revert good changes and misread them as a plateau).
+  const inconclusive = !failed && !gamed && metrics.some((m) => m.inert) && !metrics.some((m) => m.status === 'improved');
   const verdict = failed ? 'fail' : gamed ? 'gamed' : inconclusive ? 'inconclusive' : 'pass';
   const report = {
     base: short(repo, base), head: short(repo, head), repeat, mode: opts.working ? 'working' : 'refs',
@@ -680,7 +682,7 @@ function detectEnv(repo) {
   // Python: link the venv (3rd-party deps) and put the worktree src FIRST on PYTHONPATH, so imports
   // resolve the MEASURED ref instead of an editable install pointing back at your original checkout.
   if (has('pyproject.toml') || has('setup.py') || has('pytest.ini')) return { linkDirs: ['.venv'], env: { PYTHONPATH: '{wt}/src:{wt}' } }; // src/ AND flat layouts; worktree src wins over an editable install
-  if (has('Cargo.toml')) return { linkDirs: ['target'] };
+  if (has('Cargo.toml')) return { linkDirs: [] }; // do NOT link target/: `cargo test` WRITES there — linking would clobber the user's real dir and share a build cache across refs (measurement blindness). Build fresh in the worktree.
   return {};
 }
 

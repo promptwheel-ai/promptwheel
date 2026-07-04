@@ -329,6 +329,20 @@ test('run: a guarded pass metric that never passes → INCONCLUSIVE (exit 3), ne
   rmSync(d, { recursive: true, force: true });
 });
 
+test('run: an inert guard does NOT bury a real improvement elsewhere (keep the win + warn)', () => {
+  const d = tmpRepo([
+    { name: 'brokenguard', cmd: 'false',          extract: 'exit',   direction: 'pass', guard: true },   // inert: 0 at both refs
+    { name: 'score',       cmd: 'cat score.txt',  extract: 'number', direction: 'up',   guard: true },
+  ]);
+  writeFileSync(join(d, 'score.txt'), '1\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'score.txt'), '9\n'); commitAll(d, 'improve');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 0);                            // a real, measured win must NOT be discarded as inconclusive
+  assert.match(r.out, /VERDICT: PASS/);
+  assert.match(r.out, /never passed at either ref/);  // the inert guard is still surfaced as a warning
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ------------------- generalized measurement env: linkDirs + env({wt}) + per-ref setup
 test('measure env: linkDirs symlink + env ({wt} substituted) + setup all reach the worktree', () => {
   const d = tmpRepo([{ name: 'x', cmd: 'true', extract: 'exit', direction: 'pass', guard: false }]);
