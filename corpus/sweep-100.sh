@@ -22,14 +22,19 @@ run_gate() { # $1=dir $2=extra_path $3=label; echoes "exit|secs|verdict|flag|ine
   { echo "--- $label (exit=$code, ${secs}s) ---"; tail -20 <<<"$out"; } >> "$W/logs/$(basename $d).log"
 }
 
-pick_src() { # $1=dir $2=lang
+pick_src() { # $1=dir $2=lang — a REAL production source file the suite imports (never a dep / example / test)
   cd "$1" || return
+  # exclude dependency/build dirs AND any dir segment that looks like test/example/demo/fixture —
+  # else the break probe lands in code the suite never imports and reads as a false "miss".
+  local DEP='(^|/)(\.venv|venv|node_modules|target|dist|build|vendor|__pycache__|docs?|scripts?)/|(^|/)[^/]*(test|e2e|example|demo|sample|fixture|mock|bench)[^/]*/'
   case $2 in
-    py)   git ls-files '*.py' | grep -vE '(^|/)(tests?|testing|conftest|setup|docs?|examples?|scripts?)' | head -1 ;;
-    go)   git ls-files '*.go' | grep -v '_test.go' | grep -vE '(^|/)(examples?|docs?)/' | head -1 ;;
-    rs)   { git ls-files 'src/lib.rs'; git ls-files 'src/main.rs'; git ls-files '*.rs' | grep -vE '(^|/)(tests?|benches|examples?)/'; } | head -1 ;;
-    *)    { git ls-files | grep -E '^(src|app|lib|packages)/.*\.(ts|tsx|js|mjs|cjs)$'; git ls-files | grep -E '\.(ts|js|mjs)$'; } \
-            | grep -vE '(test|spec|__|\.d\.ts|config)' | head -1 ;;
+    py)   git ls-files '*.py' | grep -vE '(^|/)(conftest|setup)\.py$' | grep -vEi "$DEP" | head -1 ;;
+    go)   git ls-files '*.go' | grep -v '_test.go' | grep -vEi "$DEP" | head -1 ;;
+    rs)   { git ls-files 'src/lib.rs'; git ls-files 'src/main.rs'; git ls-files '*.rs'; } | grep -vEi "$DEP" | head -1 ;;
+    *)    { git ls-files | grep -E '^(src|lib|packages)/.*\.(ts|tsx|js|mjs|cjs)$'; \
+            git ls-files | grep -E '^app/.*\.(ts|tsx|js|mjs|cjs)$'; \
+            git ls-files | grep -E '\.(ts|js|mjs)$'; } \
+            | grep -vE '(spec|\.d\.ts|config)' | grep -vEi "$DEP" | head -1 ;;
   esac
 }
 
@@ -86,6 +91,9 @@ run_one() {
      && node -e "process.exit(((require('$d/package.json').scripts)||{}).build?0:1)" 2>/dev/null; then
     node -e "const f='$d/promptwheel.config.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f,'utf8'));c.setup='npm run build --if-present';fs.writeFileSync(f,JSON.stringify(c,null,2)+'\n')" 2>/dev/null
   fi
+  # keep installed deps OUT of the committed tree — else git ls-files/pick_src/probes operate on
+  # .venv/node_modules and the break lands in a dependency file the suite never imports.
+  printf '%s\n' '.venv/' 'venv/' 'node_modules/' 'target/' 'dist/' 'build/' 'vendor/' '__pycache__/' '.pytest_cache/' >> "$d/.git/info/exclude"
   git -C "$d" add -A >/dev/null 2>&1; git -C "$d" commit -qm pw-base >/dev/null 2>&1
 
   local baseline=$(run_gate "$d" "$xp" baseline)
