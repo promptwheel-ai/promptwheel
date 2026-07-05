@@ -6,13 +6,13 @@ set -u
 PW=${PW:-$(cd "$(dirname "$0")/../bin" && pwd)/promptwheel.mjs}  # absolute: run_gate cd's into the repo before using it
 W=${W:-/tmp/pw-corpus-100}
 GO_BIN=${GO_BIN:-$(dirname $(command -v go 2>/dev/null) 2>/dev/null)}
-TB_CLONE=240; TB_INSTALL=480; TB_GATE=240
+TB_CLONE=240; TB_INSTALL=480; TB_GATE=${TB_GATE:-600}; REPEAT=${REPEAT:-3}   # gate measures each metric REPEAT× per ref → a noise band; a flaky delta reads inconclusive, not FAIL/GAMED
 mkdir -p $W/repos $W/results $W/logs
 
 run_gate() { # $1=dir $2=extra_path $3=label; echoes "exit|secs|verdict|flag|inert"
   local d=$1 xp=$2 label=$3
   local t0=$(date +%s)
-  local out; out=$(cd "$d" && PATH="$xp$PATH" timeout $TB_GATE node $PW run --working --no-record 2>&1); local code=$?
+  local out; out=$(cd "$d" && PATH="$xp$PATH" timeout $TB_GATE node $PW run --working --no-record --repeat $REPEAT 2>&1); local code=$?
   local secs=$(( $(date +%s) - t0 ))
   local verdict=$(grep -oE 'VERDICT: [A-Z]+' <<<"$out" | head -1 | cut -d' ' -f2)
   [ $code -eq 124 ] && verdict=TIMEOUT
