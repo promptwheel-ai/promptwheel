@@ -343,6 +343,21 @@ test('run: an inert guard does NOT bury a real improvement elsewhere (keep the w
   rmSync(d, { recursive: true, force: true });
 });
 
+test('antihack tripwires exclude generated dirs — no artifact-drift false fire', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-artifact-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'package.json'), '{"name":"x","scripts":{"test":"true"}}');
+  mkdirSync(join(d, 'src'));  writeFileSync(join(d, 'src', 'a.js'), 'assert(1)\n');                              // 1 real tracked assertion
+  mkdirSync(join(d, 'dist')); writeFileSync(join(d, 'dist', 'a.js'), 'assert(2)\nassert(3)\nassert(4)\n');       // 3 in a BUILD dir the tests generate
+  assert.equal(pw(d, ['init', '--preset', 'antihack']).code, 0);
+  commitAll(d, 'base');
+  const r = pw(d, ['run', '--base', 'HEAD', '--head', 'HEAD', '--no-record', '--json']);
+  const a = JSON.parse(r.out).metrics.find((m) => m.name === 'assertions');
+  assert.ok(a.before <= 1, `assertions must exclude dist/ (counted ${a.before}, expected the 1 tracked-source assert only)`);
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ------------------- generalized measurement env: linkDirs + env({wt}) + per-ref setup
 test('measure env: linkDirs symlink + env ({wt} substituted) + setup all reach the worktree', () => {
   const d = tmpRepo([{ name: 'x', cmd: 'true', extract: 'exit', direction: 'pass', guard: false }]);
