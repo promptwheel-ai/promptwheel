@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2 — 2026-07-07 — reposition: "add a referee to your coding loop"
+
+- **Repositioned** the README and npm description around the **referee** frame — a neutral, un-gameable check you add to your coding loop that verifies a win was *earned*. Catching the test-editing cheat is the referee's signature call, not the whole pitch. **No engine change** — the mechanism, verdicts, exit codes, and demos are identical to 0.4.1.
+- **`examples/test-change-verdicts/`** — a runnable three-scenario demo answering "won't this flag my legit test edits?": a green→green refactor **PASSES**, a real fix that also edits a test **PASSES**, a test-only red→green is **GAMED**. Same metric move, opposite verdict — it keys on whether *source* carried the win, not whether a test was touched.
+- **Corpus:** distribution regression matrix extended to **1,000 repos** (verified rows across TS/JS/Next/Python/Go/Rust).
+
 ## 0.4.1 — 2026-07-03 — honest verdicts + cross-ecosystem measurement
 
 - **Inert guards no longer report a green PASS.** A guarded pass/fail metric that never actually runs (stuck at 0 across both refs — a missing or misconfigured test command) now yields `VERDICT: INCONCLUSIVE` (exit 3) instead of a misleading `PASS` with a buried warning. `improve` reverts on it; PR/markdown gets a yellow state. A gate must not certify a pass it never measured. *(Surfaced by the 150-repo sweep, where ~76% of real repos were silently reading a fake green.)*
