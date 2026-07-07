@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/promptwheel-ai/promptwheel/actions/workflows/ci.yml/badge.svg)](https://github.com/promptwheel-ai/promptwheel/actions/workflows/ci.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Node ≥18](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![deps: zero](https://img.shields.io/badge/deps-zero-blue)
 
-**Catch your agent cheating** — the deterministic auditor that flags when your AI coding agent gamed its own success metric.
+**Add a referee to your coding loop.** A green test should mean your agent *fixed the code* — not that it edited the test to match the bug. PromptWheel is the referee that tells the difference: deterministic, no LLM, and un-gameable, because a player can't call its own fouls.
 
 PromptWheel re-proves every "win" using the agent's **source edits alone**. If the gate only went green because the agent edited the test, mocked the grader, suppressed the error (`@ts-ignore` / `eslint-disable`), or deleted the feature, the win evaporates when those edits are reverted → **`VERDICT GAMED`, exit 2**. No LLM in the loop — a diff partition plus a re-run, so every flag is reproducible in seconds with a human-readable reason.
 

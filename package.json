@@ -1,7 +1,7 @@
 {
   "name": "promptwheel",
   "version": "0.4.1",
-  "description": "Catch your agent cheating — a deterministic, zero-LLM CLI that flags when an AI coding agent gamed its own metric (re-proves the win from the agent's source edits alone). Built on an outcome gate; runs in CI or a Claude Code hook.",
+  "description": "Add a referee to your coding loop — a deterministic, zero-LLM CLI that checks every change earned its win: it re-proves the result from the agent's source edits alone, so a green that came from editing the test reads GAMED. Runs in CI or a Claude Code hook.",
   "type": "module",
   "bin": {
     "promptwheel": "bin/promptwheel.mjs",
