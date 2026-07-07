@@ -25,7 +25,7 @@
 
 ```bash
 node bin/promptwheel.mjs run --base <ref> --head <ref> [--repeat N] [--json]
-npm test          # 55 dep-free node:test tests (unit + integration)
+npm test          # 57 dep-free node:test tests (unit + integration)
 ```
 
 Tests live in `test/promptwheel.test.mjs` — keep them **dep-free** (`node:test`): import the pure helpers for unit tests, shell out to the CLI for integration. `bin/promptwheel.mjs` is the single source of behavior; **add/adjust a test with every behavior change**. The engine is importable (pure helpers exported; the CLI runs only when invoked directly) — don't break that, the tests rely on it.

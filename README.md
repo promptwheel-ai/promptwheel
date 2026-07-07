@@ -242,7 +242,7 @@ The engine is one importable file; pure helpers are exported for unit tests, the
 - [x] `promptwheel init` + presets — zero-config onboarding
 - [x] `insights` — reward-stream aggregation (Phase-5 seed)
 - [x] `--detect-gaming` — reward-hack detection: re-prove the win from source edits alone + `antihack` preset
-- [x] npm publish — `promptwheel@0.4.1` (the lead magnet)
+- [x] npm publish — `promptwheel@0.4.2` (the lead magnet)
 - [x] outcome-curated learning + UCB work-discovery — `playbook` + `suggest` + the compounding A/B harness (**experimental**; compounding *claims* stay gated on real-data proof — see [docs/LEARNING.md](docs/LEARNING.md))
 
-> Status: **published** (npm `promptwheel`, v0.4.1) — all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.
+> Status: **published** (npm `promptwheel`, v0.4.2) — all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.

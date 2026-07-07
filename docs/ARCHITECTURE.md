@@ -113,7 +113,7 @@ Exit code: `0` = pass · `1` = fail (a guarded metric had a trusted regression) 
 
 ## Testing
 
-`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` — **55 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
+`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` — **57 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
 
 ## Design constraints
 - **Zero runtime dependencies, no build.** Node 18+, ESM, runs straight from source.

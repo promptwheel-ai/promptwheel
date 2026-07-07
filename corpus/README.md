@@ -15,6 +15,10 @@ No per-repo test-quality findings are produced or published — this measures
   overridden). ~3 h. `repos-150.txt` is the 100-row baseline verbatim + 50 verified rows appended,
   so it is a strict superset (the 100-row prefix stays byte-identical for baseline comparison).
 - `results-100-v0.2.1.jsonl` — the raw run that produced the 0.2.2 findings (baseline snapshot).
+- `sweep-{300,500,1000}.sh` + `repos-{300,500,1000}.txt` — one-time **scale-hardening sweeps**
+  (2026-07-06), thin wrappers over `sweep-100.sh` via `LIST`. Run to validate saturation at scale;
+  the 100→1,000 expansion surfaced **no new failure class**. These are rerunnable but are NOT part
+  of the per-release regression matrix (see Policy).
 
 ## Probes (per repo)
 1. **baseline** — clean tree; hunts hangs, junk verdicts, and validates the inert-guard warning.
@@ -27,12 +31,14 @@ No per-repo test-quality findings are produced or published — this measures
 ## Policy (decided 2026-07-02 — keep this from becoming forever-polish)
 - **Run `sweep-10` before each release; `sweep-100` before majors.** Compare against the
   committed baseline results — regressions in a fixed matrix are findings; novelty is not sought.
-- **Matrix size: 150 (extended 2026-07-02, superseding the earlier ~100 cap).** The 100-repo
-  rounds saturated discovery (3 classes per 10 repos in round one; 2 per 100 in round two, both
-  in newly sampled strata). The matrix was extended to 150 on 2026-07-02 by decision, to widen
-  stratum coverage; the 50 added rows are treated exactly like the rest — regressions against the
-  committed baseline are findings, novelty is not sought. The saturation caveat still stands:
-  do NOT grow past 150 speculatively. Further rows are added ONLY from evidence — a user-reported
-  failure shape becomes a permanent fixture here, with the fix.
+- **Recurring regression matrix: 150** (the per-release comparison set). The 100-repo rounds
+  saturated discovery (3 classes per 10 repos in round one; 2 per 100 in round two, both in newly
+  sampled strata); extended to 150 on 2026-07-02 to widen stratum coverage. Regressions against the
+  committed baseline are findings; novelty is not sought. **Do NOT grow the recurring matrix past
+  150 speculatively** — further permanent rows are added ONLY from evidence (a user-reported failure
+  shape becomes a fixture here, with the fix). Separately, one-time **scale-hardening sweeps to
+  300 / 500 / 1,000 repos** (2026-07-06) confirmed saturation at scale — **no new failure class** —
+  which is *why* the recurring matrix doesn't need to grow. Those big sweeps are rerunnable, not
+  per-release.
 - Findings are published as aggregates and failure classes; repo names appear only as
   compat-matrix rows (standard CI-matrix practice), never with quality judgments.
