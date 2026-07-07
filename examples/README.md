@@ -39,3 +39,7 @@ See **[`reliability-sprint/`](reliability-sprint/)** — gates `eval_pass_rate` 
 
 ---
 **One mechanism, every stack:** revert the test/config/grader/golden edits, re-run *your* gate, see if the win survives. `--detect-gaming` is on by default in `run` and `improve`; `--no-detect-gaming` for the bare gate.
+
+## Runnable demos
+- **[`catch-a-cheat/`](catch-a-cheat/)** — the 60-second "watch it fire": an agent greens a suite by editing the test → `GAMED`.
+- **[`test-change-verdicts/`](test-change-verdicts/)** — *"but what if I legitimately change a test?"* Three scenarios in one script (refactor → PASS · fix+test-edit → PASS · test-only → GAMED). Same metric move, opposite verdict — it keys on whether **source** carried the win, not whether a test was touched.
