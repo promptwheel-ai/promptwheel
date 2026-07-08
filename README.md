@@ -196,6 +196,31 @@ Teams keep one shared base config and have every repo inherit it via `extends`:
 
 Read this way, `extends` is **the shared invariants — the "business rules" — your agents inherit and are held to**: enforced as *measured guards* (a trusted regression fails the gate / reverts the commit), not advisory text an agent can quietly ignore. (Natural-language conventions belong in `AGENTS.md`; only deterministic, measurable guards belong here.)
 
+## Flaky tests — attribute the noise, don't just distrust it
+
+A referee is only as good as its signal, and test flakiness IS noise in the reward signal.
+`promptwheel flaky` re-runs your test command in a throwaway worktree across the four classic
+causes of "passes locally, fails in CI" and tells you which one flips the outcome:
+
+```
+promptwheel flaky                      # uses your config's pass-metric (or: --cmd "npx vitest run")
+
+  = seed   --sequence.seed=7            pass
+  ▲ time   TZ=Pacific/Kiritimati        fail   ← FLIP
+  · db     skipped — config-only (set flaky.axes.db.variants)
+
+  FLAKINESS SCORE: 25/100 → FLAKY
+  fix[time]: freeze time in tests, pin TZ (TZ=UTC) in CI, add midnight/DST-boundary cases
+```
+
+- **Axes**: seed (20) · order (25) · time/TZ (25) · db-isolation (20, config-only) — weighted
+  0–100; static hints (`git grep`) pick which axes to probe first; `--budget SEC` caps the spend.
+- **Honest by construction**: axes your framework can't express are *skipped and reported*, never
+  guessed. A suite that's unstable **at rest** scores 30 with axis attribution declared
+  unreliable — fix the base first. Nested-runner false-greens are stripped (`NODE_TEST_CONTEXT`).
+- Exit `0` stable · `1` flaky. `--json` for loops/CI. Benchmark: `node bench/flaky-bench.mjs`
+  (6/6 labeled fixture classes attributed).
+
 ## Trust model — the point of the whole thing
 
 A number that jumps around between runs is worthless as a signal. PromptWheel won't pretend otherwise:
