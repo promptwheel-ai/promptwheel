@@ -591,3 +591,122 @@ test("guards: reports each guard's flag record from the stream", () => {
   assert.ok(todos.flagged >= 1); // the regression shows up as a flag in the record
   rmSync(d, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------------------- unit: flaky
+import { detectFlakyFramework, flakyAxisVariants, flakyScore, FLAKY_WEIGHTS } from '../bin/promptwheel.mjs';
+
+test('flaky: framework detection', () => {
+  assert.equal(detectFlakyFramework('npx vitest run'), 'vitest');
+  assert.equal(detectFlakyFramework('npx jest --ci'), 'jest');
+  assert.equal(detectFlakyFramework('bundle exec rspec'), 'rspec');
+  assert.equal(detectFlakyFramework('pytest -q tests/'), 'pytest');
+  assert.equal(detectFlakyFramework('node --test'), 'node');
+  assert.equal(detectFlakyFramework('make check'), 'unknown');
+});
+
+test('flaky: axis variants — time is env-based, seed is per-framework, unsupported → null', () => {
+  const time = flakyAxisVariants('time', 'unknown', 'make check');
+  assert.equal(time.length, 3);
+  assert.ok(time.every((v) => v.env && v.env.TZ));
+  const seedV = flakyAxisVariants('seed', 'vitest', 'npx vitest run');
+  assert.ok(seedV.every((v) => v.cmd.includes('--sequence.seed=')));
+  const seedFallback = flakyAxisVariants('seed', 'node', 'node --test');
+  assert.ok(seedFallback.every((v) => v.env && v.env.PW_SEED));
+  assert.equal(flakyAxisVariants('order', 'node', 'node --test'), null);
+  assert.equal(flakyAxisVariants('db', 'rspec', 'bundle exec rspec'), null);
+});
+
+test('flaky: score = harmonic_belt weights, base instability 30, clamped at 100', () => {
+  assert.equal(flakyScore([], false), 0);
+  assert.equal(flakyScore(['time'], false), 25);
+  assert.equal(flakyScore(['seed'], false), 20);
+  assert.equal(flakyScore([], true), 30);
+  assert.equal(flakyScore(['seed', 'order', 'time', 'db'], false), 90);
+  assert.equal(flakyScore(['seed', 'order', 'time', 'db'], true), 30); // unstable base → axis flips unattributable
+  assert.equal(Object.values(FLAKY_WEIGHTS).reduce((a, b) => a + b, 0), 90);
+});
+
+// -------------------------------------------------------- integration: flaky
+function flakyRepo(testFiles, config) {
+  const d = mkdtempSync(join(tmpdir(), 'pw-flaky-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), '.promptwheel/\nstate.tmp\n');
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify(config));
+  for (const [name, body] of Object.entries(testFiles)) writeFileSync(join(d, name), body);
+  commitAll(d, 'base');
+  return d;
+}
+const NODE_TEST = (body) => `import { test } from 'node:test';\nimport assert from 'node:assert/strict';\n${body}\n`;
+
+test('flaky: stable suite → STABLE, score 0, order/db reported skipped', () => {
+  const d = flakyRepo(
+    { 'ok.test.mjs': NODE_TEST(`test('ok', () => assert.ok(true));`) },
+    { linkNodeModules: false, env: { TZ: 'UTC' },
+      metrics: [{ name: 'tests_pass', cmd: 'node --test ok.test.mjs', direction: 'pass', extract: 'exit', guard: true }] });
+  const r = pw(d, ['flaky', '--json']);
+  const rep = JSON.parse(r.out);
+  assert.equal(r.code, 0);
+  assert.equal(rep.verdict, 'STABLE'); assert.equal(rep.score, 0); assert.equal(rep.baseUnstable, false);
+  assert.ok(rep.skipped.some((s) => s.axis === 'order'));
+  assert.ok(rep.skipped.some((s) => s.axis === 'db'));
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('flaky: TZ-dependent test flips the time axis (score 25, exit 1, fix suggested)', () => {
+  const d = flakyRepo(
+    { 'tz.test.mjs': NODE_TEST(`test('tz', () => { const t = 1750000000000; assert.equal(new Date(t).getHours(), new Date(t).getUTCHours()); });`) },
+    { linkNodeModules: false, env: { TZ: 'UTC' },
+      metrics: [{ name: 'tests_pass', cmd: 'node --test tz.test.mjs', direction: 'pass', extract: 'exit', guard: true }] });
+  const r = pw(d, ['flaky', '--axes', 'time', '--json']);
+  const rep = JSON.parse(r.out);
+  assert.equal(r.code, 1);
+  assert.deepEqual(rep.flipped, ['time']); assert.equal(rep.score, 25); assert.equal(rep.verdict, 'FLAKY');
+  assert.equal(rep.baseOutcome, 'pass');
+  assert.ok(rep.axes.time.probes.some((p) => p.label === 'TZ=UTC' && !p.flip));
+  assert.ok(rep.fixes.some((f) => f.axis === 'time'));
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('flaky: seed dependence via PW_SEED env fallback flips the seed axis', () => {
+  const d = flakyRepo(
+    { 'seed.test.mjs': NODE_TEST(`test('seed', () => assert.notEqual(process.env.PW_SEED, '1337'));`) },
+    { linkNodeModules: false,
+      metrics: [{ name: 'tests_pass', cmd: 'node --test seed.test.mjs', direction: 'pass', extract: 'exit', guard: true }] });
+  const r = pw(d, ['flaky', '--axes', 'seed', '--json']);
+  const rep = JSON.parse(r.out);
+  assert.equal(r.code, 1);
+  assert.deepEqual(rep.flipped, ['seed']); assert.equal(rep.score, 20);
+  const flips = rep.axes.seed.probes.filter((p) => p.flip);
+  assert.equal(flips.length, 1); assert.match(flips[0].label, /1337/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('flaky: order dependence flips via config-provided variants', () => {
+  // plain sequential node scripts: argv order IS execution order (node --test sorts files itself,
+  // so it cannot express this axis — which is exactly why the axis is config-only for node)
+  const d = flakyRepo(
+    { 'a.mjs': `import { writeFileSync } from 'node:fs'; writeFileSync('state.tmp', 'x');`,
+      'b.mjs': `import { existsSync } from 'node:fs'; process.exit(existsSync('state.tmp') ? 0 : 1);` },
+    { linkNodeModules: false,
+      metrics: [{ name: 'tests_pass', cmd: 'rm -f state.tmp && node a.mjs && node b.mjs', direction: 'pass', extract: 'exit', guard: true }],
+      flaky: { axes: { order: { variants: [{ label: 'reversed file order', cmd: 'rm -f state.tmp && node b.mjs && node a.mjs' }] } } } });
+  const r = pw(d, ['flaky', '--axes', 'order', '--json']);
+  const rep = JSON.parse(r.out);
+  assert.equal(r.code, 1);
+  assert.deepEqual(rep.flipped, ['order']); assert.equal(rep.score, 25);
+  assert.ok(rep.fixes.some((f) => f.axis === 'order'));
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('flaky: --cmd works without any config file', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-flaky-nocfg-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'ok.test.mjs'), NODE_TEST(`test('ok', () => assert.ok(true));`));
+  commitAll(d, 'base');
+  const r = pw(d, ['flaky', '--cmd', 'node --test ok.test.mjs', '--axes', 'seed', '--json']);
+  const rep = JSON.parse(r.out);
+  assert.equal(r.code, 0); assert.equal(rep.verdict, 'STABLE');
+  rmSync(d, { recursive: true, force: true });
+});

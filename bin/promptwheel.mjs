@@ -51,12 +51,12 @@ function resolveConfig(p, repo, label, seen) {
       if (!existsSync(bp)) { console.error(`extends target not found: ${ref} (from ${relOf(repo, p)})`); process.exit(2); }
       const base = resolveConfig(bp, repo, relOf(repo, bp), seen);
       for (const m of base.metrics) byName.set(m.name, m);
-      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold']) if (base[k] !== undefined) scalars[k] = base[k];
+      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'flaky']) if (base[k] !== undefined) scalars[k] = base[k];
     }
     for (const m of (cfg.metrics || [])) {
       byName.set(m.name, { ...m, __src: label, __override: byName.has(m.name) });
     }
-    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
+    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'flaky']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
     return { ...scalars, metrics: [...byName.values()] };
   } finally {
     seen.delete(abs); // only ACTIVE ancestors are a cycle — a diamond (a base reached two ways) is fine
@@ -825,9 +825,182 @@ function parseArgs(argv) {
   return a;
 }
 
+// ---------------------------------------------------------------------------
+// flaky: noise-source attribution for the reward signal.
+//
+// Constitution #3 says never trust a delta inside the noise band. `flaky` is
+// the other half of that promise: find out WHERE the noise comes from. It
+// re-runs the test command in ONE throwaway worktree under deliberately varied
+// conditions — the four classic causes of "passes locally, fails in CI" — and
+// reports which axis flips the outcome, with a weighted 0–100 score:
+//   seed   (20)  hidden dependence on randomness
+//   order  (25)  state leaking between tests
+//   time   (25)  timezone / date-boundary dependence
+//   db     (20)  reliance on transactional rollback (config-only axis)
+// plus base-instability (30): the suite flips with NO variation at all.
+// Weights descend from the harmonic_belt lineage (2025). Axes the framework
+// can't express (and unconfigured db) are SKIPPED and reported, never guessed.
+// ---------------------------------------------------------------------------
+const FLAKY_WEIGHTS = { seed: 20, order: 25, time: 25, db: 20 };
+const FLAKY_BASE_WEIGHT = 30;
+const FLAKY_HINTS = {
+  time: 'new Date\\(|Date\\.now|Time\\.(now|zone)|moment\\(|dayjs\\(|strftime|toLocale|getTimezoneOffset|DateTime\\.(now|utc|local)',
+  seed: 'Math\\.random|random\\.(random|choice|randint)|\\brand\\b|faker|Faker|shuffle\\(|sample\\(',
+  order: 'beforeAll\\(|before\\(:all\\)|globalThis\\.[A-Za-z_$]+ *=|setupFilesAfterEach',
+  db: 'rollback|use_transactional|DatabaseCleaner|TRUNCATE|transactional_fixtures',
+};
+const FLAKY_FIXES = {
+  base: 'unstable at rest — the suite flips with no variation: a race, real network call, or sleep-based timing; fix this before trusting any gate built on it',
+  seed: 'seed-dependent — remove unseeded randomness (Math.random/faker/shuffle) or pin the seed and assert on properties, not exact values',
+  order: 'order-dependent — tests share state: remove beforeAll/before(:all) mutations, module-level caches, and globals; each test builds its own world',
+  time: 'time-dependent — freeze time in tests, pin TZ (TZ=UTC) in CI, and add explicit midnight/DST-boundary cases',
+  db: 'isolation-dependent — tests rely on transactional rollback: unify the cleaning strategy; avoid writes in suite-level setup',
+};
+
+function detectFlakyFramework(cmd) {
+  if (/vitest/.test(cmd)) return 'vitest';
+  if (/\bjest\b/.test(cmd)) return 'jest';
+  if (/\brspec\b/.test(cmd)) return 'rspec';
+  if (/\bpytest\b/.test(cmd)) return 'pytest';
+  if (/\bnode\b[^&|;]*--test\b/.test(cmd)) return 'node';
+  return 'unknown';
+}
+
+// variants: [{label, cmd?, env?}] — `cmd` replaces the test command; `env` overlays it.
+// Returns null when the axis can't be expressed for this framework (caller reports SKIPPED).
+function flakyAxisVariants(axis, framework, cmd) {
+  const seeds = [7, 1337];
+  if (axis === 'time') {
+    return ['UTC', 'Pacific/Kiritimati', 'America/New_York'].map((tz) => ({ label: `TZ=${tz}`, env: { TZ: tz } }));
+  }
+  if (axis === 'seed') {
+    if (framework === 'vitest') return seeds.map((s) => ({ label: `--sequence.seed=${s}`, cmd: `${cmd} --sequence.seed=${s}` }));
+    if (framework === 'jest') return seeds.map((s) => ({ label: `--seed=${s}`, cmd: `${cmd} --seed=${s}` }));
+    if (framework === 'rspec') return seeds.map((s) => ({ label: `--seed ${s}`, cmd: `${cmd} --seed ${s}` }));
+    if (framework === 'pytest') return seeds.map((s) => ({ label: `--randomly-seed=${s}`, cmd: `${cmd} -p randomly --randomly-seed=${s}` }));
+    // env fallback: the suite must consume PW_SEED for this to bite; still honest — a flip proves seed-dependence
+    return seeds.map((s) => ({ label: `PW_SEED=${s} (env fallback)`, env: { PW_SEED: String(s) } }));
+  }
+  if (axis === 'order') {
+    if (framework === 'vitest') return [{ label: '--sequence.shuffle', cmd: `${cmd} --sequence.shuffle` }];
+    if (framework === 'jest') return [{ label: '--randomize', cmd: `${cmd} --randomize` }];
+    if (framework === 'rspec') return [{ label: '--order random', cmd: `${cmd} --order random` }];
+    if (framework === 'pytest') return [{ label: '-p randomly', cmd: `${cmd} -p randomly` }];
+    return null;
+  }
+  return null; // db (and anything else): config-only — repo semantics are not guessable
+}
+
+function flakyScore(flippedAxes, baseUnstable) {
+  // unstable at rest → axis flips are unattributable (the suite flips on its own):
+  // score only the base instability and say so — fix the base before trusting any axis
+  if (baseUnstable) return FLAKY_BASE_WEIGHT;
+  let s = 0;
+  for (const a of flippedAxes) s += FLAKY_WEIGHTS[a] ?? 0;
+  return Math.min(100, s);
+}
+
+// static hints via git grep over tracked files: which axes does the code itself suggest probing first?
+function flakyHints(repo) {
+  const hints = {};
+  for (const [axis, pattern] of Object.entries(FLAKY_HINTS)) {
+    try {
+      const out = execFileSync('git', ['grep', '-l', '-I', '-E', pattern, '--', '.', ':!*node_modules*', ':!*vendor*'], { cwd: repo, encoding: 'utf8' });
+      const n = out.split('\n').filter(Boolean).length;
+      if (n > 0) hints[axis] = n;
+    } catch { /* no matches */ }
+  }
+  return hints;
+}
+
+function flaky(rest) {
+  const arg = (name, dflt) => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : dflt; };
+  const has = (name) => rest.includes(name);
+  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
+  const cfgPath = ['promptwheel.config.json', 'outcome-gate.config.json'].map((c) => join(repo, c)).find(existsSync);
+  const cfg = cfgPath ? resolveConfig(cfgPath, repo, 'local', new Set()) : { metrics: [] };
+  const fcfg = cfg.flaky || {};
+  const cmd = arg('--cmd', fcfg.cmd || (cfg.metrics.find((m) => (m.direction || 'up') === 'pass' && m.cmd) || {}).cmd);
+  if (!cmd) { console.error('flaky: no test command — pass --cmd "<test cmd>" or add a pass-direction metric / flaky.cmd to the config'); process.exit(2); }
+  const runs = Number(arg('--runs', fcfg.runs ?? 2));
+  const threshold = Number(arg('--threshold', fcfg.threshold ?? 20));
+  const budgetSec = Number(arg('--budget', fcfg.budget ?? 0)); // 0 = no budget
+  const ref = arg('--ref', 'HEAD');
+  const asJson = has('--json');
+  const framework = detectFlakyFramework(cmd);
+  const hints = flakyHints(repo);
+
+  // axis selection: --axes wins; else all four, hinted axes probed first (budget bites the tail)
+  const requested = (arg('--axes', '') || 'seed,order,time,db').split(',').map((s) => s.trim()).filter(Boolean);
+  const axes = requested.sort((a, b) => (hints[b] || 0) - (hints[a] || 0));
+
+  const wt = mkdtempSync(join(tmpdir(), 'promptwheel-flaky-'));
+  git(['worktree', 'add', '--quiet', '--detach', wt, ref], repo);
+  const started = Date.now();
+  const overBudget = () => budgetSec > 0 && (Date.now() - started) / 1000 > budgetSec;
+  let exitCode = 0;
+  try {
+    const baseEnv = { ...bridgeEnv(repo, wt, cfg) };
+    // probes must run in a CLEAN test context: node:test injects NODE_TEST_CONTEXT into its
+    // children, and a nested `node --test` that sees it reports to a phantom parent and exits 0
+    // even on failure — the exact false-green this command exists to catch.
+    delete baseEnv.NODE_TEST_CONTEXT;
+    runSetup(wt, cfg, baseEnv);
+    const runOnce = (c, envOverlay) => runMetric(wt, { cmd: c, extract: 'exit', timeoutSec: fcfg.timeoutSec ?? 300 }, { ...baseEnv, ...(envOverlay || {}) });
+
+    // scout: is the suite stable at rest?
+    const baseRuns = [];
+    for (let i = 0; i < Math.max(2, runs); i++) baseRuns.push(runOnce(cmd));
+    const baseUnstable = new Set(baseRuns).size > 1;
+    const baseOutcome = baseRuns.filter((x) => x === 1).length > baseRuns.length / 2 ? 1 : 0;
+
+    const results = {}; const flipped = []; const skipped = [];
+    for (const axis of axes) {
+      if (overBudget()) { skipped.push({ axis, reason: 'budget' }); continue; }
+      const custom = fcfg.axes && fcfg.axes[axis] && fcfg.axes[axis].variants;
+      const variants = custom || flakyAxisVariants(axis, framework, cmd);
+      if (!variants) { skipped.push({ axis, reason: axis === 'db' ? 'config-only (set flaky.axes.db.variants)' : `no ${framework} support (set flaky.axes.${axis}.variants)` }); continue; }
+      const probes = [];
+      for (const v of variants) {
+        if (overBudget()) { skipped.push({ axis, reason: 'budget (partial)' }); break; }
+        const outcome = runOnce(v.cmd || cmd, v.env);
+        probes.push({ label: v.label, outcome, flip: outcome !== baseOutcome });
+      }
+      const flips = probes.filter((p) => p.flip);
+      results[axis] = { probes, flipped: flips.length > 0 };
+      if (flips.length > 0) flipped.push(axis);
+    }
+
+    const score = flakyScore(flipped, baseUnstable);
+    const verdict = score >= threshold ? 'FLAKY' : 'STABLE';
+    const report = {
+      cmd, framework, ref, baseOutcome: baseOutcome === 1 ? 'pass' : 'fail', baseUnstable,
+      axes: results, skipped, hints, flipped, score, threshold, verdict,
+      ...(baseUnstable ? { note: 'unstable at rest — axis flips are unattributable until the base is stable; fix base first' } : {}),
+      fixes: (baseUnstable ? ['base'] : flipped).map((a) => ({ axis: a, fix: FLAKY_FIXES[a] })),
+    };
+    if (asJson) console.log(JSON.stringify(report, null, 2));
+    else {
+      console.log(`PromptWheel flaky — ${cmd}  (${framework}, base: ${report.baseOutcome}${baseUnstable ? ', UNSTABLE AT REST' : ''})`);
+      for (const [axis, r] of Object.entries(results)) {
+        for (const p of r.probes) console.log(`  ${r.flipped ? '▲' : '='} ${axis.padEnd(6)} ${p.label.padEnd(34)} ${p.outcome === 1 ? 'pass' : 'fail'}${p.flip ? '   ← FLIP' : ''}`);
+      }
+      for (const s of skipped) console.log(`  · ${s.axis.padEnd(6)} skipped — ${s.reason}`);
+      if (Object.keys(hints).length) console.log(`  hints: ${Object.entries(hints).map(([a, n]) => `${a}(${n} files)`).join(' ')}`);
+      console.log(`\n  FLAKINESS SCORE: ${score}/100 → ${verdict}${verdict === 'FLAKY' ? '' : ` (threshold ${threshold})`}`);
+      for (const f of report.fixes) console.log(`  fix[${f.axis}]: ${f.fix}`);
+    }
+    exitCode = verdict === 'FLAKY' ? 1 : 0;
+  } finally {
+    // never process.exit() inside the try — it would skip this cleanup and leak the worktree
+    try { git(['worktree', 'remove', '--force', wt], repo); } catch { rmSync(wt, { recursive: true, force: true }); }
+  }
+  process.exit(exitCode);
+}
+
 // pure, side-effect-free helpers are exported for unit testing; the CLI below only
 // runs when this file is executed directly (not when imported by the test suite).
-export { extract, evaluate, median, spread, renderMarkdown, isNonSource, gain, judgeGaming, foldOutcomes, betaMean, scoreKey };
+export { extract, evaluate, median, spread, renderMarkdown, isNonSource, gain, judgeGaming, foldOutcomes, betaMean, scoreKey, detectFlakyFramework, flakyAxisVariants, flakyScore, FLAKY_WEIGHTS, FLAKY_FIXES };
 
 function main() {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -839,6 +1012,7 @@ function main() {
   else if (cmd === 'backfill') backfill(rest);
   else if (cmd === 'init') init(rest);
   else if (cmd === 'guards') guards(rest);
+  else if (cmd === 'flaky') flaky(rest);
   else {
     console.log([
       'PromptWheel — catch your agent cheating. Prove a change moved a real metric (and that the agent earned it, not gamed it). The per-turn reward + source-only audit for AI coding loops.',
@@ -855,6 +1029,9 @@ function main() {
       '  promptwheel suggest [--json]                 UCB work-discovery: where the next attempt should go (experimental)',
       '  promptwheel backfill [-n N | --since <ref>]  seed the ledger from git history (cohort-tagged; commit types become labels)',
       '  promptwheel guards                           show the effective guardrails (incl. inherited) + flag record',
+      '  promptwheel flaky [--cmd "<test cmd>"]       attribute test noise to its source: re-run the suite across',
+      '       seed / order / time(TZ) / db-isolation variations in a throwaway worktree; weighted 0-100 score,',
+      '       per-axis fixes. exit 0=stable · 1=flaky. Options: --axes a,b --runs N --budget SEC --threshold N --json',
       '',
       'Loop it:  while promptwheel improve --attempt "$AGENT"; do :; done   # stops on plateau/regression',
       'Config:   promptwheel.config.json → { extends?, metrics:[{ name, cmd, direction, extract?, guard? }] }   (or: promptwheel init)',

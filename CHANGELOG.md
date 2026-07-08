@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **New: `promptwheel flaky`** — noise-source attribution for the reward signal. Re-runs the
+  test command in a throwaway worktree across the four classic causes of "passes locally,
+  fails in CI" — seed (20), order (25), time/TZ (25), db-isolation (20, config-only) — plus
+  base-instability (30), and emits a weighted 0–100 flakiness score with per-axis fixes.
+  Axes the framework can't express are skipped and reported, never guessed. When the suite
+  is unstable at rest, axis flips are declared unattributable (fix base first) instead of
+  being scored. Probes strip `NODE_TEST_CONTEXT` so a nested `node --test` cannot false-green.
+  Labeled benchmark: `bench/flaky-bench.mjs` (6/6 fixture classes correctly attributed).
+  Weights and remediation mapping descend from the harmonic_belt lineage (2025).
+
 ## 0.4.2 — 2026-07-07 — reposition: "add a referee to your coding loop"
 
 - **Repositioned** the README and npm description around the **referee** frame — a neutral, un-gameable check you add to your coding loop that verifies a win was *earned*. Catching the test-editing cheat is the referee's signature call, not the whole pitch. **No engine change** — the mechanism, verdicts, exit codes, and demos are identical to 0.4.1.
