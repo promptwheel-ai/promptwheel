@@ -1,0 +1,209 @@
+{
+  "pack": "security",
+  "version": "0.1.0",
+  "source": "securitychecks recommended tier (regex-portable subset)",
+  "patterns": [
+    {
+      "id": "DATAFLOW.UNTRUSTED.XSS",
+      "name": "Template Engine Autoescape Disabled",
+      "severity": "P0",
+      "match": "autoescape\\s*:\\s*false",
+      "exclude": [],
+      "message": "Template engine autoescape disabled \u2014 enables stored XSS attacks",
+      "fix": "Enable autoescape or sanitize all user input before rendering",
+      "files": [
+        "**/*.ts",
+        "**/*.js",
+        "!**/__tests__/**",
+        "!**/*.test.*",
+        "!**/*.spec.*",
+        "!**/test/**",
+        "!**/tests/**",
+        "!**/__mocks__/**",
+        "!**/fixtures/**",
+        "!**/www/**",
+        "!**/docs/**",
+        "!**/documentation/**"
+      ]
+    },
+    {
+      "id": "SESSION.INSECURE_COOKIE",
+      "name": "Insecure Session Cookie",
+      "severity": "P0",
+      "match": "secure\\s*:\\s*false",
+      "exclude": [],
+      "message": "Session cookies must have secure and httpOnly flags",
+      "fix": "Verify this is not a false positive",
+      "files": [
+        "**/*.ts",
+        "**/*.js",
+        "**/*.tsx",
+        "**/*.jsx",
+        "!**/__tests__/**",
+        "!**/*.test.*",
+        "!**/*.spec.*",
+        "!**/test/**",
+        "!**/tests/**",
+        "!**/__mocks__/**",
+        "!**/fixtures/**",
+        "!**/e2e/**",
+        "!**/playwright/**",
+        "!**/cypress/**",
+        "!**/test-utils/**",
+        "!**/*.e2e.*",
+        "!**/e2e-*/**"
+      ]
+    },
+    {
+      "id": "AUTHZ.CORS_WILDCARD",
+      "name": "CORS Wildcard Origin",
+      "severity": "P0",
+      "match": "Access-Control-Allow-Origin.*\\*|origin\\s*:\\s*\\*|origin:\\s*true",
+      "exclude": [
+        "!credentials"
+      ],
+      "message": "Wildcard origin with credentials exposes user data",
+      "fix": "Verify this is not a false positive",
+      "files": [
+        "**/*.ts",
+        "**/*.js",
+        "**/*.tsx",
+        "**/*.jsx",
+        "!**/__tests__/**",
+        "!**/*.test.*",
+        "!**/*.spec.*",
+        "!**/test/**",
+        "!**/tests/**",
+        "!**/__mocks__/**",
+        "!**/fixtures/**",
+        "!**/*.tsx",
+        "!**/*.jsx",
+        "!**/components/**"
+      ]
+    },
+    {
+      "id": "AUTHZ.CORS_REFLECT",
+      "name": "CORS Origin Reflection",
+      "severity": "P0",
+      "match": "(?:Access-Control-Allow-Origin|res\\.(?:set|setHeader|header)\\(['\"]Access-Control).*(?:req\\.headers\\.origin|headers\\.get\\(['\"]origin['\"]\\))",
+      "exclude": [],
+      "message": "Reflecting origin is equivalent to wildcard \u2014 validate against allowlist",
+      "fix": "Verify this is not a false positive",
+      "files": [
+        "**/*.ts",
+        "**/*.js",
+        "**/*.tsx",
+        "**/*.jsx",
+        "!**/__tests__/**",
+        "!**/*.test.*",
+        "!**/*.spec.*",
+        "!**/test/**",
+        "!**/tests/**",
+        "!**/__mocks__/**",
+        "!**/fixtures/**"
+      ]
+    },
+    {
+      "id": "PAY.CLIENT_AMOUNT",
+      "name": "Payment Amount From Client",
+      "severity": "P0",
+      "match": "amount.*req\\.body|price.*req\\.body|total.*body\\.amount",
+      "exclude": [
+        "server|database|catalog"
+      ],
+      "message": "Calculate payment amounts server-side, not from client input",
+      "fix": "Verify this is not a false positive",
+      "files": [
+        "**/*.ts",
+        "**/*.js",
+        "**/*.tsx",
+        "**/*.jsx",
+        "!**/__tests__/**",
+        "!**/*.test.*",
+        "!**/*.spec.*",
+        "!**/test/**",
+        "!**/tests/**",
+        "!**/__mocks__/**",
+        "!**/fixtures/**"
+      ]
+    },
+    {
+      "id": "CONFIG.NPMRC_TOKEN",
+      "name": "NPM Token in .npmrc",
+      "severity": "P0",
+      "match": "_authToken=|//registry.*:_auth",
+      "exclude": [
+        "\\$\\{NPM_TOKEN\\}|process\\.env"
+      ],
+      "message": "NPM tokens should come from environment variables",
+      "fix": "Verify this is not a false positive",
+      "files": [
+        "**/*",
+        "!**/__tests__/**",
+        "!**/*.test.*",
+        "!**/*.spec.*",
+        "!**/test/**",
+        "!**/tests/**",
+        "!**/__mocks__/**",
+        "!**/fixtures/**"
+      ]
+    },
+    {
+      "id": "VALID.UPLOAD_NOCHECK",
+      "name": "S3 Presigned Upload Without Content Validation",
+      "severity": "P2",
+      "match": "(?:createPresignedPost|getSignedUrl|PutObjectCommand)\\s*\\(",
+      "exclude": [
+        "ContentType|content-type|Content-Length|content-length|Conditions|conditions",
+        "allowedTypes|fileFilter|mimetype|maxSize|maxFileSize",
+        "@example|Example:|```|description:|guidance",
+        "GetObjectCommand|getObject|HeadObjectCommand|DeleteObjectCommand|download|Download|read|Read",
+        "generateSignedUrl.*get|getSignedUrl.*getObject"
+      ],
+      "message": "S3 presigned upload URL has no content type or size conditions \u2014 any file type/size can be uploaded",
+      "fix": "Add Conditions to presigned POST or ContentType/ContentLength constraints",
+      "files": [
+        "**/*.ts",
+        "**/*.js",
+        "!**/*.tsx",
+        "!**/*.jsx",
+        "!**/components/**",
+        "!**/frontend/**",
+        "!**/public/**",
+        "!**/__tests__/**",
+        "!**/*.test.*",
+        "!**/*.spec.*",
+        "!**/test/**",
+        "!**/tests/**",
+        "!**/__mocks__/**",
+        "!**/fixtures/**"
+      ]
+    },
+    {
+      "id": "SECRETS.HARDCODED",
+      "name": "Hardcoded Secret in Sensitive Variable",
+      "severity": "P0",
+      "match": "(?:const|let|var)\\s+(?:[A-Z_]*(?:SECRET|JWT_SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY|SIGNING_KEY|ENCRYPTION_KEY)[A-Z_]*)\\s*=\\s*['\"][^'\"]{8,}['\"]",
+      "exclude": [
+        "process\\.env|import\\.meta\\.env|getenv|\\$\\{|placeholder|changeme|YOUR_|TODO|FIXME|example|EXAMPLE"
+      ],
+      "message": "Secret value hardcoded in source code \u2014 use environment variables",
+      "fix": "Verify this is not a placeholder or example value",
+      "files": [
+        "**/*.ts",
+        "**/*.js",
+        "!**/__tests__/**",
+        "!**/*.test.*",
+        "!**/*.spec.*",
+        "!**/test/**",
+        "!**/tests/**",
+        "!**/__mocks__/**",
+        "!**/fixtures/**",
+        "!**/sample/**",
+        "!**/samples/**",
+        "!**/example/**",
+        "!**/examples/**"
+      ]
+    }
+  ]
+}

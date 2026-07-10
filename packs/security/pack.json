@@ -1,0 +1,12 @@
+{
+  "$comment": "PromptWheel security guard-pack. Decanted from securitychecks (recommended tier). Use via { \"extends\": [\"packs/security/pack.json\"] } in your promptwheel.config.json. Gates on the count of security-invariant violations (direction: down = lower is better; guard: true = fail if it climbs). Because it's a promptwheel metric, the win must survive --detect-gaming: an agent can't lower the count by editing the pattern file or a config, only by fixing the code.",
+  "metrics": [
+    {
+      "name": "security_findings",
+      "cmd": "node packs/security/scan.mjs .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true
+    }
+  ]
+}
