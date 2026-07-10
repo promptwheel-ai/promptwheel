@@ -591,3 +591,18 @@ test("guards: reports each guard's flag record from the stream", () => {
   assert.ok(todos.flagged >= 1); // the regression shows up as a flag in the record
   rmSync(d, { recursive: true, force: true });
 });
+
+// --- security guard-pack (decanted from securitychecks) ---
+test('security pack: scanner detects P0 invariants and passes clean code', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pw-sec-'));
+  mkdirSync(join(dir, 'src'));
+  writeFileSync(join(dir, 'src/a.ts'),
+    "res.setHeader('Access-Control-Allow-Origin', '*');\nconst STRIPE_SECRET = 'sk_live_x';\n");
+  const scan = join(dirname(ENGINE), '..', 'packs', 'security', 'scan.mjs');
+  const vuln = Number(execFileSync('node', [scan, dir], { encoding: 'utf8' }).trim());
+  assert.ok(vuln >= 2, `expected >=2 findings, got ${vuln}`);
+  writeFileSync(join(dir, 'src/a.ts'), 'export const add = (a, b) => a + b;\n');
+  const clean = Number(execFileSync('node', [scan, dir], { encoding: 'utf8' }).trim());
+  assert.equal(clean, 0);
+  rmSync(dir, { recursive: true, force: true });
+});
