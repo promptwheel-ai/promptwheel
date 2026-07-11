@@ -30,3 +30,20 @@ whether flagged suppressions are STILL in the current tree (grep HEAD for
 the skip/ignore near the flagged location). Present the triage as YOUR
 judgment layered on the deterministic record — never edit the logbook files
 to match your conclusions; the record and the reading stay separate.
+
+## Querying the full record (events.jsonl)
+
+The digest truncates with "…and N more — full record in events.jsonl". When
+completeness matters (ALL reverts touching a file, every weakening event),
+query the record — never read it whole (it can exceed the context window):
+
+```bash
+# every event touching a file that was a revert or dropped 3+ net assertions
+jq -c 'select((.files//[]) | index("lib/response.js")) | select(.revert or (.del_asserts - .add_asserts >= 3)) | {sha,date,subject}' events.jsonl
+# all suppression events since a date
+jq -c 'select(.suppressions != [] and .date >= "2024-01-01") | {sha,date,suppressions}' events.jsonl
+```
+
+Digest for breadth, queries for depth. Measured: digest alone found 4/12
+qualifying commits on a real task; digest + two jq queries found 12/12 for
+~400 extra tokens.
