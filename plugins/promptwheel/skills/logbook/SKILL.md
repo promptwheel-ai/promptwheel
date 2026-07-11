@@ -1,6 +1,6 @@
 ---
 name: logbook
-description: Turn a repo's git history into memory an agent can use. Writes LOGBOOK.md (hotspots, do-not-retry reverts, suppression ledger, fragile areas), events.jsonl (structured events), JOURNEY.md (the repo's story). Use when onboarding to an unfamiliar repo, before proposing large changes, or when asked what happened in a codebase. Structure maps show WHERE code is; the logbook shows WHAT HAPPENED and why. The logbook records; the referee (promptwheel gate) judges.
+description: Turn a repo's git history into memory an agent can use. Writes LOGBOOK.md (hotspots, do-not-retry reverts, suppression ledger, fragile areas), events.jsonl, JOURNEY.md; `audit` shows what is still suppressed today and its fight log. INVOKE WHEN: starting work in an unfamiliar repo; before proposing a refactor or any large change (check do-not-retry first); when something keeps breaking or a test seems flaky (fragile areas / fight log); when asked "has this been tried", "why is this like this", or "what happened here"; when deciding whether green tests can be trusted (assertion-weakening ledger). Structure maps show WHERE code is; the logbook shows WHAT HAPPENED. The logbook records; the referee (promptwheel gate) judges.
 ---
 
 # Logbook
