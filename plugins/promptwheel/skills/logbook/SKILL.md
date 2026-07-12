@@ -61,5 +61,5 @@ npx -y @promptwheel/logbook query --suppress --since 2024-01-01
 ```
 
 Digest for breadth, queries for depth. Measured: digest alone found 4/12
-qualifying commits on a real task; digest + two jq queries found 12/12 for
+qualifying commits on a real task; digest + two logbook queries found 12/12 for
 ~400 extra tokens.
