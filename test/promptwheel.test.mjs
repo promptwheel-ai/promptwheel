@@ -606,3 +606,11 @@ test('security pack: scanner detects P0 invariants and passes clean code', () =>
   assert.equal(clean, 0);
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("published tarball includes every file the CLI shells out to", () => {
+  const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+    cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
+  const files = JSON.parse(out)[0].files.map((f) => f.path);
+  assert.ok(files.includes("packs/security/scan.mjs"),
+    "security playbook's scanner must ship in the tarball");
+});
