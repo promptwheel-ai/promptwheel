@@ -11,7 +11,7 @@
 //   promptwheel run [--base R] [--head R] [--repeat N] [--json]
 
 import { execSync, execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, appendFileSync, realpathSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, appendFileSync, realpathSync, readdirSync, statSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, isAbsolute, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -87,13 +87,19 @@ function runMetric(cwd, m, env) {
   try {
     stdout = execSync(m.cmd, { cwd, env: env || process.env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: (m.timeoutSec ?? 300) * 1000 });
   } catch (e) { code = e.status ?? 1; stdout = `${e.stdout || ''}${e.stderr || ''}`; }
-  return extract(stdout, code, m.extract);
+  return extract(stdout, code, m.extract, m.allowNonzero);
 }
 
 // extract modes: 'number' (last number, default) | 'lines' | 'exit' | {regex}
-function extract(stdout, code, mode) {
+// A FAILED command is unmeasurable (null -> the metric goes inert, guards
+// fail loudly) — error text often contains numbers ("Node.js v22") and
+// silently measuring those produced identical junk on both refs = a false
+// green. 'exit' mode consumes nonzero by design; anything else needs the
+// per-metric opt-in `allowNonzero: true`.
+function extract(stdout, code, mode, allowNonzero) {
   mode = mode || 'number';
   if (mode === 'exit') return code === 0 ? 1 : 0;
+  if (code !== 0 && !allowNonzero) return null;
   if (mode === 'lines') return stdout.split('\n').filter((l) => l.trim()).length;
   if (mode && typeof mode === 'object' && mode.regex) {
     const mm = new RegExp(mode.regex).exec(stdout);
@@ -719,6 +725,19 @@ function init(argv) {
     if (!p) { console.error(`unknown preset "${presetName}" — try: promptwheel init --list`); process.exit(2); }
     metrics = p.metrics || [{ name: 'tests_pass', cmd: detectTestCmd(repo), extract: 'exit', direction: 'pass', guard: true }];
     metrics = metrics.map((m) => m.cmd === '__TESTCMD__' ? { ...m, cmd: detectTestCmd(repo) } : m); // fill the preset's target
+    // pack-backed presets: the referenced scripts live in THIS package, not
+    // the user's repo — copy them in so the generated config is
+    // self-contained and committable (a bare reference silently 404'd)
+    metrics = metrics.map((m) => {
+      const pk = /(^|\s)(packs\/[\w-]+)\//.exec(m.cmd);
+      if (!pk) return m;
+      const src = fileURLToPath(new URL(`../${pk[2]}/`, import.meta.url));
+      const dst = join(repo, '.promptwheel', pk[2]);
+      mkdirSync(dst, { recursive: true });
+      for (const f of readdirSync(src)) copyFileSync(join(src, f), join(dst, f));
+      console.log(`  ✓ installed ${pk[2]} → .promptwheel/${pk[2]} (commit it with the config)`);
+      return { ...m, cmd: m.cmd.replaceAll(pk[2] + '/', `.promptwheel/${pk[2]}/`) };
+    });
     note = presetName;
   } else {
     // default = the headline posture: guarded tests + the antihack tripwires, so the FIRST

@@ -614,3 +614,36 @@ test("published tarball includes every file the CLI shells out to", () => {
   assert.ok(files.includes("packs/security/scan.mjs"),
     "security playbook's scanner must ship in the tarball");
 });
+
+test("a preset whose command cannot run must NOT pass — cold llm-eval with missing scripts", () => {
+  const d = mkdtempSync(join(tmpdir(), "pw-preset-"));
+  const g = (a) => execFileSync("git", ["-C", d, ...a], { env: { ...process.env,
+    GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+  g(["init", "-q"]);
+  writeFileSync(join(d, "a.js"), "let x = 1;\n");
+  g(["add", "-A"]); g(["commit", "-q", "-m", "one"]);
+  execFileSync(process.execPath, [ENGINE, "init", "--preset", "llm-eval"], { cwd: d, encoding: "utf8" });
+  let out = "", code = 0;
+  try {
+    out = execFileSync(process.execPath, [ENGINE, "run", "--base", "HEAD", "--head", "HEAD"], { cwd: d, encoding: "utf8" });
+  } catch (e) { code = e.status; out = `${e.stdout || ""}${e.stderr || ""}`; }
+  assert.notEqual(code, 0, "missing eval scripts must not exit 0");
+  assert.ok(!/verdict:\s*PASS/i.test(out), "must not report PASS: " + out.slice(-200));
+});
+
+test("security preset installs its pack into the repo and the scanner actually runs", () => {
+  const d = mkdtempSync(join(tmpdir(), "pw-sec-"));
+  const g = (a) => execFileSync("git", ["-C", d, ...a], { env: { ...process.env,
+    GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+  g(["init", "-q"]);
+  writeFileSync(join(d, "a.js"), "let x = 1;\n");
+  g(["add", "-A"]); g(["commit", "-q", "-m", "one"]);
+  execFileSync(process.execPath, [ENGINE, "init", "--preset", "security"], { cwd: d, encoding: "utf8" });
+  assert.ok(existsSync(join(d, ".promptwheel", "packs", "security", "scan.mjs")), "pack copied into repo");
+  const cfg = JSON.parse(readFileSync(join(d, "promptwheel.config.json"), "utf8"));
+  assert.match(cfg.metrics[0].cmd, /\.promptwheel\/packs\/security\/scan\.mjs/);
+  g(["add", "-A"]); g(["commit", "-q", "-m", "wire promptwheel"]);
+  const out = execFileSync(process.execPath, [ENGINE, "run", "--base", "HEAD", "--head", "HEAD", "--json"], { cwd: d, encoding: "utf8" });
+  const rep = JSON.parse(out);
+  assert.notEqual(rep.metrics[0].status, "unmeasurable", "scanner must actually run");
+});
