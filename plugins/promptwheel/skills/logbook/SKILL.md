@@ -52,10 +52,12 @@ completeness matters (ALL reverts touching a file, every weakening event),
 query the record — never read it whole (it can exceed the context window):
 
 ```bash
-# every event touching a file that was a revert or dropped 3+ net assertions
-jq -c 'select((.files//[]) | index("lib/response.js")) | select(.revert or (.del_asserts - .add_asserts >= 3)) | {sha,date,subject}' "$(git rev-parse --show-toplevel)/events.jsonl"
-# all suppression events since a date
-jq -c 'select(.suppressions != [] and .date >= "2024-01-01") | {sha,date,suppressions}' "$(git rev-parse --show-toplevel)/events.jsonl"
+# every revert touching a file
+npx -y @promptwheel/logbook query --file lib/response.js --revert
+# all assertion-weakening events (3+ net) since a date
+npx -y @promptwheel/logbook query --weaken 3 --since 2024-01-01
+# all suppression events, era-scoped
+npx -y @promptwheel/logbook query --suppress --since 2024-01-01
 ```
 
 Digest for breadth, queries for depth. Measured: digest alone found 4/12
