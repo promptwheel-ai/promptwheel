@@ -208,6 +208,13 @@ const NON_SOURCE = [
   /(^|\/)tsconfig[^/]*\.json$/i,
   /(^|\/)\.(eslintrc|babelrc|prettierrc)[^/]*$/i,
   /(^|\/)(pytest\.ini|setup\.cfg|\.flake8|tox\.ini|eslint\.config\.[cm]?js)$/i,
+  // promptwheel's OWN evaluator surface: the config that defines the gate
+  // and any pack copied into the repo by `init --preset`. Editing these is
+  // moving the goalposts, never a production improvement — an agent that
+  // "improved" security_findings by deleting pattern rules must show 0%
+  // retained in the source-only re-run, not 100%.
+  /(^|\/)promptwheel\.config\.json$/i,
+  /(^|\/)\.promptwheel\//i,
 ];
 const isNonSource = (p) => NON_SOURCE.some((re) => re.test(p));
 

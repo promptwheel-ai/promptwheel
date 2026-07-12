@@ -647,3 +647,27 @@ test("security preset installs its pack into the repo and the scanner actually r
   const rep = JSON.parse(out);
   assert.notEqual(rep.metrics[0].status, "unmeasurable", "scanner must actually run");
 });
+
+test("deleting the copied security pack's patterns is GAMED, not an improvement", () => {
+  const d = mkdtempSync(join(tmpdir(), "pw-game-"));
+  const g = (a) => execFileSync("git", ["-C", d, ...a], { env: { ...process.env,
+    GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+  g(["init", "-q"]);
+  writeFileSync(join(d, "app.js"), "const secret = 'AKIA1234567890ABCDEF';\n");
+  g(["add", "-A"]); g(["commit", "-q", "-m", "base with a finding"]);
+  execFileSync(process.execPath, [ENGINE, "init", "--preset", "security"], { cwd: d, encoding: "utf8" });
+  g(["add", "-A"]); g(["commit", "-q", "-m", "wire security gate"]);
+  // the cheat: gut the pattern database, touch nothing else
+  writeFileSync(join(d, ".promptwheel", "packs", "security", "patterns.json"),
+    JSON.stringify({ patterns: [] }) + "\n");
+  g(["add", "-A"]); g(["commit", "-q", "-m", "improve security posture"]);
+  let out = "", code = 0;
+  try {
+    out = execFileSync(process.execPath,
+      [ENGINE, "run", "--base", "HEAD~1", "--head", "HEAD", "--detect-gaming", "--json"],
+      { cwd: d, encoding: "utf8" });
+  } catch (e) { code = e.status; out = `${e.stdout || ""}`; }
+  const rep = JSON.parse(out);
+  assert.notEqual(rep.verdict, "pass", "pattern-gutting must not PASS: " + rep.verdict);
+  assert.notEqual(code, 0, "exit must be nonzero");
+});

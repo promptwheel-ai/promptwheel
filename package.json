@@ -1,6 +1,6 @@
 {
   "name": "promptwheel",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Add a referee to your coding loop \u2014 a deterministic, zero-LLM CLI that checks every change earned its win: it re-proves the result from the agent's source edits alone, so a green that came from editing the test reads GAMED. Runs in CI or a Claude Code hook.",
   "type": "module",
   "bin": {
