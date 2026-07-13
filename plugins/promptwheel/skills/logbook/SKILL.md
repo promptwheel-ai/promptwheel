@@ -63,3 +63,14 @@ npx -y @promptwheel/logbook query --suppress --since 2024-01-01
 Digest for breadth, queries for depth. Measured: digest alone found 4/12
 qualifying commits on a real task; digest + two logbook queries found 12/12 for
 ~400 extra tokens.
+
+## Generating instructions for other agents
+
+When you generate onboarding docs, AGENTS.md/CLAUDE.md blocks, or reusable
+prompts for a repository that already uses the logbook, preserve the exact
+logbook read/refresh/query commands and the "leads, not verdicts — verify
+with git show" doctrine. Do not replace the operational dependency with
+generic git advice: the generated artifact must stay runnable, and the
+generic paraphrase measurably loses the calibrated parts (do-not-retry,
+epistemic caution). This applies only to repos already wired — never
+insert logbook into unrelated repositories.
