@@ -389,7 +389,7 @@ test('run: a guarded pass metric that never passes → INCONCLUSIVE (exit 3), ne
   const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
   assert.equal(r.code, 3);                        // an inert guard verifies nothing, not a pass, not a regression
   assert.match(r.out, /INCONCLUSIVE/);
-  assert.match(r.out, /never passed at either ref/);   // still names the specific broken guard
+  assert.match(r.out, /never ran/);   // still names the specific broken guard
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -403,7 +403,7 @@ test('run: an inert guard does NOT bury a real improvement elsewhere (keep the w
   const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
   assert.equal(r.code, 0);                            // a real, measured win must NOT be discarded as inconclusive
   assert.match(r.out, /VERDICT: PASS/);
-  assert.match(r.out, /never passed at either ref/);  // the inert guard is still surfaced as a warning
+  assert.match(r.out, /never ran/);  // the inert guard is still surfaced as a warning
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -837,12 +837,12 @@ test('check(): verdict gamed when the win came from editing the test, not the so
   assert.equal(conformsToContract(report).ok, true, conformsToContract(report).errors.join('; '));
   rmSync(d, { recursive: true, force: true });
 });
-test('check(): throws (does not exit) on a missing config', () => {
+test('check(): with auto:false throws (does not exit) on a missing config', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-nocfg-'));
   const g = (a) => execFileSync('git', a, { cwd: d });
   g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
   writeFileSync(join(d, 'x.js'), '1\n'); commitAll(d, 'base');
-  assert.throws(() => check({ repo: d }), /no promptwheel\.config\.json/);
+  assert.throws(() => check({ repo: d, auto: false }), /no promptwheel\.config\.json/);
   rmSync(d, { recursive: true, force: true });
 });
 test('check(): accepts an in-process config object (no config file needed)', () => {
@@ -919,5 +919,52 @@ test('gate integrity: deleting a guarded metric that regressed reads GAMED', () 
   const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
   assert.equal(r.verdict, 'gamed', JSON.stringify(r));
   assert.ok(r.gate.weakened.some((w) => w.name === 'todos' && w.change === 'guard-removed'), 'removed guard recorded');
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------- integration: zero-config (no config file)
+function bareRepo() {
+  const d = mkdtempSync(join(tmpdir(), 'pw-zc-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+  return d;
+}
+test('zero-config: run auto-detects the test command when no config file exists', () => {
+  const d = bareRepo();
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'zc', scripts: { test: 'node --test' } }));
+  writeFileSync(join(d, 'a.test.mjs'), "import { test } from 'node:test'; import assert from 'node:assert'; test('t', () => assert.ok(true));\n");
+  commitAll(d, 'base');
+  writeFileSync(join(d, 'note.txt'), 'x'); commitAll(d, 'honest change');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 0, r.out);   // the "auto-gating ..." note is on stderr so --json stays clean
+  assert.match(r.out, /tests_pass/);
+  assert.match(r.out, /PASS/);
+  rmSync(d, { recursive: true, force: true });
+});
+test('zero-config: --no-auto restores the require-a-config behavior (exit 2)', () => {
+  const d = bareRepo();
+  writeFileSync(join(d, 'f.txt'), 'a'); commitAll(d, 'base'); writeFileSync(join(d, 'f.txt'), 'b'); commitAll(d, 'change');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-auto']);
+  assert.equal(r.code, 2, r.out);
+  assert.match(r.out, /no promptwheel\.config\.json/);
+  rmSync(d, { recursive: true, force: true });
+});
+test('zero-config: no test command -> inert -> INCONCLUSIVE with a helpful message', () => {
+  const d = bareRepo();
+  writeFileSync(join(d, 'f.txt'), 'a'); commitAll(d, 'base'); writeFileSync(join(d, 'f.txt'), 'b'); commitAll(d, 'change');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 3, r.out);   // inconclusive, never a fake green
+  assert.match(r.out, /never ran|INCONCLUSIVE/);
+  rmSync(d, { recursive: true, force: true });
+});
+test('check(): falls back to auto-config when no config file exists', () => {
+  const d = bareRepo();
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'zc', scripts: { test: 'node --test' } }));
+  writeFileSync(join(d, 'a.test.mjs'), "import { test } from 'node:test'; import assert from 'node:assert'; test('t', () => assert.ok(true));\n");
+  commitAll(d, 'base'); writeFileSync(join(d, 'note.txt'), 'x'); commitAll(d, 'change');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.metrics[0].name, 'tests_pass');
+  assert.equal(r.verdict, 'pass', JSON.stringify(r.metrics));
   rmSync(d, { recursive: true, force: true });
 });

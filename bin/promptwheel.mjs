@@ -75,6 +75,18 @@ function loadConfig(repo) {
   return cfg;
 }
 
+// does the repo have a committed gate config?
+const hasConfigFile = (repo) => ['promptwheel.config.json', 'outcome-gate.config.json'].some((f) => existsSync(join(repo, f)));
+
+// the zero-config default: the gate `init` would write, built in memory from stack detection.
+// It gates the detected test command (gaming detection on) with the stack's env/linkDirs so the
+// measurement actually runs in a throwaway worktree. Lets `run` and `check()` work with no config
+// file; `init` is for customizing. A repo with no test command gets a sentinel that reads inert ->
+// INCONCLUSIVE (never a fake green), with a message pointing at the fix.
+function autoConfig(repo) {
+  return { ...detectEnv(repo), metrics: [{ name: 'tests_pass', cmd: detectTestCmd(repo), extract: 'exit', direction: 'pass', guard: true }] };
+}
+
 function resolveBase(repo, base) {
   if (base) return base;
   for (const b of ['origin/main', 'origin/master', 'main', 'master']) {
@@ -546,7 +558,12 @@ function gate(repo, opts) {
 function run(argv) {
   const args = parseArgs(argv);
   const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
-  const report = gate(repo, { base: args.base, head: args.head, working: args.working, repeat: args.repeat, noRecord: args.noRecord, detectGaming: args.detectGaming, label: args.label });
+  let config;
+  if (!hasConfigFile(repo) && !args.noAuto) {
+    config = autoConfig(repo);
+    console.error(`no promptwheel.config.json, auto-gating the detected test command: ${config.metrics[0].cmd}  (promptwheel init to customize; --no-auto to require a config)`);
+  }
+  const report = gate(repo, { base: args.base, head: args.head, working: args.working, repeat: args.repeat, noRecord: args.noRecord, detectGaming: args.detectGaming, label: args.label, config });
   if (args.json) console.log(JSON.stringify(report, null, 2));
   else if (args.markdown) console.log(renderMarkdown(report));
   else printHuman(report);
@@ -951,7 +968,7 @@ function printHuman(r) {
     const tag = m.guard ? (m.ok ? 'guard✓' : 'GUARD✗') : 'info';
     const d = m.delta == null ? 'n/a' : (m.delta > 0 ? `+${m.delta}` : `${m.delta}`);
     console.log(`  ${arrowFor(m)} ${m.name.padEnd(18)} ${String(m.before).padStart(8)} → ${String(m.after).padStart(8)}  (${d}, ${m.status}) [${tag}, ${m.confidence}]`);
-    if (m.inert) console.log('      ⚠ never passed at either ref, this guard is protecting nothing (check its command)');
+    if (m.inert) console.log(`      ⚠ "${m.name}" never ran (same value at both refs): its command needs a build/deps first, or is not your real test command. Fix: promptwheel init, or set setup/linkDirs in promptwheel.config.json`);
     if (m.gamed === true) console.log(`      🚩 GAMED, ${m.gamingReason}`);
   }
   if (r.gate && r.gate.weakened) for (const w of r.gate.weakened) console.log(`  🚩 GATE WEAKENED, the guard "${w.name}" was ${w.change === 'guard-removed' ? 'removed' : 'disabled'} in this change and it would have ${w.status} at head (goalpost moved, not earned)`);
@@ -993,6 +1010,7 @@ function parseArgs(argv) {
     else if (argv[i] === '--repeat') a.repeat = parseInt(argv[++i], 10);
     else if (argv[i] === '--working') a.working = true;
     else if (argv[i] === '--no-record') a.noRecord = true;
+    else if (argv[i] === '--no-auto') a.noAuto = true;
     else if (argv[i] === '--detect-gaming' || argv[i] === '--antihack') { a.detectGaming = true; a.dgExplicit = true; }
     else if (argv[i] === '--no-detect-gaming' || argv[i] === '--no-antihack') { a.detectGaming = false; a.dgExplicit = true; }
     else if (argv[i] === '--since') a.since = argv[++i];
@@ -1046,7 +1064,8 @@ export function verdictExitCode(verdict) {
 //   head          string   head ref (default: HEAD)
 //   working       boolean  gate uncommitted changes instead of base..head
 //   config        object   a resolved config { metrics:[...], ... }; omit to load
-//                          promptwheel.config.json from the repo
+//                          promptwheel.config.json, or auto-detect a default when none exists
+//   auto          boolean  allow the zero-config auto-detect fallback (default true; false throws if no config)
 //   repeat        number   measurement repeats for the noise band (default: config.repeat ?? 1)
 //   detectGaming  boolean  run the Section 3 source-only re-proof (default: true)
 //   cohort        string   cohort tag for the record (default: CI ? 'ci' : 'local')
@@ -1059,19 +1078,20 @@ export function check(options = {}) {
                         : git(['rev-parse', '--show-toplevel'], process.cwd());
   } catch { throw new Error(`promptwheel check: not inside a git repository (${options.repo || process.cwd()})`); }
 
-  if (options.config !== undefined) {
-    const c = options.config;
-    if (!c || typeof c !== 'object' || !Array.isArray(c.metrics) || c.metrics.length === 0)
+  let config = options.config;
+  if (config !== undefined) {
+    if (!config || typeof config !== 'object' || !Array.isArray(config.metrics) || config.metrics.length === 0)
       throw new Error('promptwheel check: options.config.metrics must be a non-empty array');
-  } else if (!['promptwheel.config.json', 'outcome-gate.config.json'].some((f) => existsSync(join(repo, f)))) {
-    throw new Error(`promptwheel check: no promptwheel.config.json in ${repo} (pass options.config to supply one in process)`);
+  } else if (!hasConfigFile(repo)) {
+    if (options.auto === false) throw new Error(`promptwheel check: no promptwheel.config.json in ${repo} (pass options.config, or allow auto-detect)`);
+    config = autoConfig(repo);   // zero-config: gate the detected test command in process
   }
 
   return gate(repo, {
     base: options.base,
     head: options.head,
     working: options.working,
-    config: options.config,
+    config,
     repeat: options.repeat,
     detectGaming: options.detectGaming ?? true,
     cohort: options.cohort,
@@ -1212,7 +1232,7 @@ function main() {
     console.log([
       'PromptWheel, catch your agent cheating. Prove a change moved a real metric (and that the agent earned it, not gamed it). The per-turn reward + source-only audit for AI coding loops.',
       '',
-      '  promptwheel init [--preset <name> | --list]  write a starter config for your stack',
+      '  promptwheel init [--preset <name> | --list]  write a starter config (OPTIONAL: run works zero-config, auto-detecting your test command)',
       '  promptwheel run [--base R] [--head R] [--repeat N] [--json|--markdown]',
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',
       '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',
