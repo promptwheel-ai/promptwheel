@@ -408,7 +408,8 @@ const GATE_SCALARS = ['gamingThreshold', 'evaluatorPaths'];
 // is no config at `ref` (a gate ADDED in this range is not a weakening). Never exits: any
 // missing/unreadable file or parse error yields null (that branch simply contributes nothing).
 function gateDefAtRef(repo, ref) {
-  const readAt = (p) => { try { return git(['show', `${ref}:${p}`], repo); } catch { return null; } };
+  // quiet: a missing path makes `git show` exit nonzero and print "fatal:" to stderr; swallow it
+  const readAt = (p) => { try { return execFileSync('git', ['show', `${ref}:${p}`], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
   const seen = new Set();
   const resolve = (p) => {
     if (seen.has(p)) return null;
@@ -428,7 +429,8 @@ function gateDefAtRef(repo, ref) {
     for (const k of GATE_SCALARS) if (cfg[k] !== undefined) scalars[k] = cfg[k];
     return { metrics: byName, scalars };
   };
-  return ['promptwheel.config.json', 'outcome-gate.config.json'].map((p) => resolve(p)).find(Boolean) || null;
+  for (const p of ['promptwheel.config.json', 'outcome-gate.config.json']) { const r = resolve(p); if (r) return r; } // first hit only: no spurious probe of the alias
+  return null;
 }
 
 // an order-independent SHA-256 (truncated) fingerprint of a gate definition, for the audit record

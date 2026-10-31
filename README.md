@@ -4,6 +4,8 @@
 
 **A deterministic check for your coding loop.** A green test should mean your agent *fixed the code*, not that it edited the test to match the bug. PromptWheel tells the difference: it re-proves every win from the source changes alone, with no LLM, so a win that only survived by editing the test reads `GAMED`. Un-gameable by construction, because the code being checked never gets to grade itself.
 
+![PromptWheel catching an agent game the metric, then passing an honest fix](demo/promptwheel.gif)
+
 PromptWheel re-proves every "win" using the agent's **source edits alone**. If the gate only went green because the agent edited the test, mocked the grader, suppressed the error (`@ts-ignore` / `eslint-disable`), or deleted the feature, the win evaporates when those edits are reverted → **`VERDICT GAMED`, exit 2**. No LLM in the loop, a diff partition plus a re-run, so every flag is reproducible in seconds with a human-readable reason.
 
 It's built on an **outcome gate**: for any change it re-runs your metric commands (tests, lint, `tsc`, coverage, bundle, eval) in throwaway git worktrees before and after, and refuses to trust a delta inside the measurement noise. The gate everyone ships asks *"did the number move?"*, PromptWheel also asks *"did the agent **earn** it?"*
