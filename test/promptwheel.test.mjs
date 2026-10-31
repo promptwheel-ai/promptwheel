@@ -172,7 +172,7 @@ test('run --detect-gaming: a gamingCheck:false guard is exempt from the source-o
   writeFileSync(join(d, 'x.test.js'), 'ok\nok\nok\n');                      // test-side gain (asserts 1→3)
   commitAll(d, 'head');
   const r = pw(d, ['run', '--base', base, '--head', 'HEAD', '--detect-gaming', '--no-record']);
-  assert.equal(r.code, 0, r.out);          // PASS — the test-side gain must not be flagged GAMED
+  assert.equal(r.code, 0, r.out);          // PASS, the test-side gain must not be flagged GAMED
   assert.doesNotMatch(r.out, /GAMED/);
   rmSync(d, { recursive: true, force: true });
 });
@@ -200,7 +200,7 @@ test('improve: keeps on improvement (commits), reverts on regression (no new com
   assert.notEqual(base, kept); // a commit was made
   r = pw(d, ['improve', '--attempt', "echo 'x // TODO' >> app.js"]); // regression
   assert.equal(r.code, 1);
-  assert.equal(rev(d), kept); // reverted — HEAD unchanged
+  assert.equal(rev(d), kept); // reverted, HEAD unchanged
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -227,7 +227,7 @@ test('run --working: SEES newly added untracked files (the dominant agent action
   writeFileSync(join(d, 'app.js'), 'a\nb\n'); commitAll(d, 'base');   // 0 TODOs committed
   writeFileSync(join(d, 'new.js'), 'x // TODO\n');                    // untracked new file
   const r = pw(d, ['run', '--working', '--no-record']);
-  assert.equal(r.code, 1);                       // todos 0->1 guarded regression — only visible if untracked is snapshotted
+  assert.equal(r.code, 1);                       // todos 0->1 guarded regression, only visible if untracked is snapshotted
   assert.ok(existsSync(join(d, 'new.js')));       // working tree untouched
   rmSync(d, { recursive: true, force: true });
 });
@@ -287,7 +287,7 @@ test('default init config: weakening the suite (flat metric) FAILS via tripwires
   // gut the suite: tests_pass stays 1 → 1, but assertions/test_count drop
   writeFileSync(join(d, 'x.test.mjs'), "import {test} from 'node:test';\ntest('trivial', () => {});\n");
   const r = pw(d, ['run', '--working', '--no-record']);
-  assert.equal(r.code, 1, r.out);               // guarded tripwire regression — not a silent PASS
+  assert.equal(r.code, 1, r.out);               // guarded tripwire regression, not a silent PASS
   assert.match(r.out, /FAIL/);
   rmSync(d, { recursive: true, force: true });
 });
@@ -323,7 +323,7 @@ test('run: a guarded pass metric that never passes → INCONCLUSIVE (exit 3), ne
   writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
   writeFileSync(join(d, 'a.js'), '2\n'); commitAll(d, 'c1');
   const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
-  assert.equal(r.code, 3);                        // an inert guard verifies nothing — not a pass, not a regression
+  assert.equal(r.code, 3);                        // an inert guard verifies nothing, not a pass, not a regression
   assert.match(r.out, /INCONCLUSIVE/);
   assert.match(r.out, /never passed at either ref/);   // still names the specific broken guard
   rmSync(d, { recursive: true, force: true });
@@ -343,7 +343,7 @@ test('run: an inert guard does NOT bury a real improvement elsewhere (keep the w
   rmSync(d, { recursive: true, force: true });
 });
 
-test('antihack tripwires exclude generated dirs — no artifact-drift false fire', () => {
+test('antihack tripwires exclude generated dirs, no artifact-drift false fire', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-artifact-'));
   const g = (a) => execFileSync('git', a, { cwd: d });
   g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
@@ -442,7 +442,7 @@ test('foldOutcomes: keys by metric, subsystem, and label; counts moved evidence'
   assert.ok(byKey['lint'].moved < byKey['lint'].w); // unchanged run adds weight but not movement
 });
 
-test('foldOutcomes: decay — recent outcomes outweigh old ones (order flips the verdict)', () => {
+test('foldOutcomes: decay, recent outcomes outweigh old ones (order flips the verdict)', () => {
   const oldGoodNewBad = [...Array(30).fill(0).map(() => runRow('improved')), ...Array(30).fill(0).map(() => runRow('regressed'))];
   const oldBadNewGood = [...Array(30).fill(0).map(() => runRow('regressed')), ...Array(30).fill(0).map(() => runRow('improved'))];
   const p1 = betaMean(foldOutcomes(oldGoodNewBad)[0].imp, foldOutcomes(oldGoodNewBad)[0].reg);
@@ -565,7 +565,7 @@ test('extends: a diamond (two bases sharing a grandparent) is NOT a false cycle'
   writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, extends: ['./b.json', './c.json'], metrics: [{ name: 'local_m', cmd: 'echo 1', extract: 'number', direction: 'up' }] }));
   writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
   const r = pw(d, ['guards', '--json']);
-  assert.equal(r.code, 0); // diamond resolves — no false "cycle" exit 2
+  assert.equal(r.code, 0); // diamond resolves, no false "cycle" exit 2
   const names = JSON.parse(r.out).guards.map((x) => x.name);
   for (const n of ['base_m', 'b_m', 'c_m', 'local_m']) assert.ok(names.includes(n), `missing ${n}`);
   rmSync(d, { recursive: true, force: true });
@@ -615,7 +615,7 @@ test("published tarball includes every file the CLI shells out to", () => {
     "security playbook's scanner must ship in the tarball");
 });
 
-test("a preset whose command cannot run must NOT pass — cold llm-eval with missing scripts", () => {
+test("a preset whose command cannot run must NOT pass, cold llm-eval with missing scripts", () => {
   const d = mkdtempSync(join(tmpdir(), "pw-preset-"));
   const g = (a) => execFileSync("git", ["-C", d, ...a], { env: { ...process.env,
     GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
