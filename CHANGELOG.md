@@ -4,6 +4,7 @@
 
 - **Re-voiced off the "referee" frame.** The README and npm description now describe PromptWheel plainly as the deterministic check; the un-gameable point stays (the code being checked never grades itself). PromptWheel is now documented as the reference check for the [Verified-Outcome Contract](https://github.com/sawbuck-ai/sawbuck/blob/master/CONTRACT.md).
 - **Fixed: measured commands no longer inherit the harness's `node:test` context.** When PromptWheel runs under a test runner, `NODE_TEST_CONTEXT` leaked into metric subprocesses (a `node --test` metric would act as a child reporter and report a bogus exit code). The measured gate now runs with a clean child env; no change to real-world behavior.
+- **New opt-in preset `no-ai-tells`**: a guard that fails if the em-dash count rises (an AI writing tell). `promptwheel init --preset no-ai-tells`.
 
 ## 0.4.2 — 2026-07-07 — reposition: "add a referee to your coding loop"
 

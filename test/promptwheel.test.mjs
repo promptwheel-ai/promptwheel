@@ -81,6 +81,25 @@ function pw(d, args) {
 }
 const TODOS = { name: 'todos', cmd: 'grep -rn TODO . --include=*.js 2>/dev/null | wc -l', extract: 'number', direction: 'down', guard: true };
 
+// -------------------------------------------------------- integration: no-ai-tells preset
+test('preset no-ai-tells: writes an em_dashes guard that regresses when an em-dash is added', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-emdash-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+  writeFileSync(join(d, 'doc.md'), 'clean prose, no tells here\n'); commitAll(d, 'base: clean');
+  const init = pw(d, ['init', '--preset', 'no-ai-tells']);
+  assert.equal(init.code, 0, init.out);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  assert.ok(cfg.metrics.some((m) => m.name === 'em_dashes'), 'em_dashes guard present');
+  commitAll(d, 'add the no-ai-tells gate');
+  writeFileSync(join(d, 'doc.md'), 'clean prose, no tells here\nnow with an — em-dash\n'); commitAll(d, 'sneak in an em-dash');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 1, r.out);                 // the em-dash tripped the guard
+  assert.match(r.out, /em_dashes|FAIL/);
+  rmSync(d, { recursive: true, force: true });
+});
+
 // -------------------------------------------------------- integration: run pass/fail
 test('run: passes on improvement (exit 0), fails on guarded regression (exit 1)', () => {
   const d = tmpRepo([TODOS]);
