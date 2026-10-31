@@ -968,3 +968,50 @@ test('check(): falls back to auto-config when no config file exists', () => {
   assert.equal(r.verdict, 'pass', JSON.stringify(r.metrics));
   rmSync(d, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------- integration: Sawbuck-Allow (declared override)
+const CALC = (expect) => `import { test } from 'node:test'; import assert from 'node:assert'; import { sub } from './calc.mjs'; test('s', () => assert.strictEqual(sub(5, 3), ${expect}));\n`;
+function gamedRepo() {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');   // BUG
+  writeFileSync(join(d, 'calc.test.mjs'), CALC(2)); commitAll(d, 'base: red');
+  writeFileSync(join(d, 'calc.test.mjs'), CALC(8));                               // the test-only "win"
+  return d;
+}
+test('Sawbuck-Allow: a gamed win declared intentional reads PASS, recorded in report.allowed', () => {
+  const d = gamedRepo();
+  commitAll(d, 'correct the test\n\nSawbuck-Allow: the old test asserted the wrong value');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'pass', JSON.stringify(r));
+  assert.ok(r.allowed && r.allowed.reason.includes('wrong value') && r.allowed.cleared.includes('tests_pass'), JSON.stringify(r.allowed));
+  assert.equal(r.metrics[0].allowed, true);
+  assert.equal(conformsToContract(r).ok, true, conformsToContract(r).errors.join('; '));
+  rmSync(d, { recursive: true, force: true });
+});
+test('Sawbuck-Allow: the --allow / allow option overrides for a committed or working run', () => {
+  const d = gamedRepo();
+  commitAll(d, 'edit the test, no declaration');
+  assert.equal(check({ repo: d, base: 'HEAD~1', head: 'HEAD' }).verdict, 'gamed');   // undeclared = gamed
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD', allow: 'the spec changed to 8' });
+  assert.equal(r.verdict, 'pass', JSON.stringify(r));
+  assert.equal(r.allowed.reason, 'the spec changed to 8');
+  rmSync(d, { recursive: true, force: true });
+});
+test('Sawbuck-Allow: covers an intentional test DELETE (not just an edit)', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test *.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');
+  writeFileSync(join(d, 'calc.test.mjs'), CALC(2)); commitAll(d, 'base: red');
+  execFileSync('git', ['rm', '-q', 'calc.test.mjs'], { cwd: d });
+  writeFileSync(join(d, 'keep.test.mjs'), "import { test } from 'node:test'; test('noop', () => {});\n");
+  commitAll(d, 'drop the obsolete test\n\nSawbuck-Allow: the feature was removed, its test is obsolete');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'pass', JSON.stringify(r));   // without the trailer this is GAMED (proven elsewhere)
+  assert.ok(r.allowed, 'the delete was acknowledged');
+  rmSync(d, { recursive: true, force: true });
+});
+test('Sawbuck-Allow: a trailer with no reason does NOT override (still gamed)', () => {
+  const d = gamedRepo();
+  commitAll(d, 'edit\n\nSawbuck-Allow:   ');   // empty reason
+  assert.equal(check({ repo: d, base: 'HEAD~1', head: 'HEAD' }).verdict, 'gamed');
+  rmSync(d, { recursive: true, force: true });
+});

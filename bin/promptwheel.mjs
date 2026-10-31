@@ -472,6 +472,20 @@ function gateWeakenings(baseGate, headMetrics) {
   return weak;
 }
 
+// A declared, auditable override (CONTRACT Section 3). The head commit can acknowledge an
+// intentional test/config/grader change - an edit, a delete, or a new file - or an intentional
+// gate change, with a trailer:   Sawbuck-Allow: <reason>
+// so a change that would read GAMED reads PASS instead, with the acknowledgment RECORDED in
+// report.allowed. The check does not judge intent; it forces intent to be explicit. An UNdeclared
+// test-only win is still gamed. `--allow "<reason>"` (CLI) / `allow` (check) supplies the same for
+// a working-tree or CI run that has no commit message to carry the trailer.
+function readAllowTrailer(repo, ref) {
+  let msg = '';
+  try { msg = execFileSync('git', ['log', '-1', '--format=%B', ref], { cwd: repo, encoding: 'utf8' }); } catch { return null; }
+  const m = msg.match(/^[ \t]*(?:Sawbuck-Allow|Allow-Gamed|Promptwheel-Allow)[ \t]*:[ \t]*(\S.*?)[ \t]*$/im);
+  return m && m[1].trim() ? { reason: m[1].trim().slice(0, 300) } : null;
+}
+
 function gate(repo, opts) {
   selfHeal(repo);
   warnEditableInstall(repo);
@@ -533,8 +547,21 @@ function gate(repo, opts) {
       ...(weakened.length ? { weakened } : {}),
     };
   }
+  // declared override: a Sawbuck-Allow trailer (or --allow) acknowledges an intentional
+  // goalpost/gate change, so a would-be GAMED becomes PASS, recorded in report.allowed for review.
+  const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300) } : (opts.working ? null : readAllowTrailer(repo, head));
+  let allowed = null;
+  if (opts.detectGaming && allow) {
+    const gm = metrics.filter((m) => m.gamed === true);
+    const gw = !!(gateInfo && gateInfo.weakened);
+    if (gm.length || gw) {
+      allowed = { reason: allow.reason, cleared: [...gm.map((m) => m.name), ...(gw ? ['gate'] : [])] };
+      for (const m of gm) { m.gamed = false; m.allowed = true; }
+      if (gw) gateInfo.allowed = true;
+    }
+  }
   const failed = metrics.some((m) => m.guard && !m.ok);
-  const gamed = metrics.some((m) => m.gamed === true) || !!(gateInfo && gateInfo.weakened);
+  const gamed = metrics.some((m) => m.gamed === true) || !!(gateInfo && gateInfo.weakened && !gateInfo.allowed);
   // a guard that never runs (inert: a pass/fail metric stuck at 0 across both refs) verifies
   // nothing, don't launder that into a green PASS. The honest verdict is "couldn't measure".
   // BUT scope it to a bare no-op run: an inert guard must NOT bury a genuine, measured win
@@ -550,6 +577,7 @@ function gate(repo, opts) {
     subsystems: subsystemsOf(repo, base, head, cfg),
     verdict, metrics,
     ...(gateInfo ? { gate: gateInfo } : {}),
+    ...(allowed ? { allowed } : {}),
   };
   if (!opts.noRecord && cfg.record !== false) recordOutcome(repo, report);
   return report;
@@ -563,7 +591,7 @@ function run(argv) {
     config = autoConfig(repo);
     console.error(`no promptwheel.config.json, auto-gating the detected test command: ${config.metrics[0].cmd}  (promptwheel init to customize; --no-auto to require a config)`);
   }
-  const report = gate(repo, { base: args.base, head: args.head, working: args.working, repeat: args.repeat, noRecord: args.noRecord, detectGaming: args.detectGaming, label: args.label, config });
+  const report = gate(repo, { base: args.base, head: args.head, working: args.working, repeat: args.repeat, noRecord: args.noRecord, detectGaming: args.detectGaming, label: args.label, allow: args.allow, config });
   if (args.json) console.log(JSON.stringify(report, null, 2));
   else if (args.markdown) console.log(renderMarkdown(report));
   else printHuman(report);
@@ -974,6 +1002,7 @@ function printHuman(r) {
   if (r.gate && r.gate.weakened) for (const w of r.gate.weakened) console.log(`  🚩 GATE WEAKENED, the guard "${w.name}" was ${w.change === 'guard-removed' ? 'removed' : 'disabled'} in this change and it would have ${w.status} at head (goalpost moved, not earned)`);
   console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? ', a guarded metric regressed (beyond noise)' : r.verdict === 'gamed' ? ', a metric "improved" by editing the goalposts, not the source' : r.verdict === 'inconclusive' ? ', a guard is inert (measured nothing); a pass cannot be certified' : ''}`);
   if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name), `promptwheel guards` shows the effective set');
+  if (r.allowed) console.log(`  ✓ allowed: ${r.allowed.cleared.join(', ')} acknowledged as an intentional change, recorded (Sawbuck-Allow: ${r.allowed.reason})`);
   console.log('');
 }
 
@@ -1011,6 +1040,7 @@ function parseArgs(argv) {
     else if (argv[i] === '--working') a.working = true;
     else if (argv[i] === '--no-record') a.noRecord = true;
     else if (argv[i] === '--no-auto') a.noAuto = true;
+    else if (argv[i] === '--allow') a.allow = argv[++i];
     else if (argv[i] === '--detect-gaming' || argv[i] === '--antihack') { a.detectGaming = true; a.dgExplicit = true; }
     else if (argv[i] === '--no-detect-gaming' || argv[i] === '--no-antihack') { a.detectGaming = false; a.dgExplicit = true; }
     else if (argv[i] === '--since') a.since = argv[++i];
@@ -1096,6 +1126,7 @@ export function check(options = {}) {
     detectGaming: options.detectGaming ?? true,
     cohort: options.cohort,
     label: options.label,
+    allow: options.allow,
     noRecord: options.record !== true,
   });
 }
@@ -1137,6 +1168,7 @@ export function conformsToContract(report) {
     if (m.noise !== undefined && !(isNum(m.noise) && m.noise >= 0)) E(`${at}.noise must be a number >= 0 (the measured jitter band; repeat count is the top-level report.repeat)`);
     if (m.confidence !== undefined && typeof m.confidence !== 'string') E(`${at}.confidence must be a string`);
     if (m.gamed !== undefined && typeof m.gamed !== 'boolean') E(`${at}.gamed must be a boolean`);
+    if (m.allowed !== undefined && typeof m.allowed !== 'boolean') E(`${at}.allowed must be a boolean`);
     if (m.sourceOnly !== undefined && !numOrNull(m.sourceOnly)) E(`${at}.sourceOnly must be a number or null`);
     if (m.retained !== undefined && !numOrNull(m.retained)) E(`${at}.retained must be a number or null`);
     if (m.gamingReason !== undefined && typeof m.gamingReason !== 'string') E(`${at}.gamingReason must be a string`);
@@ -1152,12 +1184,21 @@ export function conformsToContract(report) {
     }
   }
 
+  // the optional declared-override record (report.allowed): a reason and the names it cleared.
+  if (report.allowed !== undefined) {
+    if (!report.allowed || typeof report.allowed !== 'object' || Array.isArray(report.allowed)) E('allowed must be an object { reason, cleared }');
+    else {
+      if (typeof report.allowed.reason !== 'string' || !report.allowed.reason) E('allowed.reason must be a non-empty string');
+      if (report.allowed.cleared !== undefined && !Array.isArray(report.allowed.cleared)) E('allowed.cleared must be an array');
+    }
+  }
+
   // Honest-verdict rules that hold regardless of how a verdict is derived:
   // a clean pass cannot hide a failing guard, a gamed win, or a weakened gate; and a gamed
   // verdict must point at a gamed metric or a weakened gate. (Fail-vs-gamed precedence is
   // left to the implementation.)
   if (VERDICTS.includes(report.verdict)) {
-    const gateWeakened = !!(report.gate && Array.isArray(report.gate.weakened) && report.gate.weakened.length);
+    const gateWeakened = !!(report.gate && Array.isArray(report.gate.weakened) && report.gate.weakened.length && !report.gate.allowed);
     if (report.verdict === 'pass' && report.metrics.some((m) => m.guard === true && m.ok === false))
       E("verdict 'pass' but a guarded metric regressed (guard:true, ok:false)");
     if (report.verdict === 'pass' && report.metrics.some((m) => m.gamed === true))
@@ -1237,6 +1278,7 @@ function main() {
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',
       '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
+      '  promptwheel run --allow "<reason>"           acknowledge an intentional test/config change (or a `Sawbuck-Allow: <reason>` commit trailer): recorded, not flagged GAMED',
       '  promptwheel improve --attempt "<cmd>"        run an agent/script; keep only if a metric improved',
       '                                               exit 0=kept · 1=regression · 3=plateau · add --json',
       '  promptwheel insights                         which metrics actually respond (raw counts)',
