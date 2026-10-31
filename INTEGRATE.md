@@ -64,7 +64,10 @@ Fixed vocabularies (use exactly these):
 delta inside it is `inconclusive`, never a regression. `retained` is the fraction of a
 metric's gain that survived the source-only re-run (Section 3). `confidence`
 (`unverified | low | medium | high`) and `sourceOnly` are informational fields this
-implementation adds; a minimal conforming report may omit them.
+implementation adds; a minimal conforming report may omit them. `gate` (optional) records a
+truncated SHA-256 fingerprint of the gate definition at base and head and lists any guard the
+change dropped to hide a regression; a non-empty `gate.weakened` forces `gamed`, so an agent
+cannot pass by disabling the guard it is judged by.
 
 Self-check your implementation against this schema (see Section 4 below):
 

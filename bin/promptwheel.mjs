@@ -11,6 +11,7 @@
 //   promptwheel run [--base R] [--head R] [--repeat N] [--json]
 
 import { execSync, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, appendFileSync, realpathSync, readdirSync, statSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, isAbsolute, relative } from 'node:path';
@@ -395,6 +396,68 @@ function warnEditableInstall(repo) {
 }
 
 // the shared core: measure a change (base→head) and return the structured report
+// ---- gate integrity: catch the agent weakening the gate it is judged by ----
+// The config is read from HEAD, so a change can disable a guard (guard:false) or delete a
+// guarded metric in the very diff it "passes". We resolve the gate as of BASE too and, if a
+// guard was dropped, re-measure it under its BASE definition; the pass only reads GAMED when
+// that guard WOULD HAVE FAILED at head (a real regression hidden by moving the goalposts).
+const GATE_SCALARS = ['gamingThreshold', 'evaluatorPaths'];
+
+// Resolve the gate definition as of `ref` (metrics + scalars), following `extends` by reading
+// every file from that ref via `git show`. Returns { metrics:Map, scalars } or null when there
+// is no config at `ref` (a gate ADDED in this range is not a weakening). Never exits: any
+// missing/unreadable file or parse error yields null (that branch simply contributes nothing).
+function gateDefAtRef(repo, ref) {
+  const readAt = (p) => { try { return git(['show', `${ref}:${p}`], repo); } catch { return null; } };
+  const seen = new Set();
+  const resolve = (p) => {
+    if (seen.has(p)) return null;
+    seen.add(p);
+    const raw = readAt(p);
+    if (raw == null) return null;
+    let cfg; try { cfg = JSON.parse(raw); } catch { return null; }
+    const byName = new Map(); const scalars = {};
+    for (const ext of [].concat(cfg.extends || [])) {
+      if (isAbsolute(ext)) continue;                 // outside the repo, cannot git-show; unchanged anyway
+      const base = resolve(join(dirname(p), ext).split('\\').join('/'));
+      if (!base) continue;
+      for (const m of base.metrics.values()) byName.set(m.name, m);
+      for (const k of GATE_SCALARS) if (base.scalars[k] !== undefined) scalars[k] = base.scalars[k];
+    }
+    for (const m of (cfg.metrics || [])) if (m && m.name) byName.set(m.name, m);
+    for (const k of GATE_SCALARS) if (cfg[k] !== undefined) scalars[k] = cfg[k];
+    return { metrics: byName, scalars };
+  };
+  return ['promptwheel.config.json', 'outcome-gate.config.json'].map((p) => resolve(p)).find(Boolean) || null;
+}
+
+// an order-independent SHA-256 (truncated) fingerprint of a gate definition, for the audit record
+function gateFingerprint(metricsList, scalars) {
+  const norm = {
+    metrics: metricsList.map((m) => ({
+      name: m.name, guard: m.guard === true, direction: m.direction || 'up',
+      gamingThreshold: m.gamingThreshold ?? null, gamingCheck: m.gamingCheck !== false,
+    })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
+    gamingThreshold: scalars.gamingThreshold ?? null,
+    evaluatorPaths: Array.isArray(scalars.evaluatorPaths) ? [...scalars.evaluatorPaths].sort() : [],
+  };
+  return createHash('sha256').update(JSON.stringify(norm)).digest('hex').slice(0, 16);
+}
+
+// guarded metrics that HEAD dropped relative to BASE (removed entirely, or guard turned off)
+function gateWeakenings(baseGate, headMetrics) {
+  if (!baseGate) return [];
+  const head = new Map(headMetrics.map((m) => [m.name, m]));
+  const weak = [];
+  for (const bm of baseGate.metrics.values()) {
+    if (bm.guard !== true) continue;                 // only a guard protects anything
+    const hm = head.get(bm.name);
+    if (!hm) weak.push({ name: bm.name, change: 'guard-removed', def: bm });
+    else if (hm.guard !== true) weak.push({ name: bm.name, change: 'guard-disabled', def: bm });
+  }
+  return weak;
+}
+
 function gate(repo, opts) {
   selfHeal(repo);
   warnEditableInstall(repo);
@@ -431,8 +494,33 @@ function gate(repo, opts) {
       m.gamed = j.gamed; m.sourceOnly = j.sourceOnly; m.retained = j.retained; m.gamingReason = j.reason;
     }
   }
+  // gate integrity (Section 3): did HEAD weaken the gate it is judged by? Resolve the gate as
+  // of BASE; a guard HEAD dropped is re-measured under its base definition and only counts as
+  // tampering if it WOULD HAVE FAILED at head (a real regression hidden by dropping the guard).
+  let gateInfo = null;
+  if (opts.detectGaming) {
+    const baseGate = gateDefAtRef(repo, base);
+    const weak = gateWeakenings(baseGate, cfg.metrics);
+    const weakened = [];
+    if (weak.length) {
+      const defs = weak.map((w) => w.def);
+      const b = measureAt(repo, base, { ...cfg, metrics: defs }, repeat);
+      const a = measureAt(repo, head, { ...cfg, metrics: defs }, repeat);
+      for (const w of weak) {
+        const ev = evaluate(w.def, b[w.name], a[w.name], repeat);
+        if (!ev.ok) weakened.push({ name: w.name, change: w.change, status: ev.status });
+      }
+    }
+    gateInfo = {
+      fingerprint: {
+        base: baseGate ? gateFingerprint([...baseGate.metrics.values()], baseGate.scalars) : null,
+        head: gateFingerprint(cfg.metrics, cfg),
+      },
+      ...(weakened.length ? { weakened } : {}),
+    };
+  }
   const failed = metrics.some((m) => m.guard && !m.ok);
-  const gamed = metrics.some((m) => m.gamed === true);
+  const gamed = metrics.some((m) => m.gamed === true) || !!(gateInfo && gateInfo.weakened);
   // a guard that never runs (inert: a pass/fail metric stuck at 0 across both refs) verifies
   // nothing, don't launder that into a green PASS. The honest verdict is "couldn't measure".
   // BUT scope it to a bare no-op run: an inert guard must NOT bury a genuine, measured win
@@ -447,6 +535,7 @@ function gate(repo, opts) {
     ...(opts.label ? { label: opts.label } : {}),
     subsystems: subsystemsOf(repo, base, head, cfg),
     verdict, metrics,
+    ...(gateInfo ? { gate: gateInfo } : {}),
   };
   if (!opts.noRecord && cfg.record !== false) recordOutcome(repo, report);
   return report;
@@ -863,6 +952,7 @@ function printHuman(r) {
     if (m.inert) console.log('      ⚠ never passed at either ref, this guard is protecting nothing (check its command)');
     if (m.gamed === true) console.log(`      🚩 GAMED, ${m.gamingReason}`);
   }
+  if (r.gate && r.gate.weakened) for (const w of r.gate.weakened) console.log(`  🚩 GATE WEAKENED, the guard "${w.name}" was ${w.change === 'guard-removed' ? 'removed' : 'disabled'} in this change and it would have ${w.status} at head (goalpost moved, not earned)`);
   console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? ', a guarded metric regressed (beyond noise)' : r.verdict === 'gamed' ? ', a metric "improved" by editing the goalposts, not the source' : r.verdict === 'inconclusive' ? ', a guard is inert (measured nothing); a pass cannot be certified' : ''}`);
   if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name), `promptwheel guards` shows the effective set');
   console.log('');
@@ -887,6 +977,7 @@ function renderMarkdown(r) {
     rows,
     '',
     r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader, not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? '> ❌ A 🛡️ guarded metric regressed beyond the noise band.' : r.verdict === 'inconclusive' ? '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.' : '> ✅ No guarded metric regressed.',
+    ...(r.gate && r.gate.weakened ? ['', `> 🚩 **Gate weakened:** ${r.gate.weakened.map((w) => `\`${w.name}\` ${w.change === 'guard-removed' ? 'removed' : 'disabled'} (would have ${w.status} at head)`).join('; ')}. The pass was bought by dropping a guard, not by earning it.`] : []),
     '',
     '<sub>🛡️ = guard · _prove every change moved a metric_ · [PromptWheel](https://github.com/promptwheel-ai/promptwheel)</sub>',
   ].join('\n');
@@ -1029,16 +1120,30 @@ export function conformsToContract(report) {
     if (m.gamingReason !== undefined && typeof m.gamingReason !== 'string') E(`${at}.gamingReason must be a string`);
   });
 
+  // the optional gate-integrity record (report.gate): a config fingerprint and, when the
+  // agent weakened the gate it is judged by, the list of dropped guards.
+  if (report.gate !== undefined) {
+    if (!report.gate || typeof report.gate !== 'object' || Array.isArray(report.gate)) E('gate must be an object');
+    else {
+      if (report.gate.fingerprint !== undefined && (typeof report.gate.fingerprint !== 'object' || report.gate.fingerprint === null)) E('gate.fingerprint must be an object { base, head }');
+      if (report.gate.weakened !== undefined && !Array.isArray(report.gate.weakened)) E('gate.weakened must be an array');
+    }
+  }
+
   // Honest-verdict rules that hold regardless of how a verdict is derived:
-  // a clean pass cannot hide a failing guard or a gamed win, and a gamed verdict
-  // must point at a gamed metric. (Fail-vs-gamed precedence is left to the implementation.)
+  // a clean pass cannot hide a failing guard, a gamed win, or a weakened gate; and a gamed
+  // verdict must point at a gamed metric or a weakened gate. (Fail-vs-gamed precedence is
+  // left to the implementation.)
   if (VERDICTS.includes(report.verdict)) {
+    const gateWeakened = !!(report.gate && Array.isArray(report.gate.weakened) && report.gate.weakened.length);
     if (report.verdict === 'pass' && report.metrics.some((m) => m.guard === true && m.ok === false))
       E("verdict 'pass' but a guarded metric regressed (guard:true, ok:false)");
     if (report.verdict === 'pass' && report.metrics.some((m) => m.gamed === true))
       E("verdict 'pass' but a metric is gamed:true");
-    if (report.verdict === 'gamed' && !report.metrics.some((m) => m.gamed === true))
-      E("verdict 'gamed' but no metric is gamed:true");
+    if (report.verdict === 'pass' && gateWeakened)
+      E("verdict 'pass' but report.gate.weakened is non-empty (the gate was weakened)");
+    if (report.verdict === 'gamed' && !report.metrics.some((m) => m.gamed === true) && !gateWeakened)
+      E("verdict 'gamed' but no metric is gamed:true and report.gate records no weakening");
   }
 
   return { ok: errors.length === 0, errors };

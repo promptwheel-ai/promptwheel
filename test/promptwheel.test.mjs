@@ -871,3 +871,53 @@ test('conformance CLI: a conforming run exits 0; malformed JSON exits 1', () => 
   assert.match(bad.out, /does NOT conform/);
   rmSync(d, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------- integration: gate integrity (Section 3)
+test('gate integrity: disabling a guard to hide a regression reads GAMED', () => {
+  const d = tmpRepo([TODOS]);                        // todos is a guard (direction down)
+  writeFileSync(join(d, 'app.js'), 'clean\n'); commitAll(d, 'base: 0 TODOs, guard on');
+  // head: ADD a regression (2 TODOs) AND disable the guard in the same diff
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n');
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [{ ...TODOS, guard: false }] }));
+  commitAll(d, 'regress + disable the guard');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'gamed', JSON.stringify(r));
+  assert.ok(r.gate && Array.isArray(r.gate.weakened) && r.gate.weakened.some((w) => w.name === 'todos'), 'gate weakening recorded');
+  assert.notEqual(r.gate.fingerprint.base, r.gate.fingerprint.head);
+  assert.equal(conformsToContract(r).ok, true, conformsToContract(r).errors.join('; '));
+  rmSync(d, { recursive: true, force: true });
+});
+test('gate integrity: disabling a guard that was NOT regressing is not gaming (no false positive)', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base: 1 TODO');
+  // head: a real improvement in source (0 TODOs) AND retire the guard (legit config cleanup)
+  writeFileSync(join(d, 'app.js'), 'clean\n');
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [{ ...TODOS, guard: false }] }));
+  commitAll(d, 'improve + retire the guard');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'pass', JSON.stringify(r));
+  assert.ok(!r.gate.weakened, 'no weakening flagged when the dropped guard was not regressing');
+  rmSync(d, { recursive: true, force: true });
+});
+test('gate integrity: fingerprint present, and identical when the gate is unchanged', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app.js'), 'a\nb\n'); commitAll(d, 'improve, gate unchanged');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'pass');
+  assert.equal(r.gate.fingerprint.base, r.gate.fingerprint.head, 'identical gate -> identical fingerprint');
+  assert.match(r.gate.fingerprint.head, /^[0-9a-f]{16}$/);
+  rmSync(d, { recursive: true, force: true });
+});
+test('gate integrity: deleting a guarded metric that regressed reads GAMED', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'clean\n'); commitAll(d, 'base: guard present');
+  // head: regress AND remove the metric entirely from the config
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\nc // TODO\n');
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [{ name: 'noop', cmd: 'echo 1', extract: 'number', direction: 'up', guard: false }] }));
+  commitAll(d, 'regress + delete the guard metric');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'gamed', JSON.stringify(r));
+  assert.ok(r.gate.weakened.some((w) => w.name === 'todos' && w.change === 'guard-removed'), 'removed guard recorded');
+  rmSync(d, { recursive: true, force: true });
+});
