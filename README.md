@@ -106,6 +106,8 @@ npx promptwheel backfill -n 30            # cold start: seed the record from git
 
 **Footprint:** it never touches your working tree, every measurement runs in a throwaway git worktree **in your system temp dir** (one at a time; configured `linkDirs` are symlinked not copied, `node_modules` by default, `.venv` for Python, etc.), removed when the run finishes. The only thing PromptWheel writes to your repo is the optional `.promptwheel/outcomes.jsonl` record, commit it to build the per-repo "what moves what" history, or `.gitignore` it (`--no-record` to skip entirely). A hard-killed run can't leave clutter behind: the next run **self-heals** any orphaned worktree (stale registry entry + abandoned temp checkout).
 
+**Per-turn cost.** A check runs your metric commands in two throwaway worktrees (before and after) plus a source-only re-run when a metric improved, so one check takes roughly **2 to 3× your metric command's runtime** plus about 40ms of worktree overhead. Point the **per-turn** gate at a *fast* metric (a lint count, a quick test subset, a build-size check) and leave the slow full suite for **CI**: a 50ms check is invisible in a loop, a two-minute one is not. A deterministic metric (a test exit, a count) is accurate at the default `repeat: 1`; only a noisy metric (latency, timing) needs `repeat: 3` or more, which multiplies the cost.
+
 ## Loop patterns
 
 PromptWheel is the gate *inside* a loop you don't have to write:
