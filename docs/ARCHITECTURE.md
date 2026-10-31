@@ -1,6 +1,6 @@
 # Architecture (v0)
 
-The whole engine is `bin/promptwheel.mjs` (~870 LOC, Node ESM, zero deps). It is intentionally a single file — importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
+The whole engine is `bin/promptwheel.mjs` (~870 LOC, Node ESM, zero deps). It is intentionally a single file - importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
 
 ## Flow
 
@@ -18,7 +18,7 @@ config (promptwheel.config.json)
    verdict = guard failed ? "fail" : gamed ? "gamed" : inert guard ? "inconclusive" : "pass"   →   print (human | --json | --markdown)   →   exit (0|1|2|3)
 ```
 
-The working tree is **never** touched — every read happens in a temp worktree that is removed afterward.
+The working tree is **never** touched - every read happens in a temp worktree that is removed afterward.
 
 ## Commands
 
@@ -42,9 +42,9 @@ The working tree is **never** touched — every read happens in a temp worktree 
 Every gated run (unless `--no-record` or `record:false`) appends one JSON line to `.promptwheel/outcomes.jsonl`: `{ ts, base, head, repeat, mode, verdict, metrics }`. Commit it to accumulate the per-repo "what moves what" record; `insights` reads it.
 
 ### detect-gaming (antihack)
-`run --detect-gaming` re-proves every *win* from the agent's source edits **alone**. After the normal gate, it partitions the head diff into **production source** vs. **`{test, config, grader, golden}`** files, rebuilds a clean worktree at the base with **only the source slice** applied, and re-runs the gate. If a guarded win does **not** survive that source-only re-run — because it passed by editing/skipping a test, mocking the grader, editing a golden, relaxing config, or touching zero source files — the verdict is **`GAMED`** (exit 2). Metrics with `gamingCheck: false` are exempt from the re-run (test-side tripwires whose gains legitimately live in test files; the `antihack` preset sets this). Deterministic, zero-LLM: a diff partition plus a re-run, so every flag is reproducible with a human-readable reason. The 50%-of-gain-survives threshold is the default and is tunable. See `DETECTION-LAYERS.md` for scope and `../bench/RESULTS.md` for measured recall.
+`run --detect-gaming` re-proves every *win* from the agent's source edits **alone**. After the normal gate, it partitions the head diff into **production source** vs. **`{test, config, grader, golden}`** files, rebuilds a clean worktree at the base with **only the source slice** applied, and re-runs the gate. If a guarded win does **not** survive that source-only re-run - because it passed by editing/skipping a test, mocking the grader, editing a golden, relaxing config, or touching zero source files - the verdict is **`GAMED`** (exit 2). Metrics with `gamingCheck: false` are exempt from the re-run (test-side tripwires whose gains legitimately live in test files; the `antihack` preset sets this). Deterministic, zero-LLM: a diff partition plus a re-run, so every flag is reproducible with a human-readable reason. The 50%-of-gain-survives threshold is the default and is tunable. See `DETECTION-LAYERS.md` for scope and `../bench/RESULTS.md` for measured recall.
 
-## Config schema — `promptwheel.config.json`
+## Config schema - `promptwheel.config.json`
 
 ```jsonc
 {
@@ -85,10 +85,10 @@ A number that jitters between runs is worthless as a signal, so a delta is only 
 | condition | confidence | guard behavior |
 |---|---|---|
 | `extract` is `exit`/`lines` (deterministic) | `high` | normal |
-| `repeat == 1` (noise unknown) | `unverified` | regression still fails (conservative) — run `--repeat` to de-flake |
+| `repeat == 1` (noise unknown) | `unverified` | regression still fails (conservative) - run `--repeat` to de-flake |
 | `repeat > 1`, `noise == 0` | `high` | normal |
 | `repeat > 1`, delta clears noise | `medium` | normal |
-| `repeat > 1`, delta inside noise | `low` | **never fails** — status is `inconclusive` |
+| `repeat > 1`, delta inside noise | `low` | **never fails** - status is `inconclusive` |
 
 So `--repeat` is how you trade time for trust: it earns a real confidence label and stops flaky metrics from failing guards.
 
@@ -97,7 +97,7 @@ So `--repeat` is how you trade time for trust: it earns a real confidence label 
 ```jsonc
 {
   "base": "a1b2c3d", "head": "e4f5g6h", "repeat": 5, "mode": "refs",
-  "verdict": "pass",             // pass | fail | gamed | inconclusive  (gamed only with --detect-gaming; inconclusive = an inert guard measured nothing — exit 3)
+  "verdict": "pass",             // pass | fail | gamed | inconclusive  (gamed only with --detect-gaming; inconclusive = an inert guard measured nothing - exit 3)
   "metrics": [
     { "name": "lint_errors", "direction": "down", "guard": true,
       "before": 12, "after": 7, "delta": -5,
@@ -109,11 +109,11 @@ So `--repeat` is how you trade time for trust: it earns a real confidence label 
 }
 ```
 
-Exit code: `0` = pass · `1` = fail (a guarded metric had a trusted regression) · `2` = **`GAMED`** (a win that didn't survive the source-only re-run) or a config/usage error (this **overloads** exit 2) · `3` = **inconclusive** (an inert guard measured nothing) — also the code `improve` returns for a plateau/no-op. This JSON is the persisted reward stream (`.promptwheel/outcomes.jsonl`), appended once per gated run.
+Exit code: `0` = pass · `1` = fail (a guarded metric had a trusted regression) · `2` = **`GAMED`** (a win that didn't survive the source-only re-run) or a config/usage error (this **overloads** exit 2) · `3` = **inconclusive** (an inert guard measured nothing) - also the code `improve` returns for a plateau/no-op. This JSON is the persisted reward stream (`.promptwheel/outcomes.jsonl`), appended once per gated run.
 
 ## Testing
 
-`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` — **59 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
+`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` - **59 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
 
 ## Design constraints
 - **Zero runtime dependencies, no build.** Node 18+, ESM, runs straight from source.

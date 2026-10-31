@@ -5,7 +5,7 @@
     {
       "name": "promptwheel",
       "source": "./plugins/promptwheel",
-      "description": "The trustworthy per-turn reward for AI coding loops — prove a change moved a metric without regressing another. Wraps the promptwheel CLI."
+      "description": "The trustworthy per-turn reward for AI coding loops - prove a change moved a metric without regressing another. Wraps the promptwheel CLI."
     }
   ]
 }

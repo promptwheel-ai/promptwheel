@@ -1,20 +1,20 @@
-# Learning & discovery (Phase 5) — built (experimental), claims still gated on data
+# Learning & discovery (Phase 5) - built (experimental), claims still gated on data
 
-> **UNFROZEN 2026-07-02** — explicit founder decision overriding D7 (recorded in the decision log) after the 0.2.x hardening arc. **The build gate was lifted; the CLAIM gate was not:** `playbook` and `suggest` ship as experimental, evidence-gated views, and no public compounding claim is made until `bench/compounding-ab.mjs` shows the playbook arm beating the control arm on real usage data. If it never does, this layer is a documented dead-end and the code is cheap to delete.
+> **UNFROZEN 2026-07-02** - explicit founder decision overriding D7 (recorded in the decision log) after the 0.2.x hardening arc. **The build gate was lifted; the CLAIM gate was not:** `playbook` and `suggest` ship as experimental, evidence-gated views, and no public compounding claim is made until `bench/compounding-ab.mjs` shows the playbook arm beating the control arm on real usage data. If it never does, this layer is a documented dead-end and the code is cheap to delete.
 
-Built as a **pure deterministic view** over the append-only ledger: no curator state file, no model — the playbook re-derives from `.promptwheel/outcomes.jsonl` on every read, with decay applied at read time (half-life 20 runs). A key (`metric` · `metric @ subsystem` · `metric # label`) earns a rendered claim only past 3 weighted moved-observations; below that it is counted, not asserted. Cohorts (ci vs local) that disagree in sign are flagged, never averaged.
+Built as a **pure deterministic view** over the append-only ledger: no curator state file, no model - the playbook re-derives from `.promptwheel/outcomes.jsonl` on every read, with decay applied at read time (half-life 20 runs). A key (`metric` · `metric @ subsystem` · `metric # label`) earns a rendered claim only past 3 weighted moved-observations; below that it is counted, not asserted. Cohorts (ci vs local) that disagree in sign are flagged, never averaged.
 
 ## What exists now (the seed)
 
-`promptwheel insights` aggregates `.promptwheel/outcomes.jsonl` into per-metric stats: runs, improved/regressed/inconclusive counts, net delta, and a **lever score** (`improved / runs`) — how reliably a metric actually responds. That's the honest substrate; no model, no RL.
+`promptwheel insights` aggregates `.promptwheel/outcomes.jsonl` into per-metric stats: runs, improved/regressed/inconclusive counts, net delta, and a **lever score** (`improved / runs`) - how reliably a metric actually responds. That's the honest substrate; no model, no RL.
 
 ## What Phase 5 becomes (only once there's data)
 
-### 1. Outcome-driven learning — an outcome-curated playbook (per Agentic Context Engineering, Stanford 2510.04618)
+### 1. Outcome-driven learning - an outcome-curated playbook (per Agentic Context Engineering, Stanford 2510.04618)
 The only learning approach that ships as open-core (no RL training) is a **structured, deduped, decaying playbook**, not free-text appended to CLAUDE.md. Adapt **Agentic Context Engineering** (Stanford 2510.04618): a Generator/Reflector/Curator loop that maintains versioned tactics keyed by `(subsystem, metric, change-type)`, each entry earned from a **measured** outcome ("refactoring X reliably cut p95; touching Y reliably regressed lint"). The reward stream is the training signal; entries decay if they stop predicting.
 
-### 2. Work-discovery — UCB over the lever scores
-The unowned gap is **principled prioritization** (nobody publishes a work-selection policy). Use the `insights` lever scores as priors in a **UCB/bandit** loop: propose the next change against the highest expected-improvement metric, balanced by exploration. This is the one place PromptWheel's archived orchestrator had a real idea (UCB1 formula rotation) worth carrying forward — but now grounded in *measured outcomes*, not heuristics.
+### 2. Work-discovery - UCB over the lever scores
+The unowned gap is **principled prioritization** (nobody publishes a work-selection policy). Use the `insights` lever scores as priors in a **UCB/bandit** loop: propose the next change against the highest expected-improvement metric, balanced by exploration. This is the one place PromptWheel's archived orchestrator had a real idea (UCB1 formula rotation) worth carrying forward - but now grounded in *measured outcomes*, not heuristics.
 
 ### 3. Paid surface
 Cross-repo aggregation of the playbook + lever data ("change-types that reliably help across your fleet") is the hosted product. Never in the OSS core.
@@ -23,25 +23,25 @@ Cross-repo aggregation of the playbook + lever data ("change-types that reliably
 
 The reward stream and any future playbook are only as good as the data feeding them. Three disciplines the earlier projects learned the hard way, to build *before* the playbook:
 
-- **Typed override reasons gate what feeds learning.** When a human overrides a verdict, require a typed reason (`false_signal` / `flaky_metric` / `acceptable_tradeoff` / `duplicate`). Only `false_signal`/`flaky_metric` may adjust a metric's noise model or lever score; an `acceptable_tradeoff` must **never** teach "this change-type is bad." A `VERDICT_MAP` from typed action → reward, never free-text. (securitychecks: "don't auto-learn from generic waive — risk of learning to suppress real issues.")
-- **Cohort-segmented reliability, not one global number.** Fingerprint each outcome with an environment/cohort tag (CI vs local, benchmark-class, machine) and segment lever scores + noise bands by cohort. securitychecks precision was ~100% on SaaS repos but ~30–50% on frameworks — "don't chase a single universal FP rate." Also a marketing-honesty guard: don't claim "works on any repo."
+- **Typed override reasons gate what feeds learning.** When a human overrides a verdict, require a typed reason (`false_signal` / `flaky_metric` / `acceptable_tradeoff` / `duplicate`). Only `false_signal`/`flaky_metric` may adjust a metric's noise model or lever score; an `acceptable_tradeoff` must **never** teach "this change-type is bad." A `VERDICT_MAP` from typed action → reward, never free-text. (securitychecks: "don't auto-learn from generic waive - risk of learning to suppress real issues.")
+- **Cohort-segmented reliability, not one global number.** Fingerprint each outcome with an environment/cohort tag (CI vs local, benchmark-class, machine) and segment lever scores + noise bands by cohort. securitychecks precision was ~100% on SaaS repos but ~30–50% on frameworks - "don't chase a single universal FP rate." Also a marketing-honesty guard: don't claim "works on any repo."
 - **Composite lever score = effect-size × confidence, Beta-smoothed.** Replace raw `improved/runs` with a Beta(α,β) posterior mean (smooths low-sample metrics) times the median effect size; drop metrics below an effect-size floor from prioritization. (securitychecks ranked by confidence×severity; blockspool's UCB1 used a Beta posterior + impact floor.)
 
-## Harvesting the reward stream (the bootstrap) — design, FROZEN under D7/R-FRANK
+## Harvesting the reward stream (the bootstrap) - design, FROZEN under D7/R-FRANK
 
-The record currently fills only from *forward* gated runs. Three harvest paths, in priority order — **none unfreeze without the gates below**:
+The record currently fills only from *forward* gated runs. Three harvest paths, in priority order - **none unfreeze without the gates below**:
 
-1. **Backfill from git (the primary harvest) — ✅ built (0.4.0).** `promptwheel backfill [-n N | --since <ref>]` walks history oldest-first, gates base→head with the *current* metrics, and seeds `.promptwheel/outcomes.jsonl` — cohort-tagged `backfill` (segmented from live evidence), conventional-commit types as labels, idempotent, root-safe. **Determinism boundary held:** old commits that don't build record `unmeasurable`, never a faked number.
-2. **Attribution from conversations (enrich only).** Agent transcripts / `.claude` history supply the *change-type* that caused an outcome (the deferred `attempt`/`label` field, R6) — never the measurement. They make `insights` answer "which change-TYPES move which metrics," but they presuppose a measured outcome; they cannot replace execution.
-3. **Instant deterministic artifact (the graphify analog).** `insights` is already a pure, deterministic, instant aggregation over the record; a static HTML render of it ("lever scores + which change-types reliably help") is the `graph.html`-style wow — instant *given the record*. The record is execution-earned, not free static analysis: **PromptWheel proves outcomes (dynamic), graphify proves structure (static).** Don't promise structure-grade instancy for outcome data — the honesty *is* the credibility feature.
+1. **Backfill from git (the primary harvest) - ✅ built (0.4.0).** `promptwheel backfill [-n N | --since <ref>]` walks history oldest-first, gates base→head with the *current* metrics, and seeds `.promptwheel/outcomes.jsonl` - cohort-tagged `backfill` (segmented from live evidence), conventional-commit types as labels, idempotent, root-safe. **Determinism boundary held:** old commits that don't build record `unmeasurable`, never a faked number.
+2. **Attribution from conversations (enrich only).** Agent transcripts / `.claude` history supply the *change-type* that caused an outcome (the deferred `attempt`/`label` field, R6) - never the measurement. They make `insights` answer "which change-TYPES move which metrics," but they presuppose a measured outcome; they cannot replace execution.
+3. **Instant deterministic artifact (the graphify analog).** `insights` is already a pure, deterministic, instant aggregation over the record; a static HTML render of it ("lever scores + which change-types reliably help") is the `graph.html`-style wow - instant *given the record*. The record is execution-earned, not free static analysis: **PromptWheel proves outcomes (dynamic), graphify proves structure (static).** Don't promise structure-grade instancy for outcome data - the honesty *is* the credibility feature.
 
 ## Mechanism-test harness (decided 2026-07-02, doc-only)
 
-When the gates below are met and Phase 5 is built, its machinery (dedup, decay, Beta-smoothed levers, cohort tags) gets verified against the **stranger-repo corpus harness** (the 100-repo distribution sweep used to harden 0.2.x) — real, diverse repos we did not author, replayed through the curator/scorer as **test fixtures, never training data**. Corpus/probe rows are tautologies (outcomes designed by the probe that produced them) and cross-sectional (one visit per repo); the playbook trains ONLY on longitudinal records from repos under real development. Synthetic volume satisfies the letter of the data gate while defeating its purpose — the record's value is that it is a trace of actual use.
+When the gates below are met and Phase 5 is built, its machinery (dedup, decay, Beta-smoothed levers, cohort tags) gets verified against the **stranger-repo corpus harness** (the 100-repo distribution sweep used to harden 0.2.x) - real, diverse repos we did not author, replayed through the curator/scorer as **test fixtures, never training data**. Corpus/probe rows are tautologies (outcomes designed by the probe that produced them) and cross-sectional (one visit per repo); the playbook trains ONLY on longitudinal records from repos under real development. Synthetic volume satisfies the letter of the data gate while defeating its purpose - the record's value is that it is a trace of actual use.
 
 ## Hard gates before building any of this
 - **≥ a few hundred gated runs** of real outcome data in a real repo (else the playbook overfits to noise).
-- **Proof of compounding**: an `improve` loop using the playbook must beat the same loop without it, *measured by the gate itself*. If it doesn't, this layer is a research dead-end and we stop — cheaply.
+- **Proof of compounding**: an `improve` loop using the playbook must beat the same loop without it, *measured by the gate itself*. If it doesn't, this layer is a research dead-end and we stop - cheaply.
 - Still zero-dep / thin. If the curator/UCB layer needs heavy ML deps, it belongs in the paid cloud, not the CLI.
 
 ## Why the discipline

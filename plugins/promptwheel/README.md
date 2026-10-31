@@ -1,6 +1,6 @@
-# PromptWheel — Claude Code plugin
+# PromptWheel - Claude Code plugin
 
-A thin wrapper around the [`promptwheel`](https://github.com/promptwheel-ai/promptwheel) CLI — *the trustworthy per-turn reward for AI coding loops* — that brings the outcome gate into Claude Code as slash commands.
+A thin wrapper around the [`promptwheel`](https://github.com/promptwheel-ai/promptwheel) CLI - *the trustworthy per-turn reward for AI coding loops* - that brings the outcome gate into Claude Code as slash commands.
 
 ## Prerequisite
 
@@ -26,4 +26,4 @@ npm install -g promptwheel
 | `/promptwheel:improve <cmd>` | `promptwheel improve --attempt "<cmd>"` | keep a change only if a metric improved, else revert |
 | `/promptwheel:insights` | `promptwheel insights` | which metrics actually respond (loop memory) |
 
-It's the **signal inside your loop, not the driver**: `/promptwheel:gate` after a change tells you whether the turn earned its keep — measured in throwaway worktrees, never touching your working tree, never failing on noise. Full model in the [main repo](https://github.com/promptwheel-ai/promptwheel).
+It's the **signal inside your loop, not the driver**: `/promptwheel:gate` after a change tells you whether the turn earned its keep - measured in throwaway worktrees, never touching your working tree, never failing on noise. Full model in the [main repo](https://github.com/promptwheel-ai/promptwheel).
