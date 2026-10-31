@@ -5,7 +5,7 @@
 // The full AST+dataflow engine (the other 75 recommended patterns) is the follow-up.
 //
 // Usage: node scan.mjs [path]            → prints the finding count (for `promptwheel` metrics)
-//        node scan.mjs [path] --list     → prints each finding (file:line — id — message)
+//        node scan.mjs [path] --list     → prints each finding (file:line · id · message)
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -50,7 +50,7 @@ for (const file of walk(ROOT)) {
 }
 
 if (LIST) {
-  for (const f of findings) console.error(`  [${f.sev}] ${f.file}:${f.line} — ${f.id} — ${f.msg}`);
+  for (const f of findings) console.error(`  [${f.sev}] ${f.file}:${f.line} · ${f.id} · ${f.msg}`);
   console.error(`\n${findings.length} security-invariant violation(s)`);
 }
 // the metric value: lower is better, 0 is clean

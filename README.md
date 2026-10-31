@@ -75,6 +75,8 @@ npx promptwheel run                       # detection ON by default · exit 0 wi
 
 Deterministic, zero-LLM, zero-network: an LLM judge asking "did you cheat?" is itself gameable; this is a diff partition plus a re-run, so a flag is trustworthy without a human in the loop. The 50%-of-gain-survives threshold is the default and is tunable via `gamingThreshold` (config-level, or per-metric).
 
+**An intentional goalpost change has a sanctioned path.** When you *do* mean to change a test, config, or grader, declare it: a `Sawbuck-Allow: <reason>` trailer on the commit (or `--allow "<reason>"` on the CLI, or the `allow` option on `check()`) turns what would read `GAMED` into a `pass` with the reason recorded in `report.allowed`. An *undeclared* test-only win is still `gamed`, and a reasonless declaration does not override; the check never judges intent, it just forces intent to be explicit and auditable (the reason lives in the commit, so a reviewer sees it instead of a silent green).
+
 This is **one layer**, not a silver bullet: it catches the evaluator-tampering class (test/grader/golden/config edits) deterministically and for free, so the expensive layers, held-out tests for semantically-weak wins, an LLM judge or a human for intent and leakage, are reserved for the calls only they can make. See **[docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md)** for the coverage matrix and honest scope, and **[bench/RESULTS.md](bench/RESULTS.md)** for the measured numbers (`node bench/gaming-bench.mjs` to reproduce, it includes a cross-stack table with a real pytest run + a numeric eval-pass-rate metric). **Gate your own stack**, pytest · tsc · coverage · bundle · llm-eval, copy a config from **[examples/](examples/)**.
 
 ## Use
@@ -250,5 +252,8 @@ The engine is one importable file; pure helpers are exported for unit tests, the
 - [x] `--detect-gaming`, reward-hack detection: re-prove the win from source edits alone + `antihack` preset
 - [x] npm publish, `promptwheel@0.4.2` (the lead magnet)
 - [x] outcome-curated learning + UCB work-discovery, `playbook` + `suggest` + the compounding A/B harness (**experimental**; compounding *claims* stay gated on real-data proof, see [docs/LEARNING.md](docs/LEARNING.md))
+- [x] gate integrity: a win that disables a guard or deletes a guarded metric in the same diff reads `GAMED` (SHA-256 gate fingerprint; 0.5.0)
+- [x] zero-config: `run` and `check()` auto-detect the gate with no committed config, `init` becomes optional (0.6.0)
+- [x] declared override (`Sawbuck-Allow:` trailer / `--allow`) + `init` build-setup detection, so a build-gated test measures instead of reading inert (0.7.0)
 
-> Status: **published** (npm `promptwheel`, v0.4.2), all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.
+> Status: **published** (npm `promptwheel`, v0.7.0), all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.

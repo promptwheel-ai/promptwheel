@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1 (2026-10-31): docs + shipped-output hygiene
+
+- **`packs/security/scan.mjs`**: the `--list` finding lines now separate fields with `·` instead of an em-dash. Output format only; the metric value (the finding count on stdout) is unchanged.
+- **README**: documented the declared-override escape hatch (`Sawbuck-Allow:` trailer / `--allow` / the `allow` option on `check()`), and refreshed the roadmap/status to 0.7.0 (added the 0.5.0 gate-integrity, 0.6.0 zero-config, and 0.7.0 declared-override + build-setup-detection milestones).
+
 ## 0.7.0 (2026-10-31): declared override (Sawbuck-Allow) + build-setup detection
 
 - **`init` detects a build/install step** (a `build` npm script, or a Python editable install) and writes it to `setup`, so a gate whose test needs a build first *measures* instead of reading inert. A 10-repo replay found the auto-detected test command was inert ~2/3 of the time, and a missing build was a leading cause. Kept out of the zero-config default so the fast per-turn path stays fast; a failed setup is still honest (inconclusive, never a fake green).
