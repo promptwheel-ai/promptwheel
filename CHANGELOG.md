@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.0 (2026-10-31): zero-config
+
+- **`run` and `check()` work with no committed config.** When there is no promptwheel.config.json, the engine auto-detects a default gate (your stack's test command with gaming detection on, the same detection `init` uses) instead of exiting. `init` becomes optional, for *customizing* what you measure. A repo with no test command gets a sentinel that reads inert -> INCONCLUSIVE (never a fake green), with a message pointing at the fix. `--no-auto` (CLI) / `auto:false` (the `check` library option) restore the require-a-config behavior.
+- The inert-guard warning now explains *why* a guard did not run (same value at both refs) and how to fix it (a build step, deps, or the wrong test command).
+
 ## 0.5.1 (2026-10-31): document the per-turn cost
 
 - **README: a "Per-turn cost" note.** A check runs your metric in two throwaway worktrees plus a source-only re-run, so it costs roughly 2-3x the metric command's runtime + ~40ms of worktree overhead (measured). Point the per-turn gate at a *fast* metric and keep the slow full suite for CI. Docs only; no engine change.
