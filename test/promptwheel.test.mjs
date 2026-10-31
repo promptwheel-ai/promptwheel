@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extract, evaluate, median, spread, renderMarkdown, isNonSource, gain, judgeGaming, foldOutcomes, betaMean, scoreKey } from '../bin/promptwheel.mjs';
+import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, foldOutcomes, betaMean, scoreKey } from '../bin/promptwheel.mjs';
 
 const ENGINE = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'promptwheel.mjs');
 
@@ -81,25 +81,6 @@ function pw(d, args) {
 }
 const TODOS = { name: 'todos', cmd: 'grep -rn TODO . --include=*.js 2>/dev/null | wc -l', extract: 'number', direction: 'down', guard: true };
 
-// -------------------------------------------------------- integration: no-ai-tells preset
-test('preset no-ai-tells: writes an em_dashes guard that regresses when an em-dash is added', () => {
-  const d = mkdtempSync(join(tmpdir(), 'pw-emdash-'));
-  const g = (a) => execFileSync('git', a, { cwd: d });
-  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
-  writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
-  writeFileSync(join(d, 'doc.md'), 'clean prose, no tells here\n'); commitAll(d, 'base: clean');
-  const init = pw(d, ['init', '--preset', 'no-ai-tells']);
-  assert.equal(init.code, 0, init.out);
-  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
-  assert.ok(cfg.metrics.some((m) => m.name === 'em_dashes'), 'em_dashes guard present');
-  commitAll(d, 'add the no-ai-tells gate');
-  writeFileSync(join(d, 'doc.md'), 'clean prose, no tells here\nnow with an — em-dash\n'); commitAll(d, 'sneak in an em-dash');
-  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
-  assert.equal(r.code, 1, r.out);                 // the em-dash tripped the guard
-  assert.match(r.out, /em_dashes|FAIL/);
-  rmSync(d, { recursive: true, force: true });
-});
-
 // -------------------------------------------------------- integration: run pass/fail
 test('run: passes on improvement (exit 0), fails on guarded regression (exit 1)', () => {
   const d = tmpRepo([TODOS]);
@@ -129,6 +110,30 @@ test('isNonSource: tool-named CONFIG is non-source; tool-named SOURCE is source'
     assert.equal(isNonSource(p), true, p);
   for (const p of ['cli/src/installers/eslint.ts', 'src/vitest-helpers.ts', 'lib/babel.ts'])
     assert.equal(isNonSource(p), false, p);  // corpus finding: production file named after a tool must stay in the source slice
+});
+test('isNonSource: cross-language test filenames are non-source (red-team gap)', () => {
+  for (const p of ['test.c', 'tests.go', 'subtract_test.c', 'test_foo.cpp', 'pkg/handler_test.go',
+    'math_test.rs', 'user_spec.rb', 'calc_test.rb', 'SubtractTest.java', 'BarTests.kt'])
+    assert.equal(isNonSource(p), true, p);
+});
+test('isNonSource: ambiguous production names that merely contain "test" stay source', () => {
+  for (const p of ['latest.c', 'speedtest.go', 'contest.java', 'Contest.java', 'Check.java',
+    'lib/latest.rb', 'contest.rb', 'score.py'])
+    assert.equal(isNonSource(p), false, p);  // conservative: a strong-signal token (_test/_spec/Test suffix) is required, never a substring
+});
+test('evaluatorMatcher: opt-in evaluator-path globs (bare name any depth, "/" anchors, ** crosses, leading /)', () => {
+  const bare = evaluatorMatcher({ evaluatorPaths: ['budget.json'] });
+  for (const p of ['budget.json', 'config/budget.json', 'a/b/budget.json']) assert.equal(bare(p), true, p);
+  for (const p of ['budget.json.bak', 'mybudget.json', 'src/app.js']) assert.equal(bare(p), false, p);
+  const glob = evaluatorMatcher({ evaluatorPaths: ['ci/*.limits', 'thresholds/**'] });
+  assert.equal(glob('ci/perf.limits'), true);
+  assert.equal(glob('ci/nested/perf.limits'), false);   // * does not cross /
+  assert.equal(glob('thresholds/a/b/x.json'), true);     // ** crosses /
+  const rooted = evaluatorMatcher({ evaluatorPaths: ['/budget.json'] });
+  assert.equal(rooted('budget.json'), true);
+  assert.equal(rooted('config/budget.json'), false);     // leading / anchors to repo root
+  assert.equal(evaluatorMatcher({})('anything'), false);              // no field -> matches nothing
+  assert.equal(evaluatorMatcher({ evaluatorPaths: 'nope' })('nope'), false);  // non-array ignored, no throw
 });
 test('gain: directional improvement', () => {
   assert.equal(gain({ direction: 'up' }, 5, 8), 3);
@@ -193,6 +198,27 @@ test('run --detect-gaming: a gamingCheck:false guard is exempt from the source-o
   const r = pw(d, ['run', '--base', base, '--head', 'HEAD', '--detect-gaming', '--no-record']);
   assert.equal(r.code, 0, r.out);          // PASS, the test-side gain must not be flagged GAMED
   assert.doesNotMatch(r.out, /GAMED/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('run --detect-gaming: evaluatorPaths opts a generic gate file into the non-source slice', () => {
+  const GATE = { name: 'gate', cmd: 'node check.js', extract: 'exit', direction: 'pass', guard: true };
+  const d = tmpRepo([GATE]);
+  const base0 = { 'src.js': 'module.exports={errs:()=>3};\n', 'budget.json': '{"maxErrors":0}\n', 'check.js': "const{errs}=require('./src');const{maxErrors}=require('./budget.json');process.exit(errs()<=maxErrors?0:1);\n" };
+  const writeBase = () => { for (const [p, c] of Object.entries(base0)) writeFileSync(join(d, p), c); };
+  // (1) NOT declared: raising the generic threshold file reads as a source win -> PASS (the open-gap baseline)
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [GATE] }));
+  writeBase(); commitAll(d, 'base'); const base = rev(d);
+  writeFileSync(join(d, 'budget.json'), '{"maxErrors":5}\n'); commitAll(d, 'raise'); const raised = rev(d);
+  let r = pw(d, ['run', '--base', base, '--head', raised, '--detect-gaming', '--no-record']);
+  assert.equal(r.code, 0, r.out); assert.doesNotMatch(r.out, /GAMED/);
+  // (2) declared as evaluator surface: the SAME cheat is now caught
+  execFileSync('git', ['checkout', '-q', base], { cwd: d });
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, evaluatorPaths: ['budget.json'], metrics: [GATE] }));
+  writeFileSync(join(d, 'budget.json'), '{"maxErrors":0}\n'); commitAll(d, 'base2'); const base2 = rev(d);
+  writeFileSync(join(d, 'budget.json'), '{"maxErrors":5}\n'); commitAll(d, 'raise2'); const raised2 = rev(d);
+  r = pw(d, ['run', '--base', base2, '--head', raised2, '--detect-gaming', '--no-record']);
+  assert.equal(r.code, 2, r.out); assert.match(r.out, /GAMED/);   // budget.json is now non-source -> zero source edits -> gamed
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -289,6 +315,24 @@ test('init: writes a starter config for the stack, refuses overwrite without --f
   assert.ok(!written.some((m) => m.name === 'lint_errors'), 'no lint metric when eslint is absent');
   assert.equal(pw(d, ['init']).code, 2);          // refuses overwrite
   assert.equal(pw(d, ['init', '--list']).code, 0); // catalog
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('init --preset security-antihack: security gate + tripwires + evaluatorPaths + installed pack', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-secah-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  const r = pw(d, ['init', '--preset', 'security-antihack']);
+  assert.equal(r.code, 0, r.out);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  const names = cfg.metrics.map((m) => m.name);
+  assert.ok(names.includes('security_findings'), 'has the security-findings gate');
+  assert.ok(names.includes('suppressions'), 'has the antihack suppression tripwire');
+  assert.ok(Array.isArray(cfg.evaluatorPaths) && cfg.evaluatorPaths.length, 'ships a starter evaluatorPaths');
+  const sf = cfg.metrics.find((m) => m.name === 'security_findings');
+  assert.match(sf.cmd, /\.promptwheel\/packs\/security\//, 'pack path rewritten into .promptwheel (evaluator-protected)');
+  assert.ok(existsSync(join(d, '.promptwheel/packs/security/scan.mjs')), 'scanner pack copied in');
+  assert.match(cfg.metrics.find((m) => m.name === 'suppressions').cmd, /nosec/, 'suppression tripwire also greps bandit-style # nosec');
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -689,4 +733,23 @@ test("deleting the copied security pack's patterns is GAMED, not an improvement"
   const rep = JSON.parse(out);
   assert.notEqual(rep.verdict, "pass", "pattern-gutting must not PASS: " + rep.verdict);
   assert.notEqual(code, 0, "exit must be nonzero");
+});
+
+// -------------------------------------------------------- integration: no-ai-tells preset
+test('preset no-ai-tells: writes an em_dashes guard that regresses when an em-dash is added', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-emdash-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+  writeFileSync(join(d, 'doc.md'), 'clean prose, no tells here\n'); commitAll(d, 'base: clean');
+  const init = pw(d, ['init', '--preset', 'no-ai-tells']);
+  assert.equal(init.code, 0, init.out);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  assert.ok(cfg.metrics.some((m) => m.name === 'em_dashes'), 'em_dashes guard present');
+  commitAll(d, 'add the no-ai-tells gate');
+  writeFileSync(join(d, 'doc.md'), 'clean prose, no tells here\nnow with an — em-dash\n'); commitAll(d, 'sneak in an em-dash');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /em_dashes|FAIL/);
+  rmSync(d, { recursive: true, force: true });
 });

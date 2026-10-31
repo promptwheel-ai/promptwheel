@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.7 (2026-10-30): reconcile the engine (evaluatorPaths, security-antihack, classifier)
+
+- Brought the published engine in line with the dev copy, all additive, no change to the verdict/exit contract:
+  - **`evaluatorPaths`**: opt-in glob allowlist for repo-declared gate files (a threshold, a budget, a CI limit), reverted in the source-only re-run like a test/grader, so a win that moved only by editing a declared gate is GAMED.
+  - **`security-antihack` preset**: security-invariant findings gate + the antihack tripwires + a starter `evaluatorPaths` ("guard the guards"); pairs with `--detect-gaming`.
+  - **compiled-language test-filename classifier**: a weakened `foo_test.c` / `FooTest.java` / `handler_test.go` / `calc_test.rb` now reads as non-source (a red-team finding).
+  - `# nosec` added to the suppressions tripwire.
+
 ## 0.4.6 (2026-10-30): the no-ai-tells preset
 
 - **New opt-in preset `no-ai-tells`**: a guard that fails if the em-dash count rises (an AI writing tell). `promptwheel init --preset no-ai-tells`. (Was intended for 0.4.5 but landed after it published.)

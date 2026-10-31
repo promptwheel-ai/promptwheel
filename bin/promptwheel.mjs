@@ -51,12 +51,12 @@ function resolveConfig(p, repo, label, seen) {
       if (!existsSync(bp)) { console.error(`extends target not found: ${ref} (from ${relOf(repo, p)})`); process.exit(2); }
       const base = resolveConfig(bp, repo, relOf(repo, bp), seen);
       for (const m of base.metrics) byName.set(m.name, m);
-      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold']) if (base[k] !== undefined) scalars[k] = base[k];
+      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths']) if (base[k] !== undefined) scalars[k] = base[k];
     }
     for (const m of (cfg.metrics || [])) {
       byName.set(m.name, { ...m, __src: label, __override: byName.has(m.name) });
     }
-    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
+    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
     return { ...scalars, metrics: [...byName.values()] };
   } finally {
     seen.delete(abs); // only ACTIVE ancestors are a cycle, a diamond (a base reached two ways) is fine
@@ -203,6 +203,17 @@ const NON_SOURCE = [
   /\.(test|spec)\.[cm]?[jt]sx?$/i,
   /(^|\/)tests?\.[cm]?[jt]sx?$/i,                 // a file literally named test.js / tests.ts
   /(^|\/)test_[^/]*\.py$/i, /_test\.py$/i, /(^|\/)conftest\.py$/i,
+  // cross-language test-filename conventions, strong-signal tokens only (a dedicated
+  // _test / _spec / Test(s) suffix, or a file literally named test.<lang>), so production
+  // code like latest.c, Contest.java or speedtest.go is NOT swept into the evaluator slice.
+  // (Test DIRECTORIES are covered above for every language; this adds the by-filename
+  // conventions compiled langs use at repo root, a red-team finding: a weakened test.c /
+  // FooTest.java / handler_test.go was classified as source, so the cheat survived.)
+  /(^|\/)tests?\.(c|cc|cpp|cxx|go|rs|rb)$/i,
+  /(^|\/)test_[^/]*\.(c|cc|cpp|cxx|h|hpp|go|rs)$/i,
+  /_test\.(c|cc|cpp|cxx|h|hpp|go|rs|rb)$/i,
+  /_spec\.rb$/i,
+  /[a-z0-9](Test|Tests)\.(java|kt|kts|scala)$/,
   /\.snap$/i, /(^|\/)golden[^/]*$/i, /\.golden$/i,
   /(^|\/)(eval|grader|score)[^/]*\.[cm]?[jt]s$/i,
   // config files only, require a .config/.conf/.setup segment so PRODUCTION source that
@@ -222,17 +233,41 @@ const NON_SOURCE = [
 ];
 const isNonSource = (p) => NON_SOURCE.some((re) => re.test(p));
 
-// split the agent's changed files into production-source vs test/config/grader/golden
-function changedSourcePaths(repo, base, head) {
+// user-declared evaluator surface: extra paths that DEFINE the gate (a generic threshold
+// file, a budget, a CI limit) and so must be reverted in the source-only re-run exactly
+// like a test/grader. Opt-in per repo via `evaluatorPaths`, NOT guessed, because a bare
+// name is a classifier risk; the user names the files only they know are the goalposts.
+// Glob semantics: a bare name matches that basename at any depth; a pattern with "/" is a
+// path glob anchored at repo root; "*" stops at "/", "**" crosses it, "?" is one char; a
+// leading "/" anchors to the root explicitly.
+function globToRe(glob) {
+  let g = glob; const anchored = g.startsWith('/'); if (anchored) g = g.slice(1);
+  const body = g.replace(/[.+^${}()|[\]\\]/g, '\\$&')            // escape regex, keep * ? for globbing
+    .replace(/\*\*/g, '\x00').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\x00/g, '.*');
+  const pre = (anchored || glob.includes('/')) ? '^' : '(^|/)';
+  return new RegExp(`${pre}${body}$`);
+}
+function evaluatorMatcher(cfg) {
+  const pats = (cfg && Array.isArray(cfg.evaluatorPaths) ? cfg.evaluatorPaths : []).filter((s) => typeof s === 'string' && s.trim());
+  if (!pats.length) return () => false;
+  const res = pats.map(globToRe);
+  return (p) => res.some((re) => re.test(p));
+}
+
+// split the agent's changed files into production-source vs test/config/grader/golden.
+// `isEval` is the repo's opt-in evaluator-path matcher, treated as non-source alongside
+// the built-in classifier, so a cheat that only edits a declared gate file is caught.
+function changedSourcePaths(repo, base, head, isEval = () => false) {
   const all = git(['diff', '--name-only', base, head], repo).split('\n').filter(Boolean);
-  return { source: all.filter((p) => !isNonSource(p)), nonSource: all.filter(isNonSource) };
+  const nonSrc = (p) => isNonSource(p) || isEval(p);
+  return { source: all.filter((p) => !nonSrc(p)), nonSource: all.filter(nonSrc) };
 }
 
 // coarse change-location fingerprint for the outcome record: top source dirs of the diff
-function subsystemsOf(repo, base, head) {
+function subsystemsOf(repo, base, head, cfg) {
   try {
     const counts = {};
-    for (const p of changedSourcePaths(repo, base, head).source) {
+    for (const p of changedSourcePaths(repo, base, head, evaluatorMatcher(cfg)).source) {
       const d = p.includes('/') ? p.slice(0, p.indexOf('/')) : '(root)';
       counts[d] = (counts[d] || 0) + 1;
     }
@@ -242,7 +277,7 @@ function subsystemsOf(repo, base, head) {
 
 // measure `metric` in a worktree at `base` with ONLY the source slice of base→head applied.
 function measureSourceOnly(repo, base, head, metric, cfg, repeat) {
-  const { source } = changedSourcePaths(repo, base, head);
+  const { source } = changedSourcePaths(repo, base, head, evaluatorMatcher(cfg));
   if (!source.length) return { samples: [], hadSourceChange: false }; // a "win" with zero source edits = goalposts moved
   const wt = mkdtempSync(join(tmpdir(), 'promptwheel-src-'));
   git(['worktree', 'add', '--quiet', '--detach', wt, base], repo);
@@ -410,7 +445,7 @@ function gate(repo, opts) {
     // label attributes a change-type, subsystems fingerprint WHERE the change landed.
     cohort: opts.cohort ?? (process.env.CI ? 'ci' : 'local'),
     ...(opts.label ? { label: opts.label } : {}),
-    subsystems: subsystemsOf(repo, base, head),
+    subsystems: subsystemsOf(repo, base, head, cfg),
     verdict, metrics,
   };
   if (!opts.noRecord && cfg.record !== false) recordOutcome(repo, report);
@@ -676,13 +711,28 @@ const PRESETS = {
       { name: 'tests_pass', cmd: '__TESTCMD__', extract: 'exit', direction: 'pass', guard: true },
       { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
       { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|xit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
-      { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa|//nolint|#!?\\[allow\\(" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
+      { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa|# ?nosec|//nolint|#!?\\[allow\\(" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
       { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert|\\bt\\.(is|deepEqual|throws|truthy|falsy|not|ok) ?\\(" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
     ] },
   'no-ai-tells': { desc: 'opt-in: fail the gate if the em-dash count rises (an AI writing tell); some projects use them on purpose, so it is not a default',
     metrics: [
       { name: 'em_dashes', cmd: 'grep -rIoe "—" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
     ] },
+};
+
+// security-antihack = the security-invariant findings gate + the SAME antihack tripwires
+// (so an agent that suppresses a security rule, # noqa / # nosec / eslint-disable, or
+// skips a security test is caught), PLUS a starter `evaluatorPaths` that protects common
+// security-gate config files (a ruleset or a budget the agent could otherwise loosen to
+// pass). The scanner pack installs into `.promptwheel/` (already evaluator-protected). It
+// is the "guard the guards" preset: pairs with --detect-gaming so a win that only moved by
+// loosening the security gate, not by fixing the code, is GAMED. Blind spot (by design,
+// not this tool's job): a source-resident backdoor that behaves safely only under test;
+// that needs held-out/behavioral analysis, not a source-only re-run.
+PRESETS['security-antihack'] = {
+  desc: 'gate security-invariant findings + antihack tripwires + evaluatorPaths so an agent cannot loosen the security gate to pass it (pairs with --detect-gaming)',
+  evaluatorPaths: ['.semgrep.yml', '.semgrep.yaml', '.bandit', 'bandit.yaml', '.ruff.toml', 'ruff.toml', '.snyk', 'security-budget.json'],
+  metrics: [{ name: 'security_findings', cmd: 'node packs/security/scan.mjs .', extract: 'number', direction: 'down', guard: true }, ...PRESETS.antihack.metrics.slice(1)],
 };
 
 function detectTestCmd(repo) {
@@ -734,10 +784,11 @@ function init(argv) {
   }
   const pi = argv.indexOf('--preset');
   const presetName = pi >= 0 ? argv[pi + 1] : null;
-  let metrics, note;
+  let metrics, note, evaluatorPaths;
   if (presetName) {
     const p = PRESETS[presetName];
     if (!p) { console.error(`unknown preset "${presetName}", try: promptwheel init --list`); process.exit(2); }
+    evaluatorPaths = p.evaluatorPaths;   // a preset may ship a starter evaluator allowlist (e.g. security-antihack)
     metrics = p.metrics || [{ name: 'tests_pass', cmd: detectTestCmd(repo), extract: 'exit', direction: 'pass', guard: true }];
     metrics = metrics.map((m) => m.cmd === '__TESTCMD__' ? { ...m, cmd: detectTestCmd(repo) } : m); // fill the preset's target
     // pack-backed presets: the referenced scripts live in THIS package, not
@@ -766,7 +817,7 @@ function init(argv) {
   }
   const envCfg = presetName ? {} : detectEnv(repo);
   if (envCfg.linkDirs) note += ` · linking ${envCfg.linkDirs.join(', ')}`;
-  writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, metrics }, null, 2) + '\n');
+  writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, ...(evaluatorPaths ? { evaluatorPaths } : {}), metrics }, null, 2) + '\n');
   console.log(`✓ wrote promptwheel.config.json, ${note}`);
   console.log('\n  next:  promptwheel run --working   # gate your uncommitted changes');
   console.log('         promptwheel init --list     # other presets (llm-eval, bundle-size, …)');
@@ -863,7 +914,7 @@ function parseArgs(argv) {
 
 // pure, side-effect-free helpers are exported for unit testing; the CLI below only
 // runs when this file is executed directly (not when imported by the test suite).
-export { extract, evaluate, median, spread, renderMarkdown, isNonSource, gain, judgeGaming, foldOutcomes, betaMean, scoreKey };
+export { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, foldOutcomes, betaMean, scoreKey };
 
 function main() {
   const [cmd, ...rest] = process.argv.slice(2);
