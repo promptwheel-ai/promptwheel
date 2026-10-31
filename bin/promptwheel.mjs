@@ -398,7 +398,7 @@ function warnEditableInstall(repo) {
 function gate(repo, opts) {
   selfHeal(repo);
   warnEditableInstall(repo);
-  const cfg = loadConfig(repo);
+  const cfg = opts.config ?? loadConfig(repo);
   const repeat = Math.max(1, opts.repeat ?? cfg.repeat ?? 1);
 
   let base, head;
@@ -459,7 +459,7 @@ function run(argv) {
   if (args.json) console.log(JSON.stringify(report, null, 2));
   else if (args.markdown) console.log(renderMarkdown(report));
   else printHuman(report);
-  process.exit(report.verdict === 'pass' ? 0 : report.verdict === 'gamed' ? 2 : report.verdict === 'inconclusive' ? 3 : 1);
+  process.exit(verdictExitCode(report.verdict));
 }
 
 // persisted record: append every gated run to a per-repo outcome record (best-effort, never fails the gate)
@@ -916,6 +916,180 @@ function parseArgs(argv) {
 // runs when this file is executed directly (not when imported by the test suite).
 export { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, foldOutcomes, betaMean, scoreKey };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Public library API: the Verified-Outcome Contract, in process.
+//   import { check } from 'promptwheel';
+// Importing this file never runs the CLI (see the isMain guard at the bottom).
+// Stable across 0.x minor versions. The schema check() returns and the exit codes
+// verdictExitCode() maps are specified in CONTRACT.md; integration paths (conform,
+// shell, import, MCP) are in INTEGRATE.md.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The contract revision this build implements (CONTRACT.md "Versioning"). Bumps only
+// when the verdict schema or the exit codes change; a consumer may assert on it.
+export const CONTRACT_VERSION = '1';
+
+// Section 2 fixed vocabularies, exported so a consumer validates against the source of
+// truth instead of hardcoding the strings.
+export const VERDICTS = Object.freeze(['pass', 'fail', 'gamed', 'inconclusive']);
+export const METRIC_STATUSES = Object.freeze(['improved', 'regressed', 'unchanged', 'inconclusive', 'unmeasurable']);
+export const DIRECTIONS = Object.freeze(['up', 'down', 'pass']);
+
+// Section 1: the one verdict -> process exit code mapping. The CLI uses it too, so a
+// consumer that maps verdicts this way exits exactly as `promptwheel run` does.
+export function verdictExitCode(verdict) {
+  return verdict === 'pass' ? 0 : verdict === 'gamed' ? 2 : verdict === 'inconclusive' ? 3 : 1;
+}
+
+// check(options) -> report
+// Run the gate in process and RETURN the Section 2 verdict object (identical to what
+// `run --json` prints). Measurement happens only in throwaway worktrees, never the
+// caller's working tree (constitution #4). This function never prints and never calls
+// process.exit; it throws a plain Error on a precondition failure (not a git repo, or a
+// missing / invalid config). Reproducible from (base, head, config) alone.
+//
+//   repo          string   repo path (default: discovered from process.cwd())
+//   base          string   base ref (default: merge-base vs origin/main..., else HEAD~1)
+//   head          string   head ref (default: HEAD)
+//   working       boolean  gate uncommitted changes instead of base..head
+//   config        object   a resolved config { metrics:[...], ... }; omit to load
+//                          promptwheel.config.json from the repo
+//   repeat        number   measurement repeats for the noise band (default: config.repeat ?? 1)
+//   detectGaming  boolean  run the Section 3 source-only re-proof (default: true)
+//   cohort        string   cohort tag for the record (default: CI ? 'ci' : 'local')
+//   label         string   change-type label
+//   record        boolean  append the run to .promptwheel/outcomes.jsonl (default: false)
+export function check(options = {}) {
+  let repo;
+  try {
+    repo = options.repo ? realpathSync(options.repo)
+                        : git(['rev-parse', '--show-toplevel'], process.cwd());
+  } catch { throw new Error(`promptwheel check: not inside a git repository (${options.repo || process.cwd()})`); }
+
+  if (options.config !== undefined) {
+    const c = options.config;
+    if (!c || typeof c !== 'object' || !Array.isArray(c.metrics) || c.metrics.length === 0)
+      throw new Error('promptwheel check: options.config.metrics must be a non-empty array');
+  } else if (!['promptwheel.config.json', 'outcome-gate.config.json'].some((f) => existsSync(join(repo, f)))) {
+    throw new Error(`promptwheel check: no promptwheel.config.json in ${repo} (pass options.config to supply one in process)`);
+  }
+
+  return gate(repo, {
+    base: options.base,
+    head: options.head,
+    working: options.working,
+    config: options.config,
+    repeat: options.repeat,
+    detectGaming: options.detectGaming ?? true,
+    cohort: options.cohort,
+    label: options.label,
+    noRecord: options.record !== true,
+  });
+}
+
+// conformsToContract(report) -> { ok, errors }
+// Structurally validate a verdict object against Section 2 (shapes + fixed vocabularies)
+// plus the two honest-verdict rules that hold for any conforming implementation. Zero
+// dependency, so a third party can self-check the artifact it emits against the reference
+// schema. It checks well-formedness and consistency, not a deep re-derivation of the math.
+export function conformsToContract(report) {
+  const errors = [];
+  const E = (m) => errors.push(m);
+  const isInt = (n) => Number.isInteger(n);
+  const isNum = (n) => typeof n === 'number' && Number.isFinite(n);
+  const numOrNull = (n) => n === null || isNum(n);
+
+  if (!report || typeof report !== 'object' || Array.isArray(report)) return { ok: false, errors: ['report must be an object'] };
+  if (!VERDICTS.includes(report.verdict)) E(`verdict must be one of ${VERDICTS.join('|')} (got ${JSON.stringify(report.verdict)})`);
+  if (typeof report.base !== 'string' || !report.base) E('base must be a non-empty string');
+  if (typeof report.head !== 'string' || !report.head) E('head must be a non-empty string');
+  if (report.mode !== undefined && report.mode !== 'refs' && report.mode !== 'working') E("mode must be 'refs' or 'working'");
+  if (report.repeat !== undefined && !(isInt(report.repeat) && report.repeat >= 1)) E('repeat must be an integer >= 1');
+  if (report.cohort !== undefined && typeof report.cohort !== 'string') E('cohort must be a string');
+  if (report.subsystems !== undefined && !(Array.isArray(report.subsystems) && report.subsystems.every((s) => typeof s === 'string')))
+    E('subsystems must be an array of strings');
+  if (!Array.isArray(report.metrics)) { E('metrics must be an array'); return { ok: false, errors }; }
+
+  report.metrics.forEach((m, i) => {
+    const at = `metrics[${i}]`;
+    if (!m || typeof m !== 'object') { E(`${at} must be an object`); return; }
+    if (typeof m.name !== 'string' || !m.name) E(`${at}.name must be a non-empty string`);
+    if (!DIRECTIONS.includes(m.direction)) E(`${at}.direction must be one of ${DIRECTIONS.join('|')}`);
+    if (typeof m.guard !== 'boolean') E(`${at}.guard must be a boolean`);
+    if (!METRIC_STATUSES.includes(m.status)) E(`${at}.status must be one of ${METRIC_STATUSES.join('|')}`);
+    if (typeof m.ok !== 'boolean') E(`${at}.ok must be a boolean`);
+    if (m.before !== undefined && !numOrNull(m.before)) E(`${at}.before must be a number or null`);
+    if (m.after !== undefined && !numOrNull(m.after)) E(`${at}.after must be a number or null`);
+    if (m.delta !== undefined && !numOrNull(m.delta)) E(`${at}.delta must be a number or null`);
+    if (m.noise !== undefined && !(isNum(m.noise) && m.noise >= 0)) E(`${at}.noise must be a number >= 0 (the measured jitter band; repeat count is the top-level report.repeat)`);
+    if (m.confidence !== undefined && typeof m.confidence !== 'string') E(`${at}.confidence must be a string`);
+    if (m.gamed !== undefined && typeof m.gamed !== 'boolean') E(`${at}.gamed must be a boolean`);
+    if (m.sourceOnly !== undefined && !numOrNull(m.sourceOnly)) E(`${at}.sourceOnly must be a number or null`);
+    if (m.retained !== undefined && !numOrNull(m.retained)) E(`${at}.retained must be a number or null`);
+    if (m.gamingReason !== undefined && typeof m.gamingReason !== 'string') E(`${at}.gamingReason must be a string`);
+  });
+
+  // Honest-verdict rules that hold regardless of how a verdict is derived:
+  // a clean pass cannot hide a failing guard or a gamed win, and a gamed verdict
+  // must point at a gamed metric. (Fail-vs-gamed precedence is left to the implementation.)
+  if (VERDICTS.includes(report.verdict)) {
+    if (report.verdict === 'pass' && report.metrics.some((m) => m.guard === true && m.ok === false))
+      E("verdict 'pass' but a guarded metric regressed (guard:true, ok:false)");
+    if (report.verdict === 'pass' && report.metrics.some((m) => m.gamed === true))
+      E("verdict 'pass' but a metric is gamed:true");
+    if (report.verdict === 'gamed' && !report.metrics.some((m) => m.gamed === true))
+      E("verdict 'gamed' but no metric is gamed:true");
+  }
+
+  return { ok: errors.length === 0, errors };
+}
+
+// `promptwheel conformance [file.json | -] [--cmd "<command>"]`
+// Self-check a Contract implementation. With a file or stdin, validate that verdict JSON
+// against the Section 2 schema. With --cmd, run the command, then validate its --json
+// stdout (Section 2) AND that its exit code matches the verdict per Section 1. Exit 0 if
+// it conforms, 1 otherwise, listing every problem.
+function conformance(argv) {
+  let cmd = null, src = null;
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--cmd') cmd = argv[++i];
+    else if (argv[i] === '-' || !argv[i].startsWith('-')) src = argv[i];
+  }
+
+  let text, exitCode = null;
+  if (cmd) {
+    try { text = execFileSync('sh', ['-c', cmd], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); exitCode = 0; }
+    catch (e) {
+      text = (e.stdout || '').toString();
+      exitCode = typeof e.status === 'number' ? e.status : null;
+      if (!text) { console.error(`conformance: command produced no stdout (exit ${exitCode}): ${e.message}`); process.exit(1); }
+    }
+  } else {
+    const file = src && src !== '-' ? src : 0; // fd 0 = stdin
+    try { text = readFileSync(file, 'utf8'); }
+    catch (e) { console.error(`conformance: cannot read ${!src || src === '-' ? 'stdin' : src}: ${e.message}`); process.exit(1); }
+  }
+
+  let report;
+  try { report = JSON.parse(text); }
+  catch (e) { console.error(`conformance: not valid JSON: ${e.message}`); process.exit(1); }
+
+  const { errors } = conformsToContract(report);
+  const problems = [...errors];
+  if (cmd && exitCode !== null && VERDICTS.includes(report.verdict)) {
+    const want = verdictExitCode(report.verdict);
+    if (exitCode !== want) problems.push(`exit code ${exitCode} does not match verdict '${report.verdict}' (Section 1 requires ${want})`);
+  }
+
+  if (problems.length === 0) {
+    console.log(`ok, conforms to the Verified-Outcome Contract v${CONTRACT_VERSION} (verdict: ${report.verdict}${cmd ? `, exit ${exitCode}` : ''})`);
+    process.exit(0);
+  }
+  console.error(`does NOT conform to the Contract (${problems.length} problem${problems.length > 1 ? 's' : ''}):`);
+  for (const p of problems) console.error(`  - ${p}`);
+  process.exit(1);
+}
+
 function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   if (cmd === 'run') run(rest);
@@ -926,6 +1100,7 @@ function main() {
   else if (cmd === 'backfill') backfill(rest);
   else if (cmd === 'init') init(rest);
   else if (cmd === 'guards') guards(rest);
+  else if (cmd === 'conformance') conformance(rest);
   else {
     console.log([
       'PromptWheel, catch your agent cheating. Prove a change moved a real metric (and that the agent earned it, not gamed it). The per-turn reward + source-only audit for AI coding loops.',
@@ -942,7 +1117,9 @@ function main() {
       '  promptwheel suggest [--json]                 UCB work-discovery: where the next attempt should go (experimental)',
       '  promptwheel backfill [-n N | --since <ref>]  seed the ledger from git history (cohort-tagged; commit types become labels)',
       '  promptwheel guards                           show the effective guardrails (incl. inherited) + flag record',
+      '  promptwheel conformance [file|-] [--cmd C]   check a verdict JSON (or a command) against the Contract (exit 0 = conforms)',
       '',
+      'Integrate (library / conform / shell / MCP): see INTEGRATE.md. Import: `import { check } from \'promptwheel\'`.',
       'Loop it:  while promptwheel improve --attempt "$AGENT"; do :; done   # stops on plateau/regression',
       'Config:   promptwheel.config.json → { extends?, metrics:[{ name, cmd, direction, extract?, guard? }] }   (or: promptwheel init)',
       '          extends: a path (or array) to a shared base config, repos INHERIT its guardrails; local metrics override by name.',

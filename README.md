@@ -10,7 +10,7 @@ It's built on an **outcome gate**: for any change it re-runs your metric command
 
 PromptWheel is the **signal, not the loop driver**: wire it as the verifier inside Claude Code `/loop`, a Ralph `while`-loop, or a Beads pull-loop. Each turn it answers one question, *did this turn earn its keep, and did the agent earn it honestly?*, so the loop improves instead of confidently degrading. (In CI it's the **outcome gate for AI code**: the same verdict, as a PR check.)
 
-PromptWheel is the reference check for the [Verified-Outcome Contract](https://github.com/sawbuck-ai/sawbuck/blob/master/CONTRACT.md), the open interface for a verifiable coding loop.
+PromptWheel is the reference check for the [Verified-Outcome Contract](https://github.com/sawbuck-ai/sawbuck/blob/master/CONTRACT.md), the open interface for a verifiable coding loop. Use it from CI, a Claude Code hook, or in process (`import { check } from 'promptwheel'`); the four integration paths (conform, shell, import, MCP) are in [INTEGRATE.md](INTEGRATE.md).
 
 > Same name, new meaning. The "wheel" is the **improvement flywheel**: every turn only counts if it **provably moved a metric without regressing another.** Orchestration (the old "wheel of prompts") *and the outcome gate itself* are now solved, commoditized problems; the open one is **catching when the agent games that gate**, making the reward signal one you can't cheat.
 

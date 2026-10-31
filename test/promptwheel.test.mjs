@@ -6,7 +6,8 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, foldOutcomes, betaMean, scoreKey } from '../bin/promptwheel.mjs';
+import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, foldOutcomes, betaMean, scoreKey,
+  check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION } from '../bin/promptwheel.mjs';
 
 const ENGINE = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'promptwheel.mjs');
 
@@ -751,5 +752,122 @@ test('preset no-ai-tells: writes an em_dashes guard that regresses when an em-da
   const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /em_dashes|FAIL/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ======================================================================================
+// Public library API + the Verified-Outcome Contract (INTEGRATE.md / CONTRACT.md)
+// ======================================================================================
+
+// ---------------------------------------------------------------- unit: Section 1 + vocab
+test('verdictExitCode: the Section 1 verdict -> exit-code mapping', () => {
+  assert.equal(verdictExitCode('pass'), 0);
+  assert.equal(verdictExitCode('fail'), 1);
+  assert.equal(verdictExitCode('gamed'), 2);
+  assert.equal(verdictExitCode('inconclusive'), 3);
+});
+test('contract vocab exports are the fixed Section 2 sets', () => {
+  assert.deepEqual([...VERDICTS], ['pass', 'fail', 'gamed', 'inconclusive']);
+  assert.deepEqual([...DIRECTIONS], ['up', 'down', 'pass']);
+  assert.deepEqual([...METRIC_STATUSES], ['improved', 'regressed', 'unchanged', 'inconclusive', 'unmeasurable']);
+  assert.equal(CONTRACT_VERSION, '1');
+});
+
+// ---------------------------------------------------------- unit: conformsToContract
+const validReport = () => ({
+  base: 'a1b2c3d', head: 'e4f5g6h', mode: 'refs', repeat: 3, cohort: 'ci', verdict: 'pass',
+  subsystems: ['api'],
+  metrics: [{ name: 'tests_pass', direction: 'pass', guard: true, before: 1, after: 1, delta: 0, status: 'unchanged', ok: true, confidence: 'high', noise: 0 }],
+});
+test('conformsToContract: a well-formed Section 2 report conforms', () => {
+  const r = conformsToContract(validReport());
+  assert.equal(r.ok, true, r.errors.join('; '));
+});
+test('conformsToContract: rejects an unknown verdict', () => {
+  const r = conformsToContract({ ...validReport(), verdict: 'green' });
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join(' '), /verdict must be one of/);
+});
+test('conformsToContract: rejects a bad metric status and direction', () => {
+  const rep = validReport(); rep.metrics[0].status = 'ok'; rep.metrics[0].direction = 'sideways';
+  const r = conformsToContract(rep);
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join(' '), /status must be one of/);
+  assert.match(r.errors.join(' '), /direction must be one of/);
+});
+test('conformsToContract: a pass may not hide a guarded regression', () => {
+  const rep = validReport(); rep.metrics[0].ok = false; // guard:true + ok:false but verdict stays pass
+  const r = conformsToContract(rep);
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join(' '), /guarded metric regressed/);
+});
+test('conformsToContract: a gamed verdict must point at a gamed metric', () => {
+  const r = conformsToContract({ ...validReport(), verdict: 'gamed' });
+  assert.equal(r.ok, false);
+  assert.match(r.errors.join(' '), /no metric is gamed/);
+});
+test('conformsToContract: a non-object is rejected cleanly', () => {
+  assert.equal(conformsToContract(null).ok, false);
+  assert.equal(conformsToContract('x').ok, false);
+});
+
+// -------------------------------------------------------- integration: check() in process
+test('check(): returns the Section 2 verdict in process and never exits (pass on a real fix)', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app.js'), 'a\nb\n'); commitAll(d, 'improve in source');
+  const report = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(report.verdict, 'pass', JSON.stringify(report.metrics));
+  assert.equal(verdictExitCode(report.verdict), 0);
+  assert.equal(conformsToContract(report).ok, true, conformsToContract(report).errors.join('; '));
+  assert.equal(report.metrics.find((m) => m.name === 'todos').status, 'improved');
+  rmSync(d, { recursive: true, force: true });
+});
+test('check(): verdict gamed when the win came from editing the test, not the source', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n'); // BUG: should be a - b
+  writeFileSync(join(d, 'calc.test.mjs'), "import { test } from 'node:test'; import assert from 'node:assert'; import { sub } from './calc.mjs'; test('sub', () => assert.strictEqual(sub(5, 3), 2));\n");
+  commitAll(d, 'base: red test, buggy source');
+  writeFileSync(join(d, 'calc.test.mjs'), "import { test } from 'node:test'; import assert from 'node:assert'; import { sub } from './calc.mjs'; test('sub', () => assert.strictEqual(sub(5, 3), 8));\n");
+  commitAll(d, 'game it: edit the test to expect the buggy answer');
+  const report = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(report.verdict, 'gamed', JSON.stringify(report.metrics));
+  assert.equal(verdictExitCode(report.verdict), 2);
+  assert.ok(report.metrics.find((m) => m.gamed === true), 'a metric is flagged gamed');
+  assert.equal(conformsToContract(report).ok, true, conformsToContract(report).errors.join('; '));
+  rmSync(d, { recursive: true, force: true });
+});
+test('check(): throws (does not exit) on a missing config', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-nocfg-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'x.js'), '1\n'); commitAll(d, 'base');
+  assert.throws(() => check({ repo: d }), /no promptwheel\.config\.json/);
+  rmSync(d, { recursive: true, force: true });
+});
+test('check(): accepts an in-process config object (no config file needed)', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-inlinecfg-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app.js'), 'a\nb\n'); commitAll(d, 'improve');
+  const report = check({ repo: d, base: 'HEAD~1', head: 'HEAD', config: { linkNodeModules: false, metrics: [TODOS] } });
+  assert.equal(report.verdict, 'pass', JSON.stringify(report.metrics));
+  assert.throws(() => check({ repo: d, config: { metrics: [] } }), /non-empty array/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------- integration: conformance CLI
+test('conformance CLI: a conforming run exits 0; malformed JSON exits 1', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'improve');
+  const ok = pw(d, ['conformance', '--cmd', `node ${ENGINE} run --base HEAD~1 --head HEAD --no-record --json`]);
+  assert.equal(ok.code, 0, ok.out);
+  assert.match(ok.out, /conforms to the Verified-Outcome Contract/);
+  writeFileSync(join(d, 'bad.json'), JSON.stringify({ base: 'a', head: 'b', verdict: 'green', metrics: [] }));
+  const bad = pw(d, ['conformance', 'bad.json']);
+  assert.equal(bad.code, 1, bad.out);
+  assert.match(bad.out, /does NOT conform/);
   rmSync(d, { recursive: true, force: true });
 });

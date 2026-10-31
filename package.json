@@ -1,15 +1,22 @@
 {
   "name": "promptwheel",
-  "version": "0.4.7",
-  "description": "A deterministic, zero-LLM check for your coding loop. It proves every change earned its win by re-running the result from the agent's source edits alone, so a green that came from editing the test reads GAMED. Runs in CI or a Claude Code hook.",
+  "version": "0.5.0",
+  "description": "A deterministic, zero-LLM check for your coding loop. It proves every change earned its win by re-running the result from the agent's source edits alone, so a green that came from editing the test reads GAMED. Runs in CI or a Claude Code hook, or import { check } in process.",
   "type": "module",
   "bin": {
     "promptwheel": "bin/promptwheel.mjs",
     "pw": "bin/promptwheel.mjs"
   },
+  "exports": {
+    ".": "./bin/promptwheel.mjs",
+    "./bin/promptwheel.mjs": "./bin/promptwheel.mjs",
+    "./package.json": "./package.json",
+    "./packs/*": "./packs/*"
+  },
   "files": [
     "bin",
-    "packs"
+    "packs",
+    "INTEGRATE.md"
   ],
   "engines": {
     "node": ">=18"
