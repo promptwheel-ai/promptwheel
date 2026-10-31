@@ -1,7 +1,8 @@
 # Changelog
 
-## 0.7.0 (2026-10-31): declared override (Sawbuck-Allow)
+## 0.7.0 (2026-10-31): declared override (Sawbuck-Allow) + build-setup detection
 
+- **`init` detects a build/install step** (a `build` npm script, or a Python editable install) and writes it to `setup`, so a gate whose test needs a build first *measures* instead of reading inert. A 10-repo replay found the auto-detected test command was inert ~2/3 of the time, and a missing build was a leading cause. Kept out of the zero-config default so the fast per-turn path stays fast; a failed setup is still honest (inconclusive, never a fake green).
 - **A sanctioned, auditable way to allow an intentional test/config change.** A `Sawbuck-Allow: <reason>` trailer on the commit (or `--allow "<reason>"` on the CLI / the `allow` option on `check`) acknowledges an intentional goalpost change, so a win that would read `GAMED` reads `pass` with the acknowledgment recorded in `report.allowed` (the reason, and the metric or gate names it cleared). It covers an edit, a delete, or a new file alike. An UNdeclared test-only win is still `gamed`; a reasonless trailer does not override. The check does not judge intent, it forces intent to be explicit and auditable (the declaration lives in the commit, so a reviewer sees the reason instead of a silent green). `conformsToContract` validates `allowed`; CONTRACT section 3 documents it.
 
 ## 0.6.0 (2026-10-31): zero-config

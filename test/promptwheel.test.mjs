@@ -1015,3 +1015,27 @@ test('Sawbuck-Allow: a trailer with no reason does NOT override (still gamed)', 
   assert.equal(check({ repo: d, base: 'HEAD~1', head: 'HEAD' }).verdict, 'gamed');
   rmSync(d, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------- integration: build-setup detection (inert gap)
+test('init: detects a build step so a build-dependent gate measures instead of reading inert', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-build-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), 'dist/\n.promptwheel/\n');
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'b', scripts: { build: 'mkdir -p dist && cp src.mjs dist/index.mjs', test: 'node --test app.test.mjs 2>&1' } }));
+  writeFileSync(join(d, 'src.mjs'), 'export const v = 1;\n');
+  writeFileSync(join(d, 'app.test.mjs'), "import { test } from 'node:test'; import assert from 'node:assert'; import { v } from './dist/index.mjs'; test('v', () => assert.strictEqual(v, 2));\n");
+  commitAll(d, 'base: red, test wants v===2');
+  writeFileSync(join(d, 'src.mjs'), 'export const v = 2;\n'); commitAll(d, 'fix: v=2');
+  assert.equal(pw(d, ['init', '--force']).code, 0);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  assert.match(cfg.setup || '', /npm run build/, 'init detected the build step');
+  // WITH the build the gate measures the real 0->1 (PASS); the test imports dist/ the build makes
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /PASS/);
+  // and with the setup stripped it is honestly inert (INCONCLUSIVE, exit 3), never a fake green
+  delete cfg.setup; writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify(cfg));
+  assert.equal(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']).code, 3);
+  rmSync(d, { recursive: true, force: true });
+});

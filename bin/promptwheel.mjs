@@ -886,6 +886,20 @@ function detectTestCmd(repo) {
 
 // deps that live outside git + the env a test needs, defaulted per stack. init writes these into
 // config; the measurement bridge (bridgeEnv/runSetup) consumes them, keeps the engine agnostic.
+// a per-ref build/install so the MEASURED worktree is actually runnable. Closes the "inert" class
+// where the detected test command cannot run without a build first (a 10-repo replay put this at
+// ~2/3 of gates). Written by `init` into `setup`; a failed setup stays honest (inert -> inconclusive,
+// never a fake green). Kept out of the zero-config default so the fast per-turn path stays fast.
+function detectSetup(repo) {
+  const has = (f) => existsSync(join(repo, f));
+  try {
+    const pkg = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
+    if (pkg.scripts && pkg.scripts.build) return 'npm run build --if-present';   // TS/bundler tests that run against a built dir
+  } catch { /* no or unparsable package.json */ }
+  if (has('pyproject.toml') || has('setup.py')) return 'pip install -e . --quiet 2>/dev/null || true';   // editable install so imports resolve the measured ref
+  return undefined;
+}
+
 function detectEnv(repo) {
   const has = (f) => existsSync(join(repo, f));
   // Python: link the venv (3rd-party deps) and put the worktree src FIRST on PYTHONPATH, so imports
@@ -951,7 +965,8 @@ function init(argv) {
     if (lint) metrics = [...metrics, { name: 'lint_errors', cmd: LINT_CMD, extract: 'number', direction: 'down', guard: false }];
     note = `tests + antihack tripwires${lint ? ' + lint' : ''} (detected: ${testCmd})`;
   }
-  const envCfg = presetName ? {} : detectEnv(repo);
+  const setup = presetName ? undefined : detectSetup(repo);
+  const envCfg = presetName ? {} : { ...detectEnv(repo), ...(setup ? { setup } : {}) };
   if (envCfg.linkDirs) note += ` · linking ${envCfg.linkDirs.join(', ')}`;
   writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, ...(evaluatorPaths ? { evaluatorPaths } : {}), metrics }, null, 2) + '\n');
   console.log(`✓ wrote promptwheel.config.json, ${note}`);
