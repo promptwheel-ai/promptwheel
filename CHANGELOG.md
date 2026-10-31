@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1 (2026-10-31): document the per-turn cost
+
+- **README: a "Per-turn cost" note.** A check runs your metric in two throwaway worktrees plus a source-only re-run, so it costs roughly 2-3x the metric command's runtime + ~40ms of worktree overhead (measured). Point the per-turn gate at a *fast* metric and keep the slow full suite for CI. Docs only; no engine change.
+
+## 0.5.0 (2026-10-31): importable library API + gate integrity
+
+- **Public library API.** `import { check } from 'promptwheel'` runs the gate in process and returns the Verified-Outcome Contract verdict object (no `process.exit`, no printing, an optional in-process `config`). Also `verdictExitCode()`, `conformsToContract(report)`, the frozen vocab exports (`VERDICTS`/`METRIC_STATUSES`/`DIRECTIONS`), and `CONTRACT_VERSION`. An `exports` map makes the package importable while keeping the bin and `package.json` resolvable. See **INTEGRATE.md** for the four integration paths (conform, shell, import, MCP).
+- **`promptwheel conformance [file|-] [--cmd C]`.** Self-check a verdict JSON, or a command's `--json` stdout and exit code, against the Contract.
+- **Gate integrity: catch a weakened gate.** A change that disables a guard (`guard:false`) or deletes a guarded metric in the same diff it passes is now caught. The gate is resolved as of the base ref (following `extends`), a dropped guard is re-measured under its base definition, and the pass reads `GAMED` only if that guard **would have failed** at head, so a legitimate guard retirement is not a false positive. The verdict gains an optional `gate` record with a truncated SHA-256 fingerprint of the gate definition at base and head.
+
 ## 0.4.7 (2026-10-30): reconcile the engine (evaluatorPaths, security-antihack, classifier)
 
 - Brought the published engine in line with the dev copy, all additive, no change to the verdict/exit contract:
