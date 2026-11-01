@@ -11,7 +11,7 @@ PW="${PROMPTWHEEL:-promptwheel}"
 out=$($PW run --working --detect-gaming --no-record --json 2>/dev/null) || true
 verdict=$(printf '%s' "$out" | grep -oE '"verdict": *"(pass|fail|gamed)"' | grep -oE 'pass|fail|gamed' | head -1)
 if [ "$verdict" = "gamed" ]; then
-  echo "PromptWheel: this turn's win survives only because tests/config/grader/golden were edited — not the source. Fix the SOURCE; do not move the goalposts." >&2
+  echo "PromptWheel: this turn's win survives only because tests/config/grader/golden were edited, not the source. Fix the SOURCE; do not move the goalposts." >&2
   exit 2
 fi
 exit 0

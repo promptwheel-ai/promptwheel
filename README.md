@@ -104,6 +104,15 @@ npx promptwheel suggest                   # UCB over the lever scores, proven le
 npx promptwheel backfill -n 30            # cold start: seed the record from git history (cohort-tagged, commit types → labels)
 ```
 
+## Give your agent the gate
+
+Paste this into your `AGENTS.md` / `CLAUDE.md` so a coding agent (or a loop) runs the gate itself, not just you:
+
+    After a change that should move a measurable metric (tests, lint, coverage, an eval), run
+    `npx promptwheel run --working`. Exit 2 (verdict GAMED) means the win came from editing a test,
+    config, or grader, not the source, so revert and earn it in the source. Exit 1 means a guarded
+    metric regressed, revert that too. Never weaken, skip, or delete a test to go green.
+
 **The consequence ledger.** git records *what changed*; PromptWheel records *what the change did*, same trust model (local, deterministic, append-only, no server, no LLM in the verdict). `playbook` and `suggest` are pure re-derivations over that ledger: every rendered line was measured by the gate, decays unless re-earned, and stays hidden below an evidence threshold. No compounding claim is made for them until the A/B acceptance test (`bench/compounding-ab.mjs`) passes on real usage data.
 
 **Footprint:** it never touches your working tree, every measurement runs in a throwaway git worktree **in your system temp dir** (one at a time; configured `linkDirs` are symlinked not copied, `node_modules` by default, `.venv` for Python, etc.), removed when the run finishes. The only thing PromptWheel writes to your repo is the optional `.promptwheel/outcomes.jsonl` record, commit it to build the per-repo "what moves what" history, or `.gitignore` it (`--no-record` to skip entirely). A hard-killed run can't leave clutter behind: the next run **self-heals** any orphaned worktree (stale registry entry + abandoned temp checkout).
@@ -256,4 +265,4 @@ The engine is one importable file; pure helpers are exported for unit tests, the
 - [x] zero-config: `run` and `check()` auto-detect the gate with no committed config, `init` becomes optional (0.6.0)
 - [x] declared override (`Sawbuck-Allow:` trailer / `--allow`) + `init` build-setup detection, so a build-gated test measures instead of reading inert (0.7.0)
 
-> Status: **published** (npm `promptwheel`, v0.7.0), all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.
+> Status: **published** (npm `promptwheel`, v0.7.1), all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.

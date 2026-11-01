@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.2 (2026-11-01): agent-orienting starter block + output hygiene
+
+- **README: a "Give your agent the gate" block.** A copy-pasteable `AGENTS.md`/`CLAUDE.md` snippet so a coding agent (or a loop) runs the gate itself and knows what a `GAMED` / regression verdict means, not just the human. Also bumped the status line to the current version.
+- **Output hygiene:** removed em-dashes from the Stop-hook stderr (`plugins/promptwheel/hooks/detect-gaming-stop.sh`, shown to the agent) and the `examples/reliability-sprint` demo banners. Docs/output only; no engine change.
+
 ## 0.7.1 (2026-10-31): docs + shipped-output hygiene
 
 - **`packs/security/scan.mjs`**: the `--list` finding lines now separate fields with `·` instead of an em-dash. Output format only; the metric value (the finding count on stdout) is unchanged.

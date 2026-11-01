@@ -11,7 +11,7 @@ printf '.promptwheel/\n' > .gitignore
 cp "$HERE/feature.v1.mjs" feature.mjs; git add -A; git commit -qm "v1: naive prompt"
 cp "$HERE/feature.v2.mjs" feature.mjs; git commit -qam "v2: better prompt, cheaper"
 cp "$HERE/feature.v3.mjs" feature.mjs; git commit -qam "v3: a 'helpful' edit that regresses"
-echo "### PASS — v1 → v2 (improvement):"
+echo "### PASS: v1 → v2 (improvement):"
 node "$PW" run --base HEAD~2 --head HEAD~1 --repeat 3 || true
-echo; echo "### FAIL — v2 → v3 (passes tests, drops quality):"
-node "$PW" run --base HEAD~1 --head HEAD --repeat 3 || echo "(exit 1 — gate caught it ✓)"
+echo; echo "### FAIL: v2 → v3 (passes tests, drops quality):"
+node "$PW" run --base HEAD~1 --head HEAD --repeat 3 || echo "(exit 1, gate caught it ✓)"
