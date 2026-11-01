@@ -2,7 +2,7 @@
 
 ## 0.7.2 (2026-11-01): agent-orienting starter block + output hygiene
 
-- **README: a "Give your agent the gate" block.** A copy-pasteable `AGENTS.md`/`CLAUDE.md` snippet so a coding agent (or a loop) runs the gate itself and knows what a `GAMED` / regression verdict means, not just the human. Also bumped the status line to the current version.
+- **`init` writes an agent-orienting gate block.** `promptwheel init` now writes a short "when to run the gate / what GAMED means" block into `AGENTS.md` (and `CLAUDE.md` / `.cursorrules` when present), sentinel-delimited and idempotent, so the coding agent (or a loop) runs the gate itself, not just the human. `--no-agent-block` skips it. The README documents the block too (for manual paste). Status line bumped to the current version.
 - **Output hygiene:** removed em-dashes from the Stop-hook stderr (`plugins/promptwheel/hooks/detect-gaming-stop.sh`, shown to the agent) and the `examples/reliability-sprint` demo banners. Docs/output only; no engine change.
 
 ## 0.7.1 (2026-10-31): docs + shipped-output hygiene

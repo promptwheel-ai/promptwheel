@@ -970,8 +970,32 @@ function init(argv) {
   if (envCfg.linkDirs) note += ` · linking ${envCfg.linkDirs.join(', ')}`;
   writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, ...(evaluatorPaths ? { evaluatorPaths } : {}), metrics }, null, 2) + '\n');
   console.log(`✓ wrote promptwheel.config.json, ${note}`);
+  if (!argv.includes('--no-agent-block')) {
+    const wrote = writeAgentBlock(repo);
+    if (wrote.length) console.log(`✓ wrote the agent guide (when to run the gate) to ${wrote.join(', ')}`);
+  }
   console.log('\n  next:  promptwheel run --working   # gate your uncommitted changes');
   console.log('         promptwheel init --list     # other presets (llm-eval, bundle-size, …)');
+}
+
+// Write (or refresh) a short agent-orienting block so the coding AGENT runs the gate itself, not just
+// the human. Goes into AGENTS.md (the cross-tool convention; created if absent) and into CLAUDE.md /
+// .cursorrules when those already exist. Idempotent + safe: only the sentinel-delimited block is
+// touched, everything else in the file is left exactly as-is. `--no-agent-block` skips it.
+function writeAgentBlock(repo) {
+  const START = '<!-- promptwheel:gate -->', END = '<!-- /promptwheel:gate -->';
+  const block = `${START}\n## PromptWheel gate\n\nAfter a change that should move a measurable metric (tests, lint, coverage, an eval), run \`npx promptwheel run --working\`. Exit 2 (verdict GAMED) means the win came from editing a test, config, or grader, not the source, so revert and earn it in the source. Exit 1 means a guarded metric regressed, revert that too. Never weaken, skip, or delete a test to go green.\n${END}\n`;
+  const targets = ['AGENTS.md', ...['CLAUDE.md', '.cursorrules'].filter((f) => existsSync(join(repo, f)))];
+  const done = [];
+  for (const f of targets) {
+    const p = join(repo, f);
+    let text = existsSync(p) ? readFileSync(p, 'utf8') : '';
+    const s = text.indexOf(START);
+    if (s > -1) { const e = text.indexOf(END, s); text = (e > -1 ? text.slice(0, s) + block + text.slice(e + END.length).replace(/^\n+/, '\n') : text.slice(0, s) + block); }
+    else { text = (text.trim() ? text.replace(/\n*$/, '\n\n') : '') + block; }
+    try { writeFileSync(p, text); done.push(f); } catch { /* best-effort */ }
+  }
+  return done;
 }
 
 // observability: list the EFFECTIVE guardrails (incl. inherited) + each one's flag record
@@ -1288,7 +1312,7 @@ function main() {
     console.log([
       'PromptWheel, catch your agent cheating. Prove a change moved a real metric (and that the agent earned it, not gamed it). The per-turn reward + source-only audit for AI coding loops.',
       '',
-      '  promptwheel init [--preset <name> | --list]  write a starter config (OPTIONAL: run works zero-config, auto-detecting your test command)',
+      '  promptwheel init [--preset <name> | --list] [--no-agent-block]  write a starter config + an AGENTS.md guide so your agent runs the gate (OPTIONAL: run works zero-config, auto-detecting your test command)',
       '  promptwheel run [--base R] [--head R] [--repeat N] [--json|--markdown]',
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',
       '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',

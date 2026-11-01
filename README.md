@@ -106,7 +106,7 @@ npx promptwheel backfill -n 30            # cold start: seed the record from git
 
 ## Give your agent the gate
 
-Paste this into your `AGENTS.md` / `CLAUDE.md` so a coding agent (or a loop) runs the gate itself, not just you:
+`promptwheel init` writes this into your `AGENTS.md` for you (and `CLAUDE.md` / `.cursorrules` if present; `--no-agent-block` to skip), so a coding agent (or a loop) runs the gate itself, not just you. To paste it yourself:
 
     After a change that should move a measurable metric (tests, lint, coverage, an eval), run
     `npx promptwheel run --working`. Exit 2 (verdict GAMED) means the win came from editing a test,

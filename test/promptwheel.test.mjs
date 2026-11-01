@@ -319,6 +319,28 @@ test('init: writes a starter config for the stack, refuses overwrite without --f
   rmSync(d, { recursive: true, force: true });
 });
 
+test('init: writes the agent gate block to AGENTS.md (idempotent; --no-agent-block skips)', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-agentblock-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'package.json'), '{"name":"x","scripts":{"test":"exit 0"}}');
+  writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
+  assert.equal(pw(d, ['init']).code, 0);
+  let agents = readFileSync(join(d, 'AGENTS.md'), 'utf8');
+  assert.match(agents, /<!-- promptwheel:gate -->/, 'wrote the sentinel-delimited gate block');
+  assert.match(agents, /promptwheel run --working/, 'the block tells the agent when to run the gate');
+  assert.equal(pw(d, ['init', '--force']).code, 0);
+  agents = readFileSync(join(d, 'AGENTS.md'), 'utf8');
+  assert.equal((agents.match(/<!-- promptwheel:gate -->/g) || []).length, 1, 'idempotent: one block, not duplicated');
+  const d2 = mkdtempSync(join(tmpdir(), 'pw-noblock-'));
+  const g2 = (a) => execFileSync('git', a, { cwd: d2 });
+  g2(['init', '-q']); g2(['config', 'user.email', 't@t']); g2(['config', 'user.name', 't']);
+  writeFileSync(join(d2, 'package.json'), '{"name":"x","scripts":{"test":"exit 0"}}'); writeFileSync(join(d2, 'a.js'), '1\n'); commitAll(d2, 'base');
+  assert.equal(pw(d2, ['init', '--no-agent-block']).code, 0);
+  assert.ok(!existsSync(join(d2, 'AGENTS.md')), '--no-agent-block writes no AGENTS.md');
+  rmSync(d, { recursive: true, force: true }); rmSync(d2, { recursive: true, force: true });
+});
+
 test('init --preset security-antihack: security gate + tripwires + evaluatorPaths + installed pack', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-secah-'));
   const g = (a) => execFileSync('git', a, { cwd: d });
