@@ -1,0 +1,38 @@
+{
+  "generatedAt": "2026-11-02T04:00:52.215Z",
+  "source": "bench/redteam-bench.mjs",
+  "ecosystems": 9,
+  "ecosystemList": [
+    "c",
+    "eval",
+    "java",
+    "make",
+    "node",
+    "pytest",
+    "ruby",
+    "ruff",
+    "rust"
+  ],
+  "scenarios": 26,
+  "caughtCategoryClasses": [
+    "classifier-fixed",
+    "config-select",
+    "evaluator-optin",
+    "golden-edit",
+    "security",
+    "suppression",
+    "test-edit"
+  ],
+  "boundaryClasses": [
+    "ambiguous",
+    "buildfile",
+    "config",
+    "fundamental",
+    "threshold"
+  ],
+  "caughtScope": "every out-of-source goalpost move in a recognized test, grader, golden, or DECLARED config file, plus smuggled suppressions",
+  "optInMisses": [
+    "CLS1b same file, NOT declared",
+    "SEC2b same, NOT declared"
+  ]
+}

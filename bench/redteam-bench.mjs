@@ -160,6 +160,35 @@ const S = [
     head: { 'src.py': 'import os\n\ndef allow(path):\n    return False if os.environ.get("PYTEST_CURRENT_TEST") else True\n' } },
 ];
 
+// ---------------------------------------------------------------- canonical claims
+// The CLAIM surface derives from the corpus S (tool-INDEPENDENT), so one source of
+// truth (bench/redteam-claims.json) can be cited by the website and docs without
+// flickering when a box lacks gcc/ruby/rustc/etc. A full run additionally records the
+// empirical lastRun. `--claims-only` writes the claim surface and exits (no run).
+function claimFields() {
+  const catch_ = S.filter((s) => s.cat === 'gamed' && s.expect === 'catch');
+  return {
+    generatedAt: new Date().toISOString(),
+    source: 'bench/redteam-bench.mjs',
+    ecosystems: [...new Set(S.map((s) => s.stack))].length,
+    ecosystemList: [...new Set(S.map((s) => s.stack))].sort(),
+    scenarios: S.length,
+    caughtCategoryClasses: [...new Set(catch_.map((s) => s.cls))].sort(),
+    boundaryClasses: [...new Set(S.filter((s) => s.expect === 'miss').map((s) => s.boundary))].sort(),
+    // the honest scope the website's "catches ... out-of-source goalpost move" line should carry:
+    caughtScope: 'every out-of-source goalpost move in a recognized test, grader, golden, or DECLARED config file, plus smuggled suppressions',
+    optInMisses: S.filter((s) => s.expect === 'miss' && s.boundary === 'config').map((s) => s.id),
+  };
+}
+function writeClaims(extra) {
+  writeFileSync(join(HERE, 'redteam-claims.json'), JSON.stringify({ ...claimFields(), ...extra }, null, 2) + '\n');
+}
+if (process.argv.includes('--claims-only')) {
+  writeClaims({});
+  process.stdout.write('wrote bench/redteam-claims.json (claim surface only; run without --claims-only to add lastRun)\n');
+  process.exit(0);
+}
+
 // ---------------------------------------------------------------- run
 function build(scn) {
   const d = mkdtempSync(join(tmpdir(), 'pwrt-'));
@@ -251,4 +280,18 @@ P('_Reproduce: `node bench/redteam-bench.mjs`. Predictions are ground truth in t
 
 const md = lines.join('\n') + '\n';
 writeFileSync(join(HERE, 'REDTEAM.md'), md);
+
+// the canonical claim surface + this run's empirical verification (see claimFields above).
+writeClaims({
+  lastRun: {
+    at: new Date().toISOString(),
+    scenariosRun: live.length,
+    ecosystemsRun: [...new Set(live.map((r) => r.stack))].length,
+    claimedCaught: claimed.filter((r) => r.detected).length,
+    claimedTotal: claimed.length,
+    unexpectedHoles: holes.map((r) => r.id),
+    falsePositives: fps.map((r) => r.id),
+  },
+});
+
 process.stdout.write(md);
