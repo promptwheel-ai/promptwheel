@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, foldOutcomes, betaMean, scoreKey,
+import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, foldOutcomes, betaMean, scoreKey, verdictFingerprint,
   check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION } from '../bin/promptwheel.mjs';
 
 const ENGINE = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'promptwheel.mjs');
@@ -92,6 +92,67 @@ test('run: passes on improvement (exit 0), fails on guarded regression (exit 1)'
   writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\nc // TODO\n'); commitAll(d, 'regress');
   r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
   assert.equal(r.code, 1); assert.match(r.out, /FAIL/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ------------------------------------------------- unit: verdict fingerprint (provenance)
+test('verdictFingerprint: stable, order-independent, sensitive to the verdict', () => {
+  const a = verdictFingerprint({ verdict: 'pass', metrics: [{ name: 'x', status: 'improved', ok: true, guard: true }, { name: 'y', status: 'unchanged', ok: true, guard: false }] });
+  const b = verdictFingerprint({ verdict: 'pass', metrics: [{ name: 'y', status: 'unchanged', ok: true, guard: false }, { name: 'x', status: 'improved', ok: true, guard: true }] });
+  assert.equal(a, b);                                   // metric order doesn't change the hash
+  const c = verdictFingerprint({ verdict: 'gamed', metrics: [{ name: 'x', status: 'improved', ok: true, guard: true, gamed: true }] });
+  assert.notEqual(a, c);                                // a different verdict is a different hash
+  assert.match(a, /^[0-9a-f]{16}$/);
+});
+
+// ------------------------------------------- integration: evaluatorPaths content-hash auto-fail
+test('run: editing a DECLARED evaluatorPath to pass is gamed; an UNdeclared one stays source', () => {
+  const mk = (evaluatorPaths) => {
+    const d = mkdtempSync(join(tmpdir(), 'pw-eval-'));
+    const g = (a) => execFileSync('git', a, { cwd: d });
+    g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+    writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+    writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, evaluatorPaths,
+      metrics: [{ name: 'budget', cmd: 'node check.js', extract: 'exit', direction: 'pass', guard: true }] }));
+    writeFileSync(join(d, 'src.js'), 'module.exports={errs:()=>3};\n');
+    writeFileSync(join(d, 'budget.json'), '{"maxErrors":0}\n');
+    writeFileSync(join(d, 'check.js'), "const{errs}=require('./src');const{maxErrors}=require('./budget.json');process.exit(errs()<=maxErrors?0:1);\n");
+    commitAll(d, 'base');
+    writeFileSync(join(d, 'budget.json'), '{"maxErrors":5}\n');   // raise the goalpost, no source change
+    commitAll(d, 'head');
+    return d;
+  };
+  // declared -> gamed (exit 2), and gate.evaluatorChanged names the file (proves the auto-fail ran)
+  const d1 = mk(['budget.json']);
+  let r = pw(d1, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  assert.equal(r.code, 2);
+  const rep = JSON.parse(r.out);
+  assert.equal(rep.verdict, 'gamed');
+  assert.ok(rep.gate && Array.isArray(rep.gate.evaluatorChanged) && rep.gate.evaluatorChanged.some((e) => e.path === 'budget.json'));
+  rmSync(d1, { recursive: true, force: true });
+  // UNdeclared -> the documented opt-in miss: budget.json stays source, the win survives, PASS
+  const d2 = mk([]);
+  r = pw(d2, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  assert.equal(r.code, 0);
+  assert.equal(JSON.parse(r.out).verdict, 'pass');
+  rmSync(d2, { recursive: true, force: true });
+});
+
+// ----------------------------------------------------------- integration: provenance receipt
+test('run: report carries a reproducible provenance receipt', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app.js'), 'a\nb\n'); commitAll(d, 'improve');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  const rep = JSON.parse(r.out);
+  assert.ok(rep.provenance, 'report has provenance');
+  assert.equal(rep.provenance.tool, 'promptwheel');
+  assert.match(rep.provenance.baseSha, /^[0-9a-f]{40}$/);
+  assert.match(rep.provenance.headSha, /^[0-9a-f]{40}$/);
+  assert.match(rep.provenance.configHash, /^[0-9a-f]{16}$/);
+  assert.match(rep.provenance.verdictHash, /^[0-9a-f]{16}$/);
+  const r2 = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  assert.equal(JSON.parse(r2.out).provenance.verdictHash, rep.provenance.verdictHash); // reproducible
   rmSync(d, { recursive: true, force: true });
 });
 

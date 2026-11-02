@@ -458,6 +458,45 @@ function gateFingerprint(metricsList, scalars) {
   return createHash('sha256').update(JSON.stringify(norm)).digest('hex').slice(0, 16);
 }
 
+// tool version (read once from the sibling package.json) for the provenance receipt
+const TOOL_VERSION = (() => {
+  try { return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version || null; }
+  catch { return null; }
+})();
+
+// full sha of a ref, best-effort (never throws into the gate)
+function safeRev(repo, ref) { try { return git(['rev-parse', ref], repo); } catch { return null; } }
+
+// SHA-256 (truncated) of a file's content at a ref, or null if the file is absent there
+function blobHashAt(repo, ref, path) {
+  try { return createHash('sha256').update(execFileSync('git', ['show', `${ref}:${path}`], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).digest('hex').slice(0, 16); }
+  catch { return null; } // absent at this ref (added or removed)
+}
+// declared evaluatorPaths whose CONTENT changed between base and head. A declared gate file is a
+// goalpost the user named; editing it in the same diff that improves a metric is gamed by
+// declaration (content-hash auto-fail) - deterministic even when the source-only re-run is inert.
+// Fires ONLY on declared files, so the opt-in semantics (an undeclared config stays source) hold.
+function changedEvaluatorPaths(repo, base, head, cfg) {
+  const isEval = evaluatorMatcher(cfg);
+  let changed = [];
+  try { changed = git(['diff', '--name-only', base, head], repo).split('\n').filter(Boolean).filter(isEval); }
+  catch { return []; }
+  return changed.map((p) => ({ path: p, base: blobHashAt(repo, base, p), head: blobHashAt(repo, head, p) }))
+    .filter((e) => e.base !== e.head);
+}
+
+// reproducible fingerprint of the verdict CONTENT (everything but the provenance block itself), so
+// a skeptic who re-runs (base, head, config) gets the same hash - the tamper-evident receipt.
+function verdictFingerprint(report) {
+  const norm = {
+    verdict: report.verdict,
+    metrics: (report.metrics || []).map((m) => ({ name: m.name, status: m.status, ok: m.ok === true, guard: m.guard === true, gamed: m.gamed === true }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
+    gate: (report.gate && report.gate.fingerprint) || null,
+  };
+  return createHash('sha256').update(JSON.stringify(norm)).digest('hex').slice(0, 16);
+}
+
 // guarded metrics that HEAD dropped relative to BASE (removed entirely, or guard turned off)
 function gateWeakenings(baseGate, headMetrics) {
   if (!baseGate) return [];
@@ -522,6 +561,22 @@ function gate(repo, opts) {
       m.gamed = j.gamed; m.sourceOnly = j.sourceOnly; m.retained = j.retained; m.gamingReason = j.reason;
     }
   }
+  // content-hash auto-fail (Section 3): a declared evaluatorPath gate file edited in this diff is a
+  // moved goalpost, so a metric that improved alongside it is gamed by declaration - deterministic,
+  // even if the source-only re-run above read inert. An allow-trailer can still clear it, below.
+  let evalChanged = [];
+  if (opts.detectGaming) {
+    evalChanged = changedEvaluatorPaths(repo, base, head, cfg);
+    if (evalChanged.length) {
+      for (const m of metrics) {
+        if (m.status !== 'improved' || m.gamed === true) continue;
+        const cm = cfg.metrics.find((c) => c.name === m.name);
+        if (cm && cm.gamingCheck === false) continue; // tripwire/test-side guards legitimately live in gate files
+        m.gamed = true;
+        m.gamingReason = `a declared evaluatorPath gate file changed in this diff (${evalChanged.map((e) => e.path).join(', ')}); a win alongside a goalpost edit is gamed by declaration`;
+      }
+    }
+  }
   // gate integrity (Section 3): did HEAD weaken the gate it is judged by? Resolve the gate as
   // of BASE; a guard HEAD dropped is re-measured under its base definition and only counts as
   // tampering if it WOULD HAVE FAILED at head (a real regression hidden by dropping the guard).
@@ -545,6 +600,7 @@ function gate(repo, opts) {
         head: gateFingerprint(cfg.metrics, cfg),
       },
       ...(weakened.length ? { weakened } : {}),
+      ...(evalChanged.length ? { evaluatorChanged: evalChanged } : {}),
     };
   }
   // declared override: a Sawbuck-Allow trailer (or --allow) acknowledges an intentional
@@ -578,6 +634,14 @@ function gate(repo, opts) {
     verdict, metrics,
     ...(gateInfo ? { gate: gateInfo } : {}),
     ...(allowed ? { allowed } : {}),
+  };
+  // provenance receipt: makes the verdict tamper-evident + reproducible ("re-run and get the same
+  // verdict is checkable"). Additive to the record; never changes the verdict.
+  report.provenance = {
+    tool: 'promptwheel', toolVersion: TOOL_VERSION,
+    baseSha: safeRev(repo, base), headSha: opts.working ? head : safeRev(repo, head),
+    configHash: gateFingerprint(cfg.metrics, cfg),
+    verdictHash: verdictFingerprint(report),
   };
   if (!opts.noRecord && cfg.record !== false) recordOutcome(repo, report);
   return report;
@@ -1094,7 +1158,7 @@ function parseArgs(argv) {
 
 // pure, side-effect-free helpers are exported for unit testing; the CLI below only
 // runs when this file is executed directly (not when imported by the test suite).
-export { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, foldOutcomes, betaMean, scoreKey };
+export { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, foldOutcomes, betaMean, scoreKey, verdictFingerprint };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public library API: the Verified-Outcome Contract, in process.
