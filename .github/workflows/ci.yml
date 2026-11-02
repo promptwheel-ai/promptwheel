@@ -20,3 +20,44 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '20' }
       - run: node bin/promptwheel.mjs run --detect-gaming
+
+  # cross-OS proof of the headline claim: a green that came from editing the TEST
+  # instead of the code is caught as GAMED everywhere. The detector is git-only
+  # (diff classification of source vs goalpost), so this confirms it travels.
+  # shell: bash gives a real grep on Windows too (git-bash). Windows is informational.
+  gamed-catch:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: windows-latest
+            experimental: true
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental || false }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: a red->green-by-editing-the-test win must verdict GAMED (exit 2)
+        run: |
+          set -u
+          PW="$GITHUB_WORKSPACE/bin/promptwheel.mjs"
+          TMP="$(mktemp -d)"; cd "$TMP"
+          git init -q; git config user.email ci@ci; git config user.name ci
+          printf 'export const mul=(a,b)=>a+b;\n' > index.mjs                 # bug: a+b, not a*b
+          printf '{"name":"x","version":"1.0.0","type":"module","scripts":{"test":"node --test"}}\n' > package.json
+          mkdir test
+          printf 'import {test} from "node:test";import a from "node:assert/strict";import {mul} from "../index.mjs";test("mul",()=>a.equal(mul(2,3),6));\n' > test/mul.test.mjs
+          node "$PW" init >/dev/null 2>&1
+          git add -A; git commit -qm "red: mul is buggy, test expects 6 and fails"
+          # game it: edit the TEST to match the bug, instead of fixing the code
+          printf 'import {test} from "node:test";import a from "node:assert/strict";import {mul} from "../index.mjs";test("mul",()=>a.equal(mul(2,3),5));\n' > test/mul.test.mjs
+          set +e; node "$PW" run --working > out.txt 2>&1; code=$?; set -e
+          cat out.txt
+          test "$code" -eq 2 || { echo "FAIL: expected exit 2 (GAMED), got $code on $RUNNER_OS"; exit 1; }
+          grep -q "GAMED" out.txt || { echo "FAIL: no GAMED verdict on $RUNNER_OS"; exit 1; }
+          echo "PASS: gamed green caught on $RUNNER_OS, node $(node -v)"

@@ -229,6 +229,10 @@ The accumulated record of **which change-types move which metrics** is the asset
 - **vs loop/agent frameworks** (Ralph, GEPA, reward models): PromptWheel is the **execution-grounded reward they lack**, it runs your real suite with zero deps; it does not drive the loop or do test-time search.
 - **When NOT to use it:** if you only care that tests pass, your base verifier already has you covered. PromptWheel earns its place when you have a **graded numeric metric** beyond pass/fail (eval score, $/run, latency, size) that a change could quietly move.
 
+## Portability
+
+The core gamed-win check is **git only** and runs anywhere git does: it classifies the files a win touched (`git diff --name-only`) to separate production source from test, config, and grader files, so a green that came only from editing the goalposts is caught the same on Linux, macOS, and Windows. The starter tripwire metrics that `init` writes (`test_count`, `assertions`, `suppressions`, `skipped_tests`) are `grep` one-liners that assume a GNU-grep-compatible shell (Linux, macOS, or Windows under WSL or git-bash); on a shell without one those counts can read 0, which quietly weakens that one tripwire but never flips a verdict, because the counts are compared base-vs-head on the same machine. Swap any tripwire `cmd` for your toolchain's own counter if you want it exact. The cross-OS proof runs in CI (`gamed-catch` job).
+
 ## Docs
 
 - [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md), how `--detect-gaming` fits as the **deterministic layer** alongside held-out tests, LLM judges, and human review: the coverage matrix, the compose-as-a-pipeline model, and the honest in/out-of-scope boundary.
