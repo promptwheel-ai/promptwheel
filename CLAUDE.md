@@ -11,7 +11,7 @@
 3. **Never trust noise.** A delta inside the measured jitter band is `inconclusive`, not a regression. Guards must never fail on noise. This is the credibility feature - protect it.
 4. **Never touch the user's working tree.** All measurement happens in throwaway git worktrees.
 5. **Outcome over orchestration.** Every feature must serve the question "did a real metric move, provably?" If it doesn't, it belongs in a different tool.
-6. **Open-core.** The CLI + GitHub Action are OSS (MIT). The paid surface is *later*: hosted cross-repo intelligence + dashboards over the accumulated outcome record. Don't build billing/cloud into the core.
+6. **Open-core.** The CLI + GitHub Action are OSS (Apache-2.0). The paid surface is *later*: hosted cross-repo intelligence + dashboards over the accumulated outcome record. Don't build billing/cloud into the core.
 
 ## Layout
 

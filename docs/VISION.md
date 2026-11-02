@@ -40,7 +40,7 @@ The lead sits on a foundation - **an outcome gate** (and the outcome gate for AI
 
 ## Business model - open-core
 
-- **OSS (MIT):** the CLI + the GitHub Action / PR-comment wrapper. This is the distribution engine; adoption is the strategy.
+- **OSS (Apache-2.0):** the CLI + the GitHub Action / PR-comment wrapper. This is the distribution engine; adoption is the strategy.
 - **Paid (later):** hosted **cross-repo intelligence** + dashboards over the accumulated outcome record - "your agents improved p95 in 3 repos this month; here's what change-types reliably help." Never bake this into the core.
 
 ## The honest risk

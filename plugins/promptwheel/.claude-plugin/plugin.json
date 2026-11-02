@@ -5,6 +5,6 @@
   "author": { "name": "Matthew Owens" },
   "homepage": "https://github.com/promptwheel-ai/promptwheel",
   "repository": "https://github.com/promptwheel-ai/promptwheel",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["evals", "outcome-gate", "agent-loop", "reward-signal", "regression", "ci"]
 }
