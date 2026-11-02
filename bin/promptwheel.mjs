@@ -46,19 +46,22 @@ function resolveConfig(p, repo, label, seen) {
   try {
     const cfg = readConfigFile(p);
     const byName = new Map();
+    const mandatesByName = new Map();   // hard rules accumulate down the extends chain (a parent's holds)
     const scalars = {};
     for (const ref of [].concat(cfg.extends || [])) {
       const bp = isAbsolute(ref) ? ref : join(dirname(p), ref);
       if (!existsSync(bp)) { console.error(`extends target not found: ${ref} (from ${relOf(repo, p)})`); process.exit(2); }
       const base = resolveConfig(bp, repo, relOf(repo, bp), seen);
       for (const m of base.metrics) byName.set(m.name, m);
+      for (const md of (base.mandates || [])) if (md && md.name) mandatesByName.set(md.name, md);
       for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths']) if (base[k] !== undefined) scalars[k] = base[k];
     }
     for (const m of (cfg.metrics || [])) {
       byName.set(m.name, { ...m, __src: label, __override: byName.has(m.name) });
     }
+    for (const md of (cfg.mandates || [])) if (md && md.name) mandatesByName.set(md.name, { ...md, __src: label });
     for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
-    return { ...scalars, metrics: [...byName.values()] };
+    return { ...scalars, metrics: [...byName.values()], mandates: [...mandatesByName.values()] };
   } finally {
     seen.delete(abs); // only ACTIVE ancestors are a cycle, a diamond (a base reached two ways) is fine
   }
@@ -267,6 +270,26 @@ function evaluatorMatcher(cfg) {
   return (p) => res.some((re) => re.test(p));
 }
 
+// mandates: named hard rules that compile to a deterministic gate. A protected-path mandate
+// forbids ANY change to its paths (same glob semantics as evaluatorPaths). A hit fails the gate
+// regardless of metrics and rides at the top of the report; mandates inherit through `extends`,
+// so a parent scope's rule holds for every repo beneath it.
+function checkMandates(repo, base, head, cfg) {
+  const mandates = Array.isArray(cfg.mandates) ? cfg.mandates : [];
+  if (!mandates.length) return [];
+  let changed = [];
+  try { changed = git(['diff', '--name-only', base, head], repo).split('\n').filter(Boolean); } catch { return []; }
+  const out = [];
+  for (const m of mandates) {
+    const pats = (Array.isArray(m.paths) ? m.paths : []).filter((s) => typeof s === 'string' && s.trim());
+    if (!pats.length) continue;
+    const res = pats.map(globToRe);
+    const hit = changed.filter((f) => res.some((re) => re.test(f)));
+    if (hit.length) out.push({ name: String(m.name || 'mandate'), reason: m.reason ? String(m.reason).slice(0, 300) : '', files: hit.slice(0, 20) });
+  }
+  return out;
+}
+
 // split the agent's changed files into production-source vs test/config/grader/golden.
 // `isEval` is the repo's opt-in evaluator-path matcher, treated as non-source alongside
 // the built-in classifier, so a cheat that only edits a declared gate file is caught.
@@ -298,7 +321,9 @@ function measureSourceOnly(repo, base, head, metric, cfg, repeat) {
     const env = bridgeEnv(repo, wt, cfg);
     const patch = git(['diff', base, head, '--', ...source], repo);
     if (patch.trim()) {
-      const tryApply = (extra) => { execFileSync('git', ['apply', '--whitespace=nowarn', ...extra], { cwd: wt, input: patch + '\n', encoding: 'utf8' }); };
+      // stdio stderr 'ignore': git apply --3way prints "Applied patch ... cleanly" to stderr; that
+      // is noise on an otherwise-quiet run (and corrupts --json for callers that fold in stderr).
+      const tryApply = (extra) => { execFileSync('git', ['apply', '--whitespace=nowarn', ...extra], { cwd: wt, input: patch + '\n', encoding: 'utf8', stdio: ['pipe', 'ignore', 'ignore'] }); };
       try { tryApply(['--3way']); }
       catch { try { tryApply([]); } catch { return { samples: [], hadSourceChange: true, applyFailed: true }; } }
     }
@@ -454,6 +479,7 @@ function gateFingerprint(metricsList, scalars) {
     })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
     gamingThreshold: scalars.gamingThreshold ?? null,
     evaluatorPaths: Array.isArray(scalars.evaluatorPaths) ? [...scalars.evaluatorPaths].sort() : [],
+    mandates: Array.isArray(scalars.mandates) ? scalars.mandates.map((m) => ({ name: String(m.name || ''), paths: [...(Array.isArray(m.paths) ? m.paths : [])].sort() })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) : [],
   };
   return createHash('sha256').update(JSON.stringify(norm)).digest('hex').slice(0, 16);
 }
@@ -616,6 +642,9 @@ function gate(repo, opts) {
       if (gw) gateInfo.allowed = true;
     }
   }
+  // mandates run first: a protected-path hard rule fails the gate no matter what the metrics say.
+  const mandateViolations = checkMandates(repo, base, head, cfg);
+  const mandated = mandateViolations.length > 0;
   const failed = metrics.some((m) => m.guard && !m.ok);
   const gamed = metrics.some((m) => m.gamed === true) || !!(gateInfo && gateInfo.weakened && !gateInfo.allowed);
   // a guard that never runs (inert: a pass/fail metric stuck at 0 across both refs) verifies
@@ -623,7 +652,7 @@ function gate(repo, opts) {
   // BUT scope it to a bare no-op run: an inert guard must NOT bury a genuine, measured win
   // elsewhere (that would make `improve` revert good changes and misread them as a plateau).
   const inconclusive = !failed && !gamed && metrics.some((m) => m.inert) && !metrics.some((m) => m.status === 'improved');
-  const verdict = failed ? 'fail' : gamed ? 'gamed' : inconclusive ? 'inconclusive' : 'pass';
+  const verdict = (mandated || failed) ? 'fail' : gamed ? 'gamed' : inconclusive ? 'inconclusive' : 'pass';
   const report = {
     base: short(repo, base), head: short(repo, head), repeat, mode: opts.working ? 'working' : 'refs',
     // learning-substrate fields (Phase 5): cohort segments reliability by environment,
@@ -632,6 +661,7 @@ function gate(repo, opts) {
     ...(opts.label ? { label: opts.label } : {}),
     subsystems: subsystemsOf(repo, base, head, cfg),
     verdict, metrics,
+    ...(mandateViolations.length ? { mandates: mandateViolations } : {}),
     ...(gateInfo ? { gate: gateInfo } : {}),
     ...(allowed ? { allowed } : {}),
   };
@@ -1095,6 +1125,7 @@ const short = (repo, ref) => { try { return git(['rev-parse', '--short', ref], r
 function printHuman(r) {
   const arrowFor = (m) => (m.delta == null ? '?' : m.delta > 0 ? '▲' : m.delta < 0 ? '▼' : '=');
   console.log(`\nPromptWheel  ${r.base} → ${r.head}${r.repeat > 1 ? `  (×${r.repeat})` : ''}\n`);
+  if (r.mandates) for (const md of r.mandates) console.log(`  ⛔ MANDATE "${md.name}" violated${md.reason ? ': ' + md.reason : ''}  (touched: ${md.files.join(', ')})`);
   for (const m of r.metrics) {
     const tag = m.guard ? (m.ok ? 'guard✓' : 'GUARD✗') : 'info';
     const d = m.delta == null ? 'n/a' : (m.delta > 0 ? `+${m.delta}` : `${m.delta}`);
@@ -1103,8 +1134,10 @@ function printHuman(r) {
     if (m.gamed === true) console.log(`      🚩 GAMED, ${m.gamingReason}`);
   }
   if (r.gate && r.gate.weakened) for (const w of r.gate.weakened) console.log(`  🚩 GATE WEAKENED, the guard "${w.name}" was ${w.change === 'guard-removed' ? 'removed' : 'disabled'} in this change and it would have ${w.status} at head (goalpost moved, not earned)`);
-  console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? ', a guarded metric regressed (beyond noise)' : r.verdict === 'gamed' ? ', a metric "improved" by editing the goalposts, not the source' : r.verdict === 'inconclusive' ? ', a guard is inert (measured nothing); a pass cannot be certified' : ''}`);
-  if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name), `promptwheel guards` shows the effective set');
+  const failReason = r.mandates ? ', a mandate was violated (a protected path changed)' : ', a guarded metric regressed (beyond noise)';
+  console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? failReason : r.verdict === 'gamed' ? ', a metric "improved" by editing the goalposts, not the source' : r.verdict === 'inconclusive' ? ', a guard is inert (measured nothing); a pass cannot be certified' : ''}`);
+  if (r.verdict === 'fail' && r.mandates) console.log('  a mandate is a hard rule; if the change is truly intended, edit the mandate in promptwheel.config.json (a tracked, tamper-evident change), do not work around it');
+  else if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name), `promptwheel guards` shows the effective set');
   if (r.allowed) console.log(`  ✓ allowed: ${r.allowed.cleared.join(', ')} acknowledged as an intentional change, recorded (Sawbuck-Allow: ${r.allowed.reason})`);
   console.log('');
 }
@@ -1123,11 +1156,12 @@ function renderMarkdown(r) {
     '',
     `\`${r.base} → ${r.head}\` · ${r.mode} mode${r.repeat > 1 ? ` · ×${r.repeat}` : ''}`,
     '',
+    ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Mandate violated:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)`).join('\n'), ''] : []),
     '| metric | before | after | Δ | status | confidence |',
     '|---|--:|--:|--:|---|---|',
     rows,
     '',
-    r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader, not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? '> ❌ A 🛡️ guarded metric regressed beyond the noise band.' : r.verdict === 'inconclusive' ? '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.' : '> ✅ No guarded metric regressed.',
+    r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader, not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? (r.mandates ? '> ⛔ A mandate was violated: a protected path changed. This is a hard rule, enforced before any metric.' : '> ❌ A 🛡️ guarded metric regressed beyond the noise band.') : r.verdict === 'inconclusive' ? '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.' : '> ✅ No guarded metric regressed.',
     ...(r.gate && r.gate.weakened ? ['', `> 🚩 **Gate weakened:** ${r.gate.weakened.map((w) => `\`${w.name}\` ${w.change === 'guard-removed' ? 'removed' : 'disabled'} (would have ${w.status} at head)`).join('; ')}. The pass was bought by dropping a guard, not by earning it.`] : []),
     '',
     '<sub>🛡️ = guard · _prove every change moved a metric_ · [PromptWheel](https://github.com/promptwheel-ai/promptwheel)</sub>',

@@ -138,6 +138,43 @@ test('run: editing a DECLARED evaluatorPath to pass is gamed; an UNdeclared one 
   rmSync(d2, { recursive: true, force: true });
 });
 
+// ------------------------------------------- integration: mandates (protected-path hard rule)
+test('run: a mandate forbidding a path fails the gate when that path is touched, passes otherwise', () => {
+  const mk = (touchProtected) => {
+    const d = mkdtempSync(join(tmpdir(), 'pw-mand-'));
+    const g = (a) => execFileSync('git', a, { cwd: d });
+    g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+    writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+    writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false,
+      mandates: [{ name: 'no-secrets-edits', paths: ['secrets.json'], reason: 'secrets are frozen; rotate in a dedicated PR' }],
+      metrics: [{ name: 'todos', cmd: 'grep -c TODO app.js || true', extract: 'number', direction: 'down', guard: true }] }));
+    writeFileSync(join(d, 'secrets.json'), '{"v":1}\n');
+    writeFileSync(join(d, 'app.js'), 'x // TODO\n');
+    commitAll(d, 'base');
+    writeFileSync(join(d, 'app.js'), 'x\n');                             // a real win: TODO removed in source
+    if (touchProtected) writeFileSync(join(d, 'secrets.json'), '{"v":2}\n'); // ... but a protected path was touched
+    commitAll(d, 'head');
+    return d;
+  };
+  // touched the protected path -> FAIL with a named mandate, even though the metric improved
+  const d1 = mk(true);
+  let r = pw(d1, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  assert.equal(r.code, 1);
+  let rep = JSON.parse(r.out);
+  assert.equal(rep.verdict, 'fail');
+  assert.ok(Array.isArray(rep.mandates) && rep.mandates[0].name === 'no-secrets-edits');
+  assert.ok(rep.mandates[0].files.includes('secrets.json'));
+  rmSync(d1, { recursive: true, force: true });
+  // same win, protected path untouched -> the win stands, PASS, mandate silent
+  const d2 = mk(false);
+  r = pw(d2, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  assert.equal(r.code, 0);
+  rep = JSON.parse(r.out);
+  assert.equal(rep.verdict, 'pass');
+  assert.ok(!rep.mandates);
+  rmSync(d2, { recursive: true, force: true });
+});
+
 // ----------------------------------------------------------- integration: provenance receipt
 test('run: report carries a reproducible provenance receipt', () => {
   const d = tmpRepo([TODOS]);

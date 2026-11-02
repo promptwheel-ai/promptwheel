@@ -213,6 +213,20 @@ Teams keep one shared base config and have every repo inherit it via `extends`:
 
 Read this way, `extends` is **the shared invariants, the "business rules", your agents inherit and are held to**: enforced as *measured guards* (a trusted regression fails the gate / reverts the commit), not advisory text an agent can quietly ignore. (Natural-language conventions belong in `AGENTS.md`; only deterministic, measurable guards belong here.)
 
+## Mandates (protected paths)
+
+Some rules are not a metric at all, they are a hard line: *never touch `src/auth/**`*, *the migration files are frozen*, *do not edit the billing schema*. Declare those as `mandates`, and any change that touches a protected path **fails the gate before a single metric is read**, however green everything else is:
+
+```json
+// promptwheel.config.json
+{ "mandates": [
+    { "name": "no-auth-edits", "paths": ["src/auth/**"], "reason": "auth changes go through a dedicated, reviewed PR" }
+  ],
+  "metrics": [ /* ... */ ] }
+```
+
+A mandate is deterministic (a path match on the diff, zero-LLM), rides at the top of the report, and **inherits through `extends`** so a parent scope's hard rule holds for every repo beneath it. It is folded into the gate fingerprint, so quietly deleting a mandate to pass is itself a tracked, tamper-evident change. This is the line between a contract and a request: `AGENTS.md` can *ask* an agent not to touch auth; a mandate *will not let the change past the gate*.
+
 ## Trust model, the point of the whole thing
 
 A number that jumps around between runs is worthless as a signal. PromptWheel won't pretend otherwise:
