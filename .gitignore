@@ -1,2 +1,4 @@
 node_modules/
 .promptwheel/
+.sawbuck/
+events.jsonl
