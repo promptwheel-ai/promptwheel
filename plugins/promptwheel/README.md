@@ -24,7 +24,7 @@ Five skills ship in `skills/`:
 | skill | wraps | what it does |
 |---|---|---|
 | `/promptwheel:setup` | `promptwheel init` | detect the stack, write a starter config |
-| `/promptwheel:gate` | `promptwheel run --working` | gate uncommitted changes; reports PASS / FAIL / GAMED / INCONCLUSIVE and what to do about each |
+| `/promptwheel:gate` | `promptwheel run --working` | gate uncommitted changes; reports the verdict (pass, fail, gamed, inconclusive) and what to do about each |
 | `/promptwheel:improve <cmd>` | `promptwheel improve --attempt "<cmd>"` | keep a change only if a metric improved, else revert (exit 0 kept, 1 regression, 2 gamed, 3 plateau) |
 | `/promptwheel:insights` | `promptwheel insights` | which metrics actually respond (loop memory) |
 | `/promptwheel:logbook` | `@promptwheel/logbook` (separate package) | the memory engine's skill, carried here because the two engines are a pair: read a repo's git history as agent memory (hotspots, do-not-retry reverts, suppressions, fragile areas) |
@@ -46,7 +46,7 @@ composes no command of its own. The plugin registers no hooks and no mod.
 
 **Files it writes.** Only inside the repo: `promptwheel.config.json` and a short block in
 `AGENTS.md` / `CLAUDE.md` when you run `/promptwheel:setup` (`--no-agent-block` skips the block),
-the outcome record `.promptwheel/outcomes.jsonl` (pass `--no-record` to skip), and, for the logbook
+the outcome record `.promptwheel/outcomes.jsonl` (add `--no-record` to skip), and, for the logbook
 skill, the memory engine's cache of that repo's own git history (`events.jsonl`, `LOGBOOK.md`),
 which includes the commit author names already in the git log.
 
