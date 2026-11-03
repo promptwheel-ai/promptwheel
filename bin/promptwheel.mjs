@@ -548,8 +548,8 @@ function gateWeakenings(baseGate, headMetrics) {
 }
 
 // A declared, auditable override (CONTRACT Section 3). The head commit can acknowledge an
-// intentional test/config/grader change - an edit, a delete, or a new file - or an intentional
-// gate change, with a trailer:   Sawbuck-Allow: <reason>
+// intentional test/config/grader change (an edit, a delete, or a new file) or an intentional
+// gate change, with a trailer:   Promptwheel-Allow: <reason>   (Sawbuck-Allow: is an alias)
 // so a change that would read GAMED reads PASS instead, with the acknowledgment RECORDED in
 // report.allowed. The check does not judge intent; it forces intent to be explicit. An UNdeclared
 // test-only win is still gamed. `--allow "<reason>"` (CLI) / `allow` (check) supplies the same for
@@ -557,7 +557,7 @@ function gateWeakenings(baseGate, headMetrics) {
 function readAllowTrailer(repo, ref) {
   let msg = '';
   try { msg = execFileSync('git', ['log', '-1', '--format=%B', ref], { cwd: repo, encoding: 'utf8' }); } catch { return null; }
-  const m = msg.match(/^[ \t]*(?:Sawbuck-Allow|Allow-Gamed|Promptwheel-Allow)[ \t]*:[ \t]*(\S.*?)[ \t]*$/im);
+  const m = msg.match(/^[ \t]*(?:Promptwheel-Allow|Sawbuck-Allow)[ \t]*:[ \t]*(\S.*?)[ \t]*$/im);
   return m && m[1].trim() ? { reason: m[1].trim().slice(0, 300) } : null;
 }
 
@@ -642,7 +642,7 @@ function gate(repo, opts) {
       ...(evalChanged.length ? { evaluatorChanged: evalChanged } : {}),
     };
   }
-  // declared override: a Sawbuck-Allow trailer (or --allow) acknowledges an intentional
+  // declared override: a Promptwheel-Allow trailer (or --allow) acknowledges an intentional
   // goalpost/gate change, so a would-be GAMED becomes PASS, recorded in report.allowed for review.
   const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300) } : (opts.working ? null : readAllowTrailer(repo, head));
   let allowed = null;
@@ -1151,7 +1151,7 @@ function printHuman(r) {
   console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? failReason : r.verdict === 'gamed' ? ', a metric "improved" by editing the goalposts, not the source' : r.verdict === 'inconclusive' ? ', a guard is inert (measured nothing); a pass cannot be certified' : ''}`);
   if (r.verdict === 'fail' && r.mandates) console.log('  a mandate is a hard rule; if the change is truly intended, edit the mandate in promptwheel.config.json (a tracked, tamper-evident change), do not work around it');
   else if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name), `promptwheel guards` shows the effective set');
-  if (r.allowed) console.log(`  ✓ allowed: ${r.allowed.cleared.join(', ')} acknowledged as an intentional change, recorded (Sawbuck-Allow: ${r.allowed.reason})`);
+  if (r.allowed) console.log(`  ✓ allowed: ${r.allowed.cleared.join(', ')} acknowledged as an intentional change, recorded (Promptwheel-Allow: ${r.allowed.reason})`);
   console.log('');
 }
 
@@ -1435,7 +1435,7 @@ function main() {
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',
       '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
-      '  promptwheel run --allow "<reason>"           acknowledge an intentional test/config change (or a `Sawbuck-Allow: <reason>` commit trailer): recorded, not flagged GAMED',
+      '  promptwheel run --allow "<reason>"           acknowledge an intentional test/config change (or a `Promptwheel-Allow: <reason>` commit trailer; `Sawbuck-Allow:` is an alias): recorded, not flagged GAMED',
       '  promptwheel improve --attempt "<cmd>"        run an agent/script; keep only if a metric improved',
       '                                               exit 0=kept · 1=regression · 2=gamed · 3=plateau/inconclusive (all but 0 reverted) · add --json',
       '  promptwheel insights                         which metrics actually respond (raw counts)',

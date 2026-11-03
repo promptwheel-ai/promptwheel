@@ -192,29 +192,13 @@ implementation earns the right to say "Verified-Outcome Contract compatible."
 
 ---
 
-## The memory half: @promptwheel/logbook
+## Related
 
-The check verifies what holds now; the **logbook** records what happened over the history.
-It is a separate package with the same thin, model-blind, zero-dependency design, and it ships
-three integration surfaces of its own:
-
-- **CLI + JSON.** `logbook query --json`, `logbook check --diff --json`. Shell it like Section 2.
-- **MCP.** `@promptwheel/logbook-mcp` (bin `logbook-mcp`) exposes the history to an agent over
-  the Model Context Protocol, so a Claude Code or other MCP client reads hotspots, reverts, and
-  suppression signals without shelling anything.
-- **Import.** The package is importable (`@promptwheel/logbook`) and importing it never runs the
-  CLI; `queryEvents`, `analyze`, `auditHead`, and `hotspots` are exported for advanced in-process
-  use. The scan and cache entry points take explicit options, so the CLI and MCP are the
-  first-class surfaces for most integrations. The reference harness (Sawbuck) consumes the
-  logbook by shelling `logbook query --json`, not by importing it, which keeps the same process
-  boundary the check engine uses.
-
----
-
-## The layer boundary (why this stays thin)
-
-The engines are deterministic and model-blind: no LLM call, no network, no runtime
-dependency, no build step. A harness that orchestrates models (Sawbuck is the reference one)
-consumes these engines across a process boundary, by shelling the CLI or resolving the bin,
-and never imports their internals. Keep that boundary and the check stays something a
-skeptic can re-run and get the same verdict, which is the entire point.
+PromptWheel is the check: it verifies what holds now. The history side is served by
+[`@promptwheel/logbook`](https://www.npmjs.com/package/@promptwheel/logbook), a separate
+zero-dependency package that turns a repo's git history into agent-readable memory
+(hotspots, reverts, suppressions), shelled the same way (`logbook query --json`). Both are
+deterministic and model-blind: no LLM call, no network, no build step. A harness that
+orchestrates models should consume them across a process boundary (shell the CLI, parse
+`--json`) rather than importing their internals, so a skeptic can always re-run the check and
+get the same verdict.

@@ -1139,7 +1139,7 @@ test('check(): falls back to auto-config when no config file exists', () => {
   rmSync(d, { recursive: true, force: true });
 });
 
-// ---------------------------------------------------- integration: Sawbuck-Allow (declared override)
+// ---------------------------------------------------- integration: Promptwheel-Allow (declared override; Sawbuck-Allow is an alias)
 const CALC = (expect) => `import { test } from 'node:test'; import assert from 'node:assert'; import { sub } from './calc.mjs'; test('s', () => assert.strictEqual(sub(5, 3), ${expect}));\n`;
 function gamedRepo() {
   const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
@@ -1148,9 +1148,9 @@ function gamedRepo() {
   writeFileSync(join(d, 'calc.test.mjs'), CALC(8));                               // the test-only "win"
   return d;
 }
-test('Sawbuck-Allow: a gamed win declared intentional reads PASS, recorded in report.allowed', () => {
+test('Promptwheel-Allow: a gamed win declared intentional reads PASS, recorded in report.allowed', () => {
   const d = gamedRepo();
-  commitAll(d, 'correct the test\n\nSawbuck-Allow: the old test asserted the wrong value');
+  commitAll(d, 'correct the test\n\nPromptwheel-Allow: the old test asserted the wrong value');
   const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
   assert.equal(r.verdict, 'pass', JSON.stringify(r));
   assert.ok(r.allowed && r.allowed.reason.includes('wrong value') && r.allowed.cleared.includes('tests_pass'), JSON.stringify(r.allowed));
@@ -1158,7 +1158,7 @@ test('Sawbuck-Allow: a gamed win declared intentional reads PASS, recorded in re
   assert.equal(conformsToContract(r).ok, true, conformsToContract(r).errors.join('; '));
   rmSync(d, { recursive: true, force: true });
 });
-test('Sawbuck-Allow: the --allow / allow option overrides for a committed or working run', () => {
+test('Promptwheel-Allow: the --allow / allow option overrides for a committed or working run', () => {
   const d = gamedRepo();
   commitAll(d, 'edit the test, no declaration');
   assert.equal(check({ repo: d, base: 'HEAD~1', head: 'HEAD' }).verdict, 'gamed');   // undeclared = gamed
@@ -1167,7 +1167,7 @@ test('Sawbuck-Allow: the --allow / allow option overrides for a committed or wor
   assert.equal(r.allowed.reason, 'the spec changed to 8');
   rmSync(d, { recursive: true, force: true });
 });
-test('Sawbuck-Allow: covers an intentional test DELETE (not just an edit)', () => {
+test('Sawbuck-Allow (alias): covers an intentional test DELETE (not just an edit)', () => {
   const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test *.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
   writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');
   writeFileSync(join(d, 'calc.test.mjs'), CALC(2)); commitAll(d, 'base: red');
@@ -1179,11 +1179,15 @@ test('Sawbuck-Allow: covers an intentional test DELETE (not just an edit)', () =
   assert.ok(r.allowed, 'the delete was acknowledged');
   rmSync(d, { recursive: true, force: true });
 });
-test('Sawbuck-Allow: a trailer with no reason does NOT override (still gamed)', () => {
+test('Promptwheel-Allow: a trailer with no reason does NOT override (still gamed); the retired Allow-Gamed name is not honored', () => {
   const d = gamedRepo();
-  commitAll(d, 'edit\n\nSawbuck-Allow:   ');   // empty reason
+  commitAll(d, 'edit\n\nPromptwheel-Allow:   ');   // empty reason
   assert.equal(check({ repo: d, base: 'HEAD~1', head: 'HEAD' }).verdict, 'gamed');
   rmSync(d, { recursive: true, force: true });
+  const d2 = gamedRepo();
+  commitAll(d2, 'edit\n\nAllow-Gamed: a reason under the dropped trailer name');
+  assert.equal(check({ repo: d2, base: 'HEAD~1', head: 'HEAD' }).verdict, 'gamed');
+  rmSync(d2, { recursive: true, force: true });
 });
 
 // ---------------------------------------------------- integration: usage/config errors exit 64, never a verdict code
