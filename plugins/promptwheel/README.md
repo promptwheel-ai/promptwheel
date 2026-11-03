@@ -1,6 +1,6 @@
 # PromptWheel - Claude Code plugin
 
-A thin wrapper around the [`promptwheel`](https://github.com/promptwheel-ai/promptwheel) CLI - *the trustworthy per-turn reward for AI coding loops* - that brings the outcome gate into Claude Code as slash commands.
+A thin wrapper around the [`promptwheel`](https://github.com/promptwheel-ai/promptwheel) CLI, *a deterministic, zero-LLM check for your coding loop*, that brings the outcome gate into Claude Code as slash commands.
 
 ## Prerequisite
 

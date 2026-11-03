@@ -5,7 +5,7 @@
     {
       "name": "promptwheel",
       "source": "./plugins/promptwheel",
-      "description": "The trustworthy per-turn reward for AI coding loops - prove a change moved a metric without regressing another. Wraps the promptwheel CLI."
+      "description": "A deterministic, zero-LLM check for your coding loop. It proves every change earned its win by re-running the result from the agent's source edits alone, so a green that came from editing the test reads GAMED. Wraps the promptwheel CLI."
     }
   ]
 }

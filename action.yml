@@ -1,5 +1,5 @@
 name: 'PromptWheel Outcome Gate'
-description: 'The reward gate for your AI coding loop. It proves a change moved a metric without regressing another (in CI, your PR check).'
+description: "A deterministic, zero-LLM check for your coding loop. It proves every change earned its win by re-running the result from the agent's source edits alone, so a green that came from editing the test reads GAMED (exit 2). Runs as your PR check."
 branding:
   icon: 'check-circle'
   color: 'green'

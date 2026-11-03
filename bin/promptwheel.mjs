@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// PromptWheel, the per-turn reward for AI coding loops (a.k.a. the outcome gate for AI code).
+// PromptWheel: a deterministic, zero-LLM check for your coding loop. It proves every change
+// earned its win by re-running the result from the agent's source edits alone, so a green
+// that came from editing the test reads GAMED.
 //
-// For any change (base ref → head ref), measure each configured metric in an
+// For any change (base ref -> head ref), measure each configured metric in an
 // isolated git worktree BEFORE and AFTER, enforce regression guards, and refuse
 // to trust a delta that sits inside the measurement noise band. Emits a
 // structured {verdict, metric, delta, confidence}. The thing base agents don't do:
@@ -1424,7 +1426,7 @@ function main() {
     const help = !cmd || cmd === '--help' || cmd === '-h' || cmd === 'help';
     if (!help) console.error(`unknown command: ${cmd}`);
     console.log([
-      'PromptWheel, catch your agent cheating. Prove a change moved a real metric (and that the agent earned it, not gamed it). The per-turn reward + source-only audit for AI coding loops.',
+      'PromptWheel: a deterministic, zero-LLM check for your coding loop. It proves every change earned its win by re-running the result from the agent\'s source edits alone, so a green that came from editing the test reads GAMED.',
       '',
       '  promptwheel --version | -v                   print the version',
       '  promptwheel --help | -h                      this banner',
