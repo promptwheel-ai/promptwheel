@@ -32,10 +32,11 @@ const spread = (xs) => { const a = xs.filter((x) => x != null); return a.length 
 // usage / config errors exit 64 (EX_USAGE), so they can never be confused with a verdict
 // (0 pass, 1 fail, 2 gamed, 3 inconclusive): in CI a config typo must not read as GAMED.
 const EX_USAGE = 64;
+function die(msg) { console.error(msg); process.exit(EX_USAGE); }
 
 function readConfigFile(p) {
   try { return JSON.parse(readFileSync(p, 'utf8')); }
-  catch (e) { console.error(`invalid config ${p}: ${e.message}`); process.exit(2); }
+  catch (e) { die(`invalid config ${p}: ${e.message}`); }
 }
 
 const relOf = (repo, p) => { try { return relative(repo, p) || p; } catch { return p; } };
@@ -45,7 +46,7 @@ const relOf = (repo, p) => { try { return relative(repo, p) || p; } catch { retu
 // a repo INHERITS their guardrails, and a local metric of the same name overrides the inherited one.
 function resolveConfig(p, repo, label, seen) {
   const abs = realpathSync(p);
-  if (seen.has(abs)) { console.error(`config inheritance cycle at ${relOf(repo, p)}`); process.exit(2); }
+  if (seen.has(abs)) die(`config inheritance cycle at ${relOf(repo, p)}`);
   seen.add(abs);
   try {
     const cfg = readConfigFile(p);
@@ -54,7 +55,7 @@ function resolveConfig(p, repo, label, seen) {
     const scalars = {};
     for (const ref of [].concat(cfg.extends || [])) {
       const bp = isAbsolute(ref) ? ref : join(dirname(p), ref);
-      if (!existsSync(bp)) { console.error(`extends target not found: ${ref} (from ${relOf(repo, p)})`); process.exit(2); }
+      if (!existsSync(bp)) die(`extends target not found: ${ref} (from ${relOf(repo, p)})`);
       const base = resolveConfig(bp, repo, relOf(repo, bp), seen);
       for (const m of base.metrics) byName.set(m.name, m);
       for (const md of (base.mandates || [])) if (md && md.name) mandatesByName.set(md.name, md);
@@ -74,11 +75,9 @@ function resolveConfig(p, repo, label, seen) {
 function loadConfig(repo) {
   const candidates = ['promptwheel.config.json', 'outcome-gate.config.json']; // back-compat alias
   const p = candidates.map((c) => join(repo, c)).find(existsSync);
-  if (!p) { console.error('no promptwheel.config.json, run: promptwheel init   (writes one for your stack)'); process.exit(2); }
+  if (!p) die('no promptwheel.config.json, run: promptwheel init   (writes one for your stack)');
   const cfg = resolveConfig(p, repo, 'local', new Set());
-  if (!Array.isArray(cfg.metrics) || cfg.metrics.length === 0) {
-    console.error('config.metrics must be a non-empty array'); process.exit(2);
-  }
+  if (!Array.isArray(cfg.metrics) || cfg.metrics.length === 0) die('config.metrics must be a non-empty array');
   return cfg;
 }
 
@@ -567,7 +566,7 @@ function gate(repo, opts) {
     // never touches the real index or working tree. (A loop agent's most common action
     // is to ADD a file; `git stash create` omits untracked, which silently reverted them.)
     try { git(['rev-parse', '--verify', 'HEAD'], repo); }
-    catch { console.error('no commits yet, make an initial commit before gating --working changes'); process.exit(2); }
+    catch { die('no commits yet, make an initial commit before gating --working changes'); }
     base = 'HEAD';
     head = workingSnapshot(repo);
   } else {
@@ -708,10 +707,10 @@ function recordOutcome(repo, report) {
 // keep-if-improved: run any agent/script, gate the result, keep the change ONLY if a metric improved
 function improve(argv) {
   const args = parseArgs(argv);
-  if (!args.attempt) { console.error('improve requires --attempt "<command that changes the repo>"'); process.exit(2); }
+  if (!args.attempt) die('improve requires --attempt "<command that changes the repo>"');
   const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
   const dirty = git(['status', '--porcelain'], repo).split('\n').filter((l) => l.trim() && !l.includes('.promptwheel'));
-  if (dirty.length) { console.error('working tree not clean, commit or stash first (improve needs a clean base to revert to)'); process.exit(2); }
+  if (dirty.length) die('working tree not clean, commit or stash first (improve needs a clean base to revert to)');
 
   console.error(`▶ attempt: ${args.attempt}`);
   try { execSync(args.attempt, { cwd: repo, stdio: 'inherit' }); }
@@ -758,7 +757,7 @@ function insights(argv) {
   const args = parseArgs(argv);
   const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
   const f = join(repo, '.promptwheel', 'outcomes.jsonl');
-  if (!existsSync(f)) { console.error('no outcome record yet, run the gate a few times first (.promptwheel/outcomes.jsonl)'); process.exit(2); }
+  if (!existsSync(f)) die('no outcome record yet, run the gate a few times first (.promptwheel/outcomes.jsonl)');
   const runs = readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
   const agg = {};
   for (const r of runs) for (const m of (r.metrics || [])) {
@@ -849,7 +848,7 @@ function cohortNote(k) {
 
 function loadEntries(repo) {
   const runs = readLedger(repo);
-  if (!runs.length) { console.error('no outcome record yet, run the gate a few times first (.promptwheel/outcomes.jsonl)'); process.exit(2); }
+  if (!runs.length) die('no outcome record yet, run the gate a few times first (.promptwheel/outcomes.jsonl)');
   const keys = foldOutcomes(runs);
   const totalW = keys.filter((k) => k.key === k.metric).reduce((s, k) => s + k.w, 0);
   const entries = keys.map((k) => ({ ...k, ...scoreKey(k, totalW), sufficient: k.moved >= MIN_MOVED }))
@@ -906,7 +905,7 @@ function backfill(argv) {
   const listArgs = ['rev-list', '--no-merges'];
   if (args.since) listArgs.push(`${args.since}..HEAD`); else listArgs.push('-n', String(args.n ?? 30), 'HEAD');
   const commits = git(listArgs, repo).split('\n').filter(Boolean).reverse(); // oldest first → ledger stays chronological, decay stays honest
-  if (!commits.length) { console.error('no commits to backfill'); process.exit(2); }
+  if (!commits.length) die('no commits to backfill');
   const seen = new Set(readLedger(repo).filter((r) => r.cohort === 'backfill').map((r) => r.head));
   let done = 0, skipped = 0;
   console.log(`\nbackfilling ${commits.length} commits through the current metrics (gaming detection ${args.dgExplicit && args.detectGaming ? 'ON' : 'off, pass --detect-gaming to audit history too'})\n`);
@@ -1027,15 +1026,13 @@ function init(argv) {
   }
   const repo = (() => { try { return git(['rev-parse', '--show-toplevel'], process.cwd()); } catch { return process.cwd(); } })();
   const out = join(repo, 'promptwheel.config.json');
-  if (existsSync(out) && !argv.includes('--force')) {
-    console.error('promptwheel.config.json already exists, pass --force to overwrite'); process.exit(2);
-  }
+  if (existsSync(out) && !argv.includes('--force')) die('promptwheel.config.json already exists, pass --force to overwrite');
   const pi = argv.indexOf('--preset');
   const presetName = pi >= 0 ? argv[pi + 1] : null;
   let metrics, note, evaluatorPaths;
   if (presetName) {
     const p = PRESETS[presetName];
-    if (!p) { console.error(`unknown preset "${presetName}", try: promptwheel init --list`); process.exit(2); }
+    if (!p) die(`unknown preset "${presetName}", try: promptwheel init --list`);
     evaluatorPaths = p.evaluatorPaths;   // a preset may ship a starter evaluator allowlist (e.g. security-antihack)
     metrics = p.metrics || [{ name: 'tests_pass', cmd: detectTestCmd(repo), extract: 'exit', direction: 'pass', guard: true }];
     metrics = metrics.map((m) => m.cmd === '__TESTCMD__' ? { ...m, cmd: detectTestCmd(repo) } : m); // fill the preset's target
@@ -1434,6 +1431,7 @@ function main() {
       '  promptwheel guards                           show the effective guardrails (incl. inherited) + flag record',
       '  promptwheel conformance [file|-] [--cmd C]   check a verdict JSON (or a command) against the Contract (exit 0 = conforms)',
       '',
+      'Exit codes: 0 pass · 1 fail (a guarded metric regressed, or a mandate was violated) · 2 gamed · 3 inconclusive · 64 usage or config error (never a verdict).',
       'Integrate (library / conform / shell / MCP): see INTEGRATE.md. Import: `import { check } from \'promptwheel\'`.',
       'Loop it:  while promptwheel improve --attempt "$AGENT"; do :; done   # stops on plateau/regression',
       'Config:   promptwheel.config.json → { extends?, metrics:[{ name, cmd, direction, extract?, guard? }] }   (or: promptwheel init)',

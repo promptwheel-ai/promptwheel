@@ -412,7 +412,7 @@ test('init: writes a starter config for the stack, refuses overwrite without --f
   assert.ok(written.some((m) => m.name === 'tests_pass'));
   assert.ok(written.some((m) => m.name === 'assertions'), 'default config includes antihack tripwires');
   assert.ok(!written.some((m) => m.name === 'lint_errors'), 'no lint metric when eslint is absent');
-  assert.equal(pw(d, ['init']).code, 2);          // refuses overwrite
+  assert.equal(pw(d, ['init']).code, 64);         // refuses overwrite (usage error, never a verdict code)
   assert.equal(pw(d, ['init', '--list']).code, 0); // catalog
   rmSync(d, { recursive: true, force: true });
 });
@@ -755,13 +755,13 @@ test('extends: a diamond (two bases sharing a grandparent) is NOT a false cycle'
   rmSync(d, { recursive: true, force: true });
 });
 
-test('extends: a real self-cycle still exits 2', () => {
+test('extends: a real self-cycle still exits 64 (config error)', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-cycle-'));
   const g = (a) => execFileSync('git', a, { cwd: d });
   g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
   writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, extends: './promptwheel.config.json', metrics: [{ name: 'm', cmd: 'echo 1', extract: 'number', direction: 'up' }] }));
   writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
-  assert.equal(pw(d, ['guards']).code, 2); // true cycle caught
+  assert.equal(pw(d, ['guards']).code, 64); // true cycle caught
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -1062,11 +1062,11 @@ test('zero-config: run auto-detects the test command when no config file exists'
   assert.match(r.out, /PASS/);
   rmSync(d, { recursive: true, force: true });
 });
-test('zero-config: --no-auto restores the require-a-config behavior (exit 2)', () => {
+test('zero-config: --no-auto restores the require-a-config behavior (exit 64)', () => {
   const d = bareRepo();
   writeFileSync(join(d, 'f.txt'), 'a'); commitAll(d, 'base'); writeFileSync(join(d, 'f.txt'), 'b'); commitAll(d, 'change');
   const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-auto']);
-  assert.equal(r.code, 2, r.out);
+  assert.equal(r.code, 64, r.out);
   assert.match(r.out, /no promptwheel\.config\.json/);
   rmSync(d, { recursive: true, force: true });
 });
@@ -1133,6 +1133,26 @@ test('Sawbuck-Allow: a trailer with no reason does NOT override (still gamed)', 
   const d = gamedRepo();
   commitAll(d, 'edit\n\nSawbuck-Allow:   ');   // empty reason
   assert.equal(check({ repo: d, base: 'HEAD~1', head: 'HEAD' }).verdict, 'gamed');
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------- integration: usage/config errors exit 64, never a verdict code
+test('a broken config exits 64 (EX_USAGE), so a typo can never read as GAMED (2) in CI', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'promptwheel.config.json'), '{ "metrics": [ this is not json');   // malformed
+  let r = pw(d, ['run', '--base', 'HEAD', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 64, r.out); assert.match(r.out, /invalid config/);
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [] }));   // no metrics
+  r = pw(d, ['run', '--base', 'HEAD', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 64, r.out); assert.match(r.out, /non-empty array/);
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, extends: './missing.json', metrics: [TODOS] }));
+  r = pw(d, ['run', '--base', 'HEAD', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 64, r.out); assert.match(r.out, /extends target not found/);
+  r = pw(d, ['improve']);                                   // missing --attempt
+  assert.equal(r.code, 64, r.out);
+  r = pw(d, ['init', '--preset', 'nope']);                  // unknown preset
+  assert.equal(r.code, 64, r.out);
   rmSync(d, { recursive: true, force: true });
 });
 

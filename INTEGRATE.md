@@ -17,10 +17,13 @@ The strongest guarantee and the loosest coupling: emit or consume the two artifa
 Contract defines, and any harness interoperates with any other, in any language, without
 importing this package.
 
-- **Section 1, exit codes.** `0` pass, `1` fail (a guarded metric regressed beyond noise),
-  `2` gamed (a win that did not survive a source-only re-run), `3` inconclusive (a guard
-  measured nothing, so a pass cannot be certified). An agent reads the code as a per-turn
-  reward it cannot inflate; a merge gate reads the same code as a wall it cannot self-clear.
+- **Section 1, exit codes.** `0` pass, `1` fail (a guarded metric regressed beyond noise, or
+  a mandate was violated), `2` gamed (a win that did not survive a source-only re-run), `3`
+  inconclusive (a guard measured nothing, so a pass cannot be certified). An agent reads the
+  code as a per-turn reward it cannot inflate; a merge gate reads the same code as a wall it
+  cannot self-clear. A usage or config error (a malformed config, a missing `extends` target,
+  a bad flag) exits `64` (`EX_USAGE`), which is not a verdict: a CI step must never read a
+  typo as `GAMED`.
 - **Section 2, the verdict JSON.** The object below, reproducible from `(base, head, config)`
   alone.
 
@@ -84,7 +87,7 @@ Node. Run the gate, read the exit code (Section 1), parse stdout (Section 2).
 
 ```bash
 promptwheel run --base "$BASE" --head "$HEAD" --json
-echo $?   # 0 pass | 1 fail | 2 gamed | 3 inconclusive
+echo $?   # 0 pass | 1 fail | 2 gamed | 3 inconclusive | 64 usage/config error (not a verdict)
 ```
 
 ```bash

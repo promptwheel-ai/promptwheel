@@ -109,7 +109,7 @@ So `--repeat` is how you trade time for trust: it earns a real confidence label 
 }
 ```
 
-Exit code: `0` = pass · `1` = fail (a guarded metric had a trusted regression) · `2` = **`GAMED`** (a win that didn't survive the source-only re-run) or a config/usage error (this **overloads** exit 2) · `3` = **inconclusive** (an inert guard measured nothing) - also the code `improve` returns for a plateau/no-op. This JSON is the persisted reward stream (`.promptwheel/outcomes.jsonl`), appended once per gated run.
+Exit code: `0` = pass · `1` = fail (a guarded metric had a trusted regression, or a mandate was violated) · `2` = **`GAMED`** (a win that didn't survive the source-only re-run, or a weakened gate) · `3` = **inconclusive** (an inert guard measured nothing) - also the code `improve` returns for a plateau/no-op · `64` = a usage or config error (`EX_USAGE`: a malformed config, a missing `extends` target, an unknown command or preset). 64 is deliberately outside the verdict range so a broken config can never be read as a verdict. This JSON is the persisted reward stream (`.promptwheel/outcomes.jsonl`), appended once per gated run.
 
 ## Testing
 

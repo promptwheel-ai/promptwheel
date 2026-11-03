@@ -31,7 +31,7 @@ PromptWheel  a1b2c3d → e4f5g6h  (×5)
   VERDICT: PASS
 ```
 
-Exit `0` pass · `1` fail · `2` gamed · `3` inconclusive (a guard measured nothing), CI-friendly. No build step, zero dependencies, Node 18+.
+Exit `0` pass · `1` fail · `2` gamed · `3` inconclusive (a guard measured nothing) · `64` usage or config error (never a verdict), CI-friendly. No build step, zero dependencies, Node 18+.
 
 ## Catch your agent cheating, on by default
 
@@ -69,7 +69,7 @@ Inline source-file suppressions (`@ts-nocheck`, `eslint-disable`, `# noqa`), and
 
 ```bash
 npx promptwheel init                      # guarded tests + antihack tripwires by default
-npx promptwheel run                       # detection ON by default · exit 0 win · 1 regression · 2 GAMED · 3 inconclusive
+npx promptwheel run                       # detection ON by default · exit 0 win · 1 regression · 2 GAMED · 3 inconclusive · 64 usage/config error
                                           #   (add --no-detect-gaming for just the outcome gate)
 ```
 

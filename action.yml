@@ -25,7 +25,7 @@ runs:
       with:
         node-version: '20'
 
-    # Runs straight from this action's own checkout — no npm install, no build.
+    # Runs straight from this action's own checkout: no npm install, no build.
     - id: gate
       shell: bash
       run: |
@@ -42,6 +42,8 @@ runs:
         GH_TOKEN: ${{ github.token }}
       run: gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/promptwheel.md" || true
 
-    # Fail the job if a guarded metric regressed (exit 1 from the gate).
+    # Propagate the gate's exit code: 0 pass, 1 fail (a guarded metric regressed or a mandate
+    # was violated), 2 gamed, 3 inconclusive, 64 usage/config error (a broken config fails the
+    # job too, but it is never reported as a verdict).
     - shell: bash
       run: exit ${{ steps.gate.outputs.exit }}
