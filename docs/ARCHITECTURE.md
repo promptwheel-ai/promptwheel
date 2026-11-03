@@ -1,6 +1,6 @@
 # Architecture (v0)
 
-The whole engine is `bin/promptwheel.mjs` (~870 LOC, Node ESM, zero deps). It is intentionally a single file - importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
+The whole engine is `bin/promptwheel.mjs` (~1290 LOC, Node ESM, zero deps). It is intentionally a single file - importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
 
 ## Flow
 
@@ -111,7 +111,7 @@ Exit code: `0` = pass · `1` = fail (a guarded metric had a trusted regression, 
 
 ## Testing
 
-`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` - **59 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, and `renderMarkdown` (imported directly), plus integration tests that spawn the real CLI against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert, reward stream, `insights`). No test dependencies.
+`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` - **97 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, `renderMarkdown`, the source/non-source classifier and `judgeGaming` (imported directly), plus integration tests that spawn the real CLI or call `check()` against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert/gamed, gaming detection, evaluatorPaths, mandates, gate integrity and fingerprints, the allow trailer, zero-config, `init` presets, exit 64 on a broken config, `--version`/`--help`). No test dependencies.
 
 ## Design constraints
 - **Zero runtime dependencies, no build.** Node 18+, ESM, runs straight from source.
