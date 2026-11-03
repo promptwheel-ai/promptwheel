@@ -59,7 +59,7 @@ npx promptwheel init --list               # presets: tests-pass · lint · bundl
 # the loop: run any agent/script, keep the change ONLY if a metric improved, else revert
 npx promptwheel improve --attempt "claude -p 'reduce lint errors'"
 #   exit 0 = kept a real win · 1 = guarded regression (reverted) · 2 = gamed (reverted) · 3 = plateau / inconclusive (reverted) · add --json
-while npx promptwheel improve --attempt "$AGENT"; do :; done     # converges: stops on the first non-zero
+while npx promptwheel improve --attempt "<your agent command>"; do :; done     # converges: stops on the first non-zero
 
 npx promptwheel insights                  # which metrics actually respond in this repo (counts from .promptwheel/outcomes.jsonl)
 npx promptwheel guards                    # the effective guardrails, including ones inherited through extends
