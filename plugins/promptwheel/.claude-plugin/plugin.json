@@ -1,10 +1,23 @@
 {
   "name": "promptwheel",
+  "displayName": "PromptWheel",
   "description": "A deterministic, zero-LLM check for your coding loop. It proves every change earned its win by re-running the result from the agent's source edits alone, so a green that came from editing the test reads GAMED. Thin wrapper around the promptwheel CLI (install: npm i -g promptwheel).",
-  "version": "0.1.3",
-  "author": { "name": "Matthew Owens" },
-  "homepage": "https://github.com/promptwheel-ai/promptwheel",
+  "version": "0.1.4",
+  "author": {
+    "name": "Matthew Owens"
+  },
+  "homepage": "https://promptwheel.com",
   "repository": "https://github.com/promptwheel-ai/promptwheel",
   "license": "Apache-2.0",
-  "keywords": ["evals", "outcome-gate", "agent-loop", "reward-signal", "regression", "ci"]
+  "keywords": [
+    "evals",
+    "outcome-gate",
+    "agent-loop",
+    "reward-signal",
+    "regression",
+    "ci"
+  ],
+  "documentationUrl": "https://promptwheel.com",
+  "supportUrl": "https://github.com/promptwheel-ai/promptwheel/issues",
+  "privacyPolicyUrl": "https://promptwheel.com/privacy"
 }

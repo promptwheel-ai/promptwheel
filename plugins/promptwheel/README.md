@@ -32,3 +32,20 @@ Five skills ship in `skills/`:
 No hooks are registered by the plugin. A Claude Code Stop-hook that blocks a GAMED turn ships as a copyable example at [`examples/detect-gaming-stop.sh`](../../examples/detect-gaming-stop.sh); wiring is in [`docs/ENFORCEMENT.md`](../../docs/ENFORCEMENT.md).
 
 It's the **signal inside your loop, not the driver**: `/promptwheel:gate` after a change tells you whether the turn earned its keep - measured in throwaway worktrees, never touching your working tree, never failing on noise. Full model in the [main repo](https://github.com/promptwheel-ai/promptwheel).
+
+## What this plugin runs, writes, and sends (the full list)
+
+**Programs it runs.** The five skills are instructions; the only programs they tell Claude to run
+are the `promptwheel` CLI you installed (`promptwheel init|run|improve|insights`) and, for the
+logbook skill, `npx -y @promptwheel/logbook`. `promptwheel run` and `improve` also run your repo's own
+test or metric command (from `promptwheel.config.json`, or the detected test script) in throwaway
+git worktrees, exactly as you would run it yourself. The plugin registers no hooks and no mod.
+
+**Files it writes.** Only inside the repo: `promptwheel.config.json` and a short block in
+`AGENTS.md` / `CLAUDE.md` when you run `/promptwheel:setup` (`--no-agent-block` skips the block),
+the outcome record `.promptwheel/outcomes.jsonl` (pass `--no-record` to skip), and, for the logbook
+skill, the memory engine's cache of that repo's own git history (`events.jsonl`, `LOGBOOK.md`),
+which includes the commit author names already in the git log.
+
+**What it sends, and where.** Nothing. The check is deterministic and never calls a model or the
+network; the only network traffic is npm fetching the packages. There is no telemetry.
