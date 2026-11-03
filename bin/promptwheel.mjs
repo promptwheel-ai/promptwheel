@@ -443,10 +443,12 @@ function warnEditableInstall(repo) {
 // that guard WOULD HAVE FAILED at head (a real regression hidden by moving the goalposts).
 const GATE_SCALARS = ['gamingThreshold', 'evaluatorPaths'];
 
-// Resolve the gate definition as of `ref` (metrics + scalars), following `extends` by reading
-// every file from that ref via `git show`. Returns { metrics:Map, scalars } or null when there
-// is no config at `ref` (a gate ADDED in this range is not a weakening). Never exits: any
-// missing/unreadable file or parse error yields null (that branch simply contributes nothing).
+// Resolve the gate definition as of `ref` (metrics + mandates + scalars), following `extends` by
+// reading every file from that ref via `git show`, mirroring resolveConfig (a parent's mandates
+// hold beneath it; a local mandate of the same name overrides). Returns { metrics:Map, scalars }
+// with scalars.mandates, or null when there is no config at `ref` (a gate ADDED in this range is
+// not a weakening). Never exits: any missing/unreadable file or parse error yields null (that
+// branch simply contributes nothing).
 function gateDefAtRef(repo, ref) {
   // quiet: a missing path makes `git show` exit nonzero and print "fatal:" to stderr; swallow it
   const readAt = (p) => { try { return execFileSync('git', ['show', `${ref}:${p}`], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return null; } };
@@ -457,16 +459,19 @@ function gateDefAtRef(repo, ref) {
     const raw = readAt(p);
     if (raw == null) return null;
     let cfg; try { cfg = JSON.parse(raw); } catch { return null; }
-    const byName = new Map(); const scalars = {};
+    const byName = new Map(); const mandatesByName = new Map(); const scalars = {};
     for (const ext of [].concat(cfg.extends || [])) {
       if (isAbsolute(ext)) continue;                 // outside the repo, cannot git-show; unchanged anyway
       const base = resolve(join(dirname(p), ext).split('\\').join('/'));
       if (!base) continue;
       for (const m of base.metrics.values()) byName.set(m.name, m);
+      for (const md of base.scalars.mandates) mandatesByName.set(md.name, md);
       for (const k of GATE_SCALARS) if (base.scalars[k] !== undefined) scalars[k] = base.scalars[k];
     }
     for (const m of (cfg.metrics || [])) if (m && m.name) byName.set(m.name, m);
+    for (const md of (cfg.mandates || [])) if (md && md.name) mandatesByName.set(md.name, md);
     for (const k of GATE_SCALARS) if (cfg[k] !== undefined) scalars[k] = cfg[k];
+    scalars.mandates = [...mandatesByName.values()];
     return { metrics: byName, scalars };
   };
   for (const p of ['promptwheel.config.json', 'outcome-gate.config.json']) { const r = resolve(p); if (r) return r; } // first hit only: no spurious probe of the alias
@@ -623,11 +628,14 @@ function gate(repo, opts) {
         if (!ev.ok) weakened.push({ name: w.name, change: w.change, status: ev.status });
       }
     }
+    // the fingerprint covers metrics (name/guard/direction/gaming settings), evaluatorPaths,
+    // gamingThreshold and mandates at BOTH refs, so a quietly deleted mandate or guard is
+    // tamper-evident: base != head is recorded as gate.changed and printed, whatever the verdict.
+    const fpBase = baseGate ? gateFingerprint([...baseGate.metrics.values()], baseGate.scalars) : null;
+    const fpHead = gateFingerprint(cfg.metrics, cfg);
     gateInfo = {
-      fingerprint: {
-        base: baseGate ? gateFingerprint([...baseGate.metrics.values()], baseGate.scalars) : null,
-        head: gateFingerprint(cfg.metrics, cfg),
-      },
+      fingerprint: { base: fpBase, head: fpHead },
+      ...(fpBase && fpBase !== fpHead ? { changed: true } : {}),
       ...(weakened.length ? { weakened } : {}),
       ...(evalChanged.length ? { evaluatorChanged: evalChanged } : {}),
     };
@@ -1135,6 +1143,7 @@ function printHuman(r) {
     if (m.gamed === true) console.log(`      🚩 GAMED, ${m.gamingReason}`);
   }
   if (r.gate && r.gate.weakened) for (const w of r.gate.weakened) console.log(`  🚩 GATE WEAKENED, the guard "${w.name}" was ${w.change === 'guard-removed' ? 'removed' : 'disabled'} in this change and it would have ${w.status} at head (goalpost moved, not earned)`);
+  if (r.gate && r.gate.changed) console.log(`  ⚠ gate definition changed in this change (fingerprint ${r.gate.fingerprint.base} -> ${r.gate.fingerprint.head}): a metric, guard, evaluatorPath or mandate was added, removed or edited; review promptwheel.config.json as part of the diff`);
   const failReason = r.mandates ? ', a mandate was violated (a protected path changed)' : ', a guarded metric regressed (beyond noise)';
   console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? failReason : r.verdict === 'gamed' ? ', a metric "improved" by editing the goalposts, not the source' : r.verdict === 'inconclusive' ? ', a guard is inert (measured nothing); a pass cannot be certified' : ''}`);
   if (r.verdict === 'fail' && r.mandates) console.log('  a mandate is a hard rule; if the change is truly intended, edit the mandate in promptwheel.config.json (a tracked, tamper-evident change), do not work around it');
@@ -1164,6 +1173,7 @@ function renderMarkdown(r) {
     '',
     r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader, not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? (r.mandates ? '> ⛔ A mandate was violated: a protected path changed. This is a hard rule, enforced before any metric.' : '> ❌ A 🛡️ guarded metric regressed beyond the noise band.') : r.verdict === 'inconclusive' ? '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.' : '> ✅ No guarded metric regressed.',
     ...(r.gate && r.gate.weakened ? ['', `> 🚩 **Gate weakened:** ${r.gate.weakened.map((w) => `\`${w.name}\` ${w.change === 'guard-removed' ? 'removed' : 'disabled'} (would have ${w.status} at head)`).join('; ')}. The pass was bought by dropping a guard, not by earning it.`] : []),
+    ...(r.gate && r.gate.changed ? ['', `> ⚠ **Gate definition changed** in this diff (fingerprint \`${r.gate.fingerprint.base}\` -> \`${r.gate.fingerprint.head}\`): a metric, guard, evaluatorPath or mandate was added, removed or edited. Review the config change with the code.`] : []),
     '',
     '<sub>🛡️ = guard · _prove every change moved a metric_ · [PromptWheel](https://github.com/promptwheel-ai/promptwheel)</sub>',
   ].join('\n');
@@ -1318,6 +1328,7 @@ export function conformsToContract(report) {
     if (!report.gate || typeof report.gate !== 'object' || Array.isArray(report.gate)) E('gate must be an object');
     else {
       if (report.gate.fingerprint !== undefined && (typeof report.gate.fingerprint !== 'object' || report.gate.fingerprint === null)) E('gate.fingerprint must be an object { base, head }');
+      if (report.gate.changed !== undefined && typeof report.gate.changed !== 'boolean') E('gate.changed must be a boolean');
       if (report.gate.weakened !== undefined && !Array.isArray(report.gate.weakened)) E('gate.weakened must be an array');
     }
   }

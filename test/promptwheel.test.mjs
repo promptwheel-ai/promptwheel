@@ -1042,6 +1042,44 @@ test('gate integrity: deleting a guarded metric that regressed reads GAMED', () 
   rmSync(d, { recursive: true, force: true });
 });
 
+test('gate integrity: an unchanged mandate (local or inherited) yields identical fingerprints; a deleted mandate changes it and the report says so', () => {
+  const MD = { name: 'no-secrets', paths: ['secrets.json'], reason: 'frozen' };
+  const mk = (baseCfg, headCfg, extra = {}) => {
+    const d = tmpRepo([TODOS]);
+    for (const [f, c] of Object.entries(extra)) writeFileSync(join(d, f), JSON.stringify(c));
+    writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify(baseCfg));
+    writeFileSync(join(d, 'secrets.json'), '{"v":1}\n'); writeFileSync(join(d, 'app.js'), 'x // TODO\n'); commitAll(d, 'base');
+    writeFileSync(join(d, 'app.js'), 'x\n');                                   // a real source win, protected path untouched
+    writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify(headCfg));
+    commitAll(d, 'head');
+    return d;
+  };
+  // 1. same mandate at both refs -> same fingerprint, nothing flagged (this was FALSE in 0.7.4: base never collected mandates)
+  let d = mk({ linkNodeModules: false, mandates: [MD], metrics: [TODOS] }, { linkNodeModules: false, mandates: [MD], metrics: [TODOS] });
+  let r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'pass');
+  assert.equal(r.gate.fingerprint.base, r.gate.fingerprint.head, 'unchanged mandate must not perturb the fingerprint');
+  assert.ok(!r.gate.changed);
+  rmSync(d, { recursive: true, force: true });
+  // 1b. the same, with the mandate INHERITED through extends at both refs
+  const inh = { linkNodeModules: false, extends: './base.json', metrics: [TODOS] };
+  d = mk(inh, inh, { 'base.json': { mandates: [MD], metrics: [] } });
+  r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.gate.fingerprint.base, r.gate.fingerprint.head, 'an inherited mandate resolves the same at base and head');
+  assert.ok(!r.gate.changed);
+  rmSync(d, { recursive: true, force: true });
+  // 2. mandate quietly deleted at head -> different fingerprint, gate.changed, and the human report names it
+  d = mk({ linkNodeModules: false, mandates: [MD], metrics: [TODOS] }, { linkNodeModules: false, mandates: [], metrics: [TODOS] });
+  r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.notEqual(r.gate.fingerprint.base, r.gate.fingerprint.head, 'deleting a mandate must change the fingerprint (tamper-evident)');
+  assert.equal(r.gate.changed, true);
+  assert.equal(conformsToContract(r).ok, true, conformsToContract(r).errors.join('; '));
+  const cli = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.match(cli.out, /gate definition changed/);
+  assert.match(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--markdown']).out, /Gate definition changed/);
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------- integration: zero-config (no config file)
 function bareRepo() {
   const d = mkdtempSync(join(tmpdir(), 'pw-zc-'));

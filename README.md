@@ -225,7 +225,7 @@ Some rules are not a metric at all, they are a hard line: *never touch `src/auth
   "metrics": [ /* ... */ ] }
 ```
 
-A mandate is deterministic (a path match on the diff, zero-LLM), rides at the top of the report, and **inherits through `extends`** so a parent scope's hard rule holds for every repo beneath it. It is folded into the gate fingerprint, so quietly deleting a mandate to pass is itself a tracked, tamper-evident change. This is the line between a contract and a request: `AGENTS.md` can *ask* an agent not to touch auth; a mandate *will not let the change past the gate*.
+A mandate is deterministic (a path match on the diff, zero-LLM), rides at the top of the report, and **inherits through `extends`** so a parent scope's hard rule holds for every repo beneath it. It is folded into the gate fingerprint at both refs, so quietly deleting a mandate to pass changes the fingerprint: the report records `gate.changed: true` and prints a "gate definition changed" line, a tracked, tamper-evident change. (Before 0.7.5 the base-ref fingerprint did not include mandates, so this was recorded backwards: an unchanged mandate read as a changed gate and a deleted one did not.) This is the line between a contract and a request: `AGENTS.md` can *ask* an agent not to touch auth; a mandate *will not let the change past the gate*.
 
 ## Trust model, the point of the whole thing
 
