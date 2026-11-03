@@ -1,6 +1,6 @@
 # Example: AI Feature Reliability gate
 
-A self-contained demo of PromptWheel gating a sample AI feature (an intent classifier) across three commits - **v1 → improved v2 → a regression** - measuring eval pass-rate, est. $/run, and latency.
+A self-contained demo of PromptWheel gating a sample AI feature (an intent classifier) across three commits - **v1 → improved v2 → a regression** - measuring eval pass-rate, est. cost per run, and latency.
 
 ```bash
 ./run-demo.sh

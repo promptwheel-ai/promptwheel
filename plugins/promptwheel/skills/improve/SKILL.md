@@ -7,7 +7,7 @@ allowed-tools: ["Bash(promptwheel:*)"]
 Run one gated improvement attempt with PromptWheel.
 
 1. Run via Bash: `promptwheel improve --attempt "$ARGUMENTS"`
-2. If `promptwheel` is not found, stop and tell me to install the `promptwheel` package from npm globally; do not install it yourself.
+2. If `promptwheel` is not found, stop and tell me; I will set it up myself (promptwheel.com has the one line). Do not set it up for me.
 3. Interpret the exit code (the loop contract, the same codes as `promptwheel run`):
    - **exit 0** - kept: a metric improved beyond noise; the change was committed.
    - **exit 1** - regression: a guarded metric regressed (or a mandate was violated); the change was reverted.

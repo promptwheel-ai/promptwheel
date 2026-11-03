@@ -34,7 +34,7 @@ Coverage gains legitimately live in *tests*, so mark it **`gamingCheck: false`**
 ```
 A smaller bundle that came from **relaxing the size config** rather than the source evaporates on the re-run.
 
-## LLM eval (pass-rate + $/run) - the flagship
+## LLM eval (pass rate and cost per run) - the flagship
 See **[`reliability-sprint/`](reliability-sprint/)** - gates `eval_pass_rate` (up) and `cost_per_run_usd` (down). Catches a higher pass-rate bought by **deleting hard eval cases, editing the golden answers, or mocking the scorer** - all caught in [`../bench/RESULTS.md`](../bench/RESULTS.md).
 
 ---
