@@ -46,7 +46,7 @@ Each pattern ships with its own false-positive guards (the `exclude` regexes).
 
 This is the **regex-portable** slice. The other ~75 recommended invariants
 (auth-enforcement, authz-revocation, tenant-isolation, dataflow-tainted sinks)
-need the AST + dataflow engine and are the follow-up - see the decant note in
-`explorations/`. The point of v0.1 is the architecture: security invariants are
+need an AST + dataflow engine and are a possible follow-up, not part of this
+pack. The point of v0.1 is the architecture: security invariants are
 now a first-class, un-gameable PromptWheel metric. Zero dependencies; the scanner
 is one file (`scan.mjs`).

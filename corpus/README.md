@@ -14,7 +14,6 @@ No per-repo test-quality findings are produced or published - this measures
   2026-07-02 (same three probes, same harness - a thin wrapper over `sweep-100.sh` with `LIST`/`W`
   overridden). ~3 h. `repos-150.txt` is the 100-row baseline verbatim + 50 verified rows appended,
   so it is a strict superset (the 100-row prefix stays byte-identical for baseline comparison).
-- `results-100-v0.2.1.jsonl` - the raw run that produced the 0.2.2 findings (baseline snapshot).
 - `sweep-{300,500,1000}.sh` + `repos-{300,500,1000}.txt` - one-time **scale-hardening sweeps**
   (2026-07-06), thin wrappers over `sweep-100.sh` via `LIST`. Run to validate saturation at scale;
   the 100→1,000 expansion surfaced **no new failure class**. These are rerunnable but are NOT part

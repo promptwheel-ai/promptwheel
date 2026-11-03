@@ -17,7 +17,7 @@ run_gate() { # $1=dir $2=extra_path $3=label; echoes "exit|secs|verdict|flag|ine
   local verdict=$(grep -oE 'VERDICT: [A-Z]+' <<<"$out" | head -1 | cut -d' ' -f2)
   [ $code -eq 124 ] && verdict=TIMEOUT
   local flag=$(grep -oE '(GUARD✗|GAMED)' <<<"$out" | head -1)
-  local inert=no; grep -q 'never passed at either ref' <<<"$out" && inert=yes
+  local inert=no; grep -q 'never ran (same value at both refs)' <<<"$out" && inert=yes
   echo "${code}|${secs}|${verdict:-none}|${flag:-none}|${inert}"
   { echo "--- $label (exit=$code, ${secs}s) ---"; tail -20 <<<"$out"; } >> "$W/logs/$(basename $d).log"
 }

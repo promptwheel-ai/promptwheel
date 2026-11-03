@@ -47,7 +47,7 @@ run_one() {
     local failed=$(grep 'GUARD✗' <<<"$o" | awk '{print $2}' | paste -sd, -)
     local gamed=no; grep -q '🚩 GAMED' <<<"$o" && gamed=yes
     local apfail=no; grep -q 'did not apply cleanly' <<<"$o" && apfail=yes
-    local inert=no; grep -q 'never passed at either ref' <<<"$o" && inert=yes
+    local inert=no; grep -q 'never ran (same value at both refs)' <<<"$o" && inert=yes
     echo "{\"repo\":\"$repo\",\"lang\":\"$lang\",\"commit\":\"${c:0:8}\",\"exit\":$code,\"secs\":$secs,\"verdict\":\"${verdict:-none}\",\"failed_guards\":\"${failed:-}\",\"gamed\":\"$gamed\",\"apply_failed\":\"$apfail\",\"inert\":\"$inert\"}" >> "$out"
     { echo "=== $c (exit=$code, ${secs}s)"; tail -15 <<<"$o"; } >> "$W/logs/$name.log"
   done

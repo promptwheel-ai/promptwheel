@@ -1,6 +1,6 @@
 # PromptWheel - working notes for agents
 
-**What this is now:** the **per-turn reward signal for AI coding loops** (and the **outcome gate for AI code** in CI) - a tiny CLI that proves a change *moved a measurable metric without regressing another*. It is the signal a loop *consumes*, not the loop driver. It is NOT (anymore) an agent orchestrator. That product was retired in June 2026 because base tools (Claude Code Workflows/subagents/hooks/Routines, Cursor) commoditized orchestration. See `docs/VISION.md` for the full why.
+**What this is now:** the **per-turn reward signal for AI coding loops** (and the **outcome gate for AI code** in CI) - a tiny CLI that proves a change *moved a measurable metric without regressing another*. It is the signal a loop *consumes*, not the loop driver. It is NOT (anymore) an agent orchestrator. That product was retired in June 2026 because base tools (Claude Code Workflows/subagents/hooks/Routines, Cursor) commoditized orchestration. See `docs/history/VISION.md` for the full why.
 
 > The "wheel" = the **improvement flywheel**: every turn only counts if it provably improved something. The outcome gate is the hub.
 
@@ -17,9 +17,8 @@
 
 - `bin/promptwheel.mjs` - the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict + `--detect-gaming` source-only re-run; commands run/improve/insights/playbook/suggest/backfill/init/guards). ~870 LOC.
 - `promptwheel.config.json` - example metrics config.
-- `docs/VISION.md` - why we pivoted, the thesis, the moat, open-core model.
-- `docs/ROADMAP.md` - phased plan + the guardrails (ship thin, the window is closing).
 - `docs/ARCHITECTURE.md` - how the engine works, schemas, the trust model.
+- `docs/history/` - the original pivot rationale (`VISION.md`) and the phased plan (`ROADMAP.md`); historical, not maintained.
 
 ## Run / verify
 
