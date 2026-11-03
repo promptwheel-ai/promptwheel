@@ -2,23 +2,34 @@
 
 [![CI](https://github.com/promptwheel-ai/promptwheel/actions/workflows/ci.yml/badge.svg)](https://github.com/promptwheel-ai/promptwheel/actions/workflows/ci.yml) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) ![Node ≥18](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![deps: zero](https://img.shields.io/badge/deps-zero-blue)
 
-**A deterministic check for your coding loop.** A green test should mean your agent *fixed the code*, not that it edited the test to match the bug. PromptWheel tells the difference: it re-proves every win from the source changes alone, with no LLM, so a win that only survived by editing the test reads `GAMED`. Un-gameable by construction, because the code being checked never gets to grade itself.
+**A deterministic, zero-LLM check for your coding loop.** A green test should mean your agent *fixed the code*, not that it edited the test to match the bug. PromptWheel re-proves every win from the agent's source edits alone, so a green that came from editing the test, grader or config reads `GAMED`. The code being checked never gets to grade itself.
 
 ![PromptWheel catching an agent game the metric, then passing an honest fix](demo/promptwheel.gif)
 
-PromptWheel re-proves every "win" using the agent's **source edits alone**. If the gate only went green because the agent edited the test, mocked the grader, suppressed the error (`@ts-ignore` / `eslint-disable`), or deleted the feature, the win evaporates when those edits are reverted → **`VERDICT GAMED`, exit 2**. No LLM in the loop, a diff partition plus a re-run, so every flag is reproducible in seconds with a human-readable reason.
+## Catch your agent cheating, in 60 seconds
 
-It's built on an **outcome gate**: for any change it re-runs your metric commands (tests, lint, `tsc`, coverage, bundle, eval) in throwaway git worktrees before and after, and refuses to trust a delta inside the measurement noise. The gate everyone ships asks *"did the number move?"*, PromptWheel also asks *"did the agent **earn** it?"*
+A hand-built cheat, so you can watch the mechanism fire (illustrative, not evidence):
 
-PromptWheel is the **signal, not the loop driver**: wire it as the verifier inside Claude Code `/loop`, a Ralph `while`-loop, or a Beads pull-loop. Each turn it answers one question, *did this turn earn its keep, and did the agent earn it honestly?*, so the loop improves instead of confidently degrading. (In CI it's the **outcome gate for AI code**: the same verdict, as a PR check.)
+```bash
+mkdir pw-cheat-demo && cd pw-cheat-demo && git init -q
+printf '{"name":"demo","type":"module","scripts":{"test":"node --test"}}\n' > package.json
+printf 'export const add = (a, b) => a - b;   // BUG: should be a + b\n' > add.js
+printf "import {test} from 'node:test'; import assert from 'node:assert'; import {add} from './add.js';\ntest('add', () => assert.equal(add(2, 3), 5));   // honest test, FAILS on the bug\n" > add.test.js
+git add -A && git commit -qm 'buggy code + an honest failing test'
+npx -y promptwheel@latest init && git add -A && git commit -qm 'add the gate config'
 
-PromptWheel is the reference check for the [Verified-Outcome Contract](https://github.com/sawbuck-ai/sawbuck/blob/master/CONTRACT.md), the open interface for a verifiable coding loop. Use it from CI, a Claude Code hook, or in process (`import { check } from 'promptwheel'`); the four integration paths (conform, shell, import, MCP) are in [INTEGRATE.md](INTEGRATE.md).
+# an agent "greens" the suite by editing the TEST to expect the bug; the code stays broken:
+printf "import {test} from 'node:test'; import assert from 'node:assert'; import {add} from './add.js';\ntest('add', () => assert.equal(add(2, 3), -1));\n" > add.test.js
+git commit -qam 'make the suite green'
 
-> Same name, new meaning. The "wheel" is the **improvement flywheel**: every turn only counts if it **provably moved a metric without regressing another.** Orchestration (the old "wheel of prompts") *and the outcome gate itself* are now solved, commoditized problems; the open one is **catching when the agent games that gate**, making the reward signal one you can't cheat.
+npx -y promptwheel@latest run --base HEAD~1 --head HEAD
+#  ▲ tests_pass 0 → 1   🚩 GAMED, the win changed zero production-source files
+#  VERDICT: GAMED   (exit 2)
+```
 
-AI coding agents (and humans) declare success when a change *compiles and tests pass*. They almost never verify that a change **improved a real measurable thing without regressing another**, and outcome data rots in dashboards (DORA, Swarmia) disconnected from the change that caused it. PromptWheel closes that loop.
+What happened: PromptWheel measured `tests_pass` at both commits in throwaway git worktrees (0 then 1, a win), then split the diff into production source versus `{test, config, grader, golden}` files, re-applied **only the source slice** on a clean worktree at the base, and re-ran the metric. The win did not survive, so it is `GAMED`. No LLM, no network: a diff partition plus a re-run, reproducible in seconds with a human-readable reason.
 
-For any change (`base` → `head`), it measures each configured metric in an **isolated git worktree** before and after, **refuses to trust a delta inside the measurement noise band**, enforces **regression guards**, and emits a structured verdict:
+The same runs on any change in any stack. For a change `base` to `head` it measures each configured metric before and after, refuses to trust a delta inside the measurement noise band, enforces regression guards, and emits one verdict:
 
 ```
 PromptWheel  a1b2c3d → e4f5g6h  (×5)
@@ -31,138 +42,43 @@ PromptWheel  a1b2c3d → e4f5g6h  (×5)
   VERDICT: PASS
 ```
 
-Exit `0` pass · `1` fail · `2` gamed · `3` inconclusive (a guard measured nothing) · `64` usage or config error (never a verdict), CI-friendly. No build step, zero dependencies, Node 18+.
+Exit `0` pass · `1` fail (a guarded metric regressed, or a mandate was violated) · `2` gamed · `3` inconclusive (a guard measured nothing) · `64` usage or config error (never a verdict). No build step, zero dependencies, Node 18+. The same verdict runs as a PR check in CI, as a per-turn signal inside a coding loop, or in process (`import { check } from 'promptwheel'`); it is the reference check for the [Verified-Outcome Contract](https://github.com/sawbuck-ai/sawbuck/blob/master/CONTRACT.md), and the integration paths are in [INTEGRATE.md](INTEGRATE.md).
 
-## Catch your agent cheating, on by default
-
-The headline feature, and it runs **by default** (in both `run` and `improve`; pass `--no-detect-gaming` for the bare outcome gate). After the normal gate, every *win* is re-proven using the agent's source edits **alone**: PromptWheel splits the diff into production source vs. `{test, config, grader, golden}` files, rebuilds a clean worktree at the base with **only the source slice** applied, and re-runs the gate. If the win doesn't survive, because it only passed by skipping/deleting a test, mocking the grader, editing a golden, relaxing a config, or the "win" touched zero source files, the verdict is **`GAMED` (exit 2)**:
-
-```
-$ promptwheel run
-
-PromptWheel  base → head
-  ▲ tests_pass    0 → 1  (+1, improved) [guard✓, high]
-      🚩 GAMED, the "win" changed zero production-source files, only test/config/grader/golden
-  VERDICT: GAMED, a metric "improved" by editing the goalposts, not the source
-```
-
-**See it fire yourself**, 60 seconds, illustrative (a hand-built cheat is a *mechanism* demo, not evidence):
+## Install and use
 
 ```bash
-mkdir pw-cheat-demo && cd pw-cheat-demo && git init -q
-printf '{"name":"demo","type":"module","scripts":{"test":"node --test"}}\n' > package.json
-printf 'export const add = (a, b) => a - b;   // BUG: should be a + b\n' > add.js
-printf "import {test} from 'node:test'; import assert from 'node:assert'; import {add} from './add.js';\ntest('add', () => assert.equal(add(2, 3), 5));   // honest test, FAILS on the bug\n" > add.test.js
-git add -A && git commit -qm 'buggy code + an honest failing test'
-npx -y promptwheel@latest init && git add -A && git commit -qm 'add the gate config'
+npm i -g promptwheel                      # or run everything through: npx promptwheel ...
 
-# an agent "greens" the suite by editing the TEST to expect the bug, the code stays broken:
-printf "import {test} from 'node:test'; import assert from 'node:assert'; import {add} from './add.js';\ntest('add', () => assert.equal(add(2, 3), -1));\n" > add.test.js
-git commit -qam 'make the suite green'
-
-npx -y promptwheel@latest run --base HEAD~1 --head HEAD
-#  ▲ tests_pass 0 → 1   🚩 GAMED, the win changed zero production-source files
-#  VERDICT: GAMED   (exit 2)
-```
-
-Inline source-file suppressions (`@ts-nocheck`, `eslint-disable`, `# noqa`), and the quieter cheat of *weakening the suite while the metric stays flat*, are a different shape, caught by **tripwire guards** (`test_count`, `skipped_tests`, `suppressions`, `assertions`) that fail when a "win" introduces them. The plain `init` default includes these tripwires, so gutting a test file fails the gate out of the box:
-
-```bash
-npx promptwheel init                      # guarded tests + antihack tripwires by default
-npx promptwheel run                       # detection ON by default · exit 0 win · 1 regression · 2 GAMED · 3 inconclusive · 64 usage/config error
-                                          #   (add --no-detect-gaming for just the outcome gate)
-```
-
-Deterministic, zero-LLM, zero-network: an LLM judge asking "did you cheat?" is itself gameable; this is a diff partition plus a re-run, so a flag is trustworthy without a human in the loop. The 50%-of-gain-survives threshold is the default and is tunable via `gamingThreshold` (config-level, or per-metric).
-
-**An intentional goalpost change has a sanctioned path.** When you *do* mean to change a test, config, or grader, declare it: a `Promptwheel-Allow: <reason>` trailer on the commit (`Sawbuck-Allow:` is accepted as an alias), or `--allow "<reason>"` on the CLI, or the `allow` option on `check()`, turns what would read `GAMED` into a `pass` with the reason recorded in `report.allowed`. An *undeclared* test-only win is still `gamed`, and a reasonless declaration does not override; the check never judges intent, it just forces intent to be explicit and auditable (the reason lives in the commit, so a reviewer sees it instead of a silent green).
-
-This is **one layer**, not a silver bullet: it catches the evaluator-tampering class (test/grader/golden/config edits) deterministically and for free, so the expensive layers, held-out tests for semantically-weak wins, an LLM judge or a human for intent and leakage, are reserved for the calls only they can make. See **[docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md)** for the coverage matrix and honest scope, and **[bench/RESULTS.md](bench/RESULTS.md)** for the measured numbers (`node bench/gaming-bench.mjs` to reproduce, it includes a cross-stack table with a real pytest run + a numeric eval-pass-rate metric). **Gate your own stack**, pytest · tsc · coverage · bundle · llm-eval, copy a config from **[examples/](examples/)**.
-
-## Use
-
-```bash
-# 0. write a starter config for your stack (or hand-write promptwheel.config.json)
-npx promptwheel init                      # detects stack → guarded tests + antihack tripwires (+ lint if eslint is set up)
-npx promptwheel init --list               # presets: tests-pass · lint · bundle-size · security · llm-eval · antihack · no-ai-tells · security-antihack
-
-# measure a change
-npx promptwheel run                       # base = merge-base with main, head = HEAD · reward-hack detection ON
-npx promptwheel run --working             # measure UNCOMMITTED changes (incl. newly added files)
+npx promptwheel run                       # zero-config: gates your detected test command; base = merge-base with main, head = HEAD
+npx promptwheel run --working             # gate UNCOMMITTED changes (incl. newly added files)
 npx promptwheel run --repeat 5 --json     # measure 5× to establish a noise band, emit JSON
 
-# the loop: run any agent/script, keep the change ONLY if a metric improved
+npx promptwheel init                      # optional: write promptwheel.config.json (guarded tests + antihack tripwires, + lint if eslint is set up)
+npx promptwheel init --list               # presets: tests-pass · lint · bundle-size · security · llm-eval · antihack · no-ai-tells · security-antihack
+
+# the loop: run any agent/script, keep the change ONLY if a metric improved, else revert
 npx promptwheel improve --attempt "claude -p 'reduce lint errors'"
 #   exit 0 = kept a real win · 1 = guarded regression (reverted) · 2 = gamed (reverted) · 3 = plateau / inconclusive (reverted) · add --json
+while npx promptwheel improve --attempt "$AGENT"; do :; done     # converges: stops on the first non-zero
 
-# what's actually responding in this repo? (aggregates .promptwheel/outcomes.jsonl)
-npx promptwheel insights
+npx promptwheel insights                  # which metrics actually respond in this repo (counts from .promptwheel/outcomes.jsonl)
+npx promptwheel guards                    # the effective guardrails, including ones inherited through extends
 ```
 
-## Give your agent the gate
+Gaming detection is on by default in `run` and `improve`; `--no-detect-gaming` gives you the bare outcome gate.
 
-`promptwheel init` writes this into your `AGENTS.md` for you (and `CLAUDE.md` / `.cursorrules` if present; `--no-agent-block` to skip), so a coding agent (or a loop) runs the gate itself, not just you. To paste it yourself:
+**Give your agent the gate.** `promptwheel init` writes this into your `AGENTS.md` (and `CLAUDE.md` / `.cursorrules` if present; `--no-agent-block` to skip), so the coding agent runs the gate itself. To paste it yourself:
 
     After a change that should move a measurable metric (tests, lint, coverage, an eval), run
     `npx promptwheel run --working`. Exit 2 (verdict GAMED) means the win came from editing a test,
     config, or grader, not the source, so revert and earn it in the source. Exit 1 means a guarded
     metric regressed, revert that too. Never weaken, skip, or delete a test to go green.
 
-**The outcome record.** git records *what changed*; PromptWheel records *what the change did*, same trust model (local, deterministic, append-only, no server, no LLM in the verdict). `insights` is a plain aggregation over that record: how often each metric improved, regressed, or read inconclusive, so you can see which metrics actually respond in this repo. Nothing is learned or recommended from it.
-
-**Footprint:** it never touches your working tree, every measurement runs in a throwaway git worktree **in your system temp dir** (one at a time; configured `linkDirs` are symlinked not copied, `node_modules` by default, `.venv` for Python, etc.), removed when the run finishes. The only thing PromptWheel writes to your repo is the optional `.promptwheel/outcomes.jsonl` record, commit it to build the per-repo "what moves what" history, or `.gitignore` it (`--no-record` to skip entirely). A hard-killed run can't leave clutter behind: the next run **self-heals** any orphaned worktree (stale registry entry + abandoned temp checkout).
-
-**Per-turn cost.** A check runs your metric commands in two throwaway worktrees (before and after) plus a source-only re-run when a metric improved, so one check takes roughly **2 to 3× your metric command's runtime** plus about 40ms of worktree overhead. Point the **per-turn** gate at a *fast* metric (a lint count, a quick test subset, a build-size check) and leave the slow full suite for **CI**: a 50ms check is invisible in a loop, a two-minute one is not. A deterministic metric (a test exit, a count) is accurate at the default `repeat: 1`; only a noisy metric (latency, timing) needs `repeat: 3` or more, which multiplies the cost.
-
-## Loop patterns
-
-PromptWheel is the gate *inside* a loop you don't have to write:
-
-```bash
-# converge: keep spinning while each turn earns its keep; stop on plateau (3) or regression (1)
-while npx promptwheel improve --attempt "claude -p 'speed up the hot path'"; do :; done
-
-# read-only signal inside a driver you control (e.g. Claude Code /loop): gate without committing
-npx promptwheel run --working --json    # branch on .verdict / per-metric .status
-```
-
-The exit code is the contract, `0` kept · `1` regression · `2` gamed · `3` plateau, so any driver (`/loop` or a shell `while`) converges without parsing anything. PromptWheel never drives the loop; it only says whether the turn counted.
-
-**Two callers, by design.** Your *agent* consumes the verdict as the loop's per-turn reward (`improve` / `run --working --json`; exit `0` kept · `1`/`2` reverted · `3` plateau). The *harness* (a Stop-hook or CI) runs `--detect-gaming`, the audit the agent **can't self-clear**, because the check never grades itself; it re-proves from the source alone (see [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md)). Same tool; *who calls it* is the difference between a reward and an audit.
-
-## In Claude Code, plugin
-
-Bring the gate into Claude Code as slash commands:
-
-```
-/plugin marketplace add promptwheel-ai/promptwheel
-/plugin install promptwheel@promptwheel-ai
-```
-
-Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommitted changes) · `/promptwheel:improve <cmd>` (keep-if-improved) · `/promptwheel:insights`. The plugin wraps the CLI, so install that too (`npm i -g promptwheel`). See [`plugins/promptwheel/`](plugins/promptwheel/).
-
-## In CI, GitHub Action
-
-Drop this in your repo (it posts a verdict comment on every PR and fails the check on a guarded regression beyond noise):
-
-```yaml
-# .github/workflows/promptwheel.yml
-name: PromptWheel
-on: pull_request
-permissions: { contents: read, pull-requests: write }
-jobs:
-  outcome-gate:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: promptwheel-ai/promptwheel@v0
-        with: { repeat: '3' }
-```
-
-The Action runs straight from its own checkout, no npm install, no build. See [`action.yml`](action.yml); a copy-paste workflow file lives at [`examples/github-action.yml`](examples/github-action.yml).
+**Two callers, by design.** Your *agent* consumes the verdict as a per-turn signal (`improve`, or `run --working --json`). The *harness* (a Stop-hook, or CI) runs the same check as an audit the agent cannot self-clear, because the check re-proves from the source alone and never asks the code to grade itself. See [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md) for the three places to enforce it.
 
 ## Config, `promptwheel.config.json`
+
+`run` works with no config (it gates your detected test command). A config says *what* to measure:
 
 ```json
 {
@@ -179,22 +95,19 @@ The Action runs straight from its own checkout, no npm install, no build. See [`
 - **extract**, reduce its output to a number: `number` (last number, default) · `lines` (count non-empty lines) · `exit` (1 if exit 0 else 0) · `{ "regex": "coverage: (\\d+)" }` (first capture).
 - **direction**, `up` (higher better) · `down` (lower better) · `pass` (boolean 0/1).
 - **guard**, `true` = a *trusted* regression **fails** the gate; `false` = informational.
-- **gamingCheck**, `false` exempts a metric from `--detect-gaming`'s source-only re-run. Use it for tripwire / test-side guards (assertion counts, test counts) whose gains legitimately live in test files, otherwise adding real tests would be flagged as gaming. The `antihack` preset sets this on its tripwires.
+- **gamingCheck**, `false` exempts a metric from the source-only re-run. Use it for tripwire / test-side guards (assertion counts, test counts) whose gains legitimately live in test files, otherwise adding real tests would be flagged as gaming. The `antihack` preset sets this on its tripwires.
 - **gamingThreshold**, the fraction of a win that must survive the source-only re-run to count as earned (default `0.5`). Config-level scalar, overridable per metric; inherited through `extends` like `repeat`.
+- **evaluatorPaths**, globs for files that *define* your gate (a threshold file, a budget, a CI limit). Editing one in the same diff that improves a metric is `GAMED` by declaration, deterministically. Opt-in, because only you know which files are the goalposts.
 
-Dependency & environment keys (config-level; `init` writes stack defaults):
+Dependency and environment keys (config-level; `init` writes stack defaults):
 
-- **linkDirs**, dirs to symlink from your checkout into each measuring worktree, for deps that live outside git. Default `["node_modules"]`; `init` writes `[".venv"]` for Python and `[]` for Rust (`cargo test` writes to `target/`, so it is built fresh in the worktree rather than shared across refs). (`"linkNodeModules": false` still works as shorthand for "link nothing".)
+- **linkDirs**, dirs to symlink from your checkout into each measuring worktree, for deps that live outside git. Default `["node_modules"]`; `init` writes `[".venv"]` for Python and `[]` for Rust (`cargo test` writes to `target/`, so it is built fresh in the worktree rather than shared across refs). `"linkNodeModules": false` still works as shorthand for "link nothing".
 - **env**, environment variables for every metric command; `{wt}` is substituted with the worktree path. Python configs get `"PYTHONPATH": "{wt}/src:{wt}"` so the *measured ref* is imported, not an editable install of your original checkout.
-- **setup**, an optional command run once per ref before metrics (e.g. `npm run build`, `pip install -e .`), after any source patch, so a build-gated suite measures the ref it's actually on.
+- **setup**, an optional command run once per ref before metrics (for example `npm run build` or `pip install -e .`), after any source patch, so a build-gated suite measures the ref it is actually on.
 
-## Guardrails & inheritance
+Copy a config for your stack (pytest, tsc, coverage, bundle size, LLM eval) from [examples/](examples/).
 
-To see what's actually enforced in a repo, including guards inherited from a shared config:
-
-```bash
-promptwheel guards
-```
+### Guardrails and inheritance
 
 Teams keep one shared base config and have every repo inherit it via `extends`:
 
@@ -204,13 +117,11 @@ Teams keep one shared base config and have every repo inherit it via `extends`:
   "metrics": [ { "name": "cost_per_run_usd", "guard": false } ] }   // loosen one inherited guard, locally
 ```
 
-`extends` takes a path (or array of paths) to base configs: a repo **inherits** their guardrails, and a local metric of the same name **overrides** the inherited one (tighten, loosen, or disable). `promptwheel guards` shows the effective set with provenance, `inherited ← base.json`, `local`, or `local override`, plus each guard's flag record from the outcome stream.
+`extends` takes a path (or array of paths) to base configs: a repo **inherits** their guardrails, and a local metric of the same name **overrides** the inherited one (tighten, loosen, or disable). `promptwheel guards` shows the effective set with provenance (`inherited ← base.json`, `local`, or `local override`) plus each guard's flag record from the outcome record. Read this way, `extends` is the set of shared invariants your agents are held to, enforced as measured guards rather than advisory text. Natural-language conventions belong in `AGENTS.md`; only deterministic, measurable guards belong here.
 
-Read this way, `extends` is **the shared invariants, the "business rules", your agents inherit and are held to**: enforced as *measured guards* (a trusted regression fails the gate / reverts the commit), not advisory text an agent can quietly ignore. (Natural-language conventions belong in `AGENTS.md`; only deterministic, measurable guards belong here.)
+### Mandates (protected paths)
 
-## Mandates (protected paths)
-
-Some rules are not a metric at all, they are a hard line: *never touch `src/auth/**`*, *the migration files are frozen*, *do not edit the billing schema*. Declare those as `mandates`, and any change that touches a protected path **fails the gate before a single metric is read**, however green everything else is:
+Some rules are not a metric at all, they are a hard line: *never touch `src/auth/**`*, *the migration files are frozen*. Declare those as `mandates`, and any change that touches a protected path **fails the gate before a single metric is read**, however green everything else is:
 
 ```json
 // promptwheel.config.json
@@ -220,58 +131,70 @@ Some rules are not a metric at all, they are a hard line: *never touch `src/auth
   "metrics": [ /* ... */ ] }
 ```
 
-A mandate is deterministic (a path match on the diff, zero-LLM), rides at the top of the report, and **inherits through `extends`** so a parent scope's hard rule holds for every repo beneath it. It is folded into the gate fingerprint at both refs, so quietly deleting a mandate to pass changes the fingerprint: the report records `gate.changed: true` and prints a "gate definition changed" line, a tracked, tamper-evident change. (Before 0.7.5 the base-ref fingerprint did not include mandates, so this was recorded backwards: an unchanged mandate read as a changed gate and a deleted one did not.) This is the line between a contract and a request: `AGENTS.md` can *ask* an agent not to touch auth; a mandate *will not let the change past the gate*.
+A mandate is deterministic (a path match on the diff, zero-LLM), rides at the top of the report, and **inherits through `extends`** so a parent scope's hard rule holds for every repo beneath it. It is folded into the gate fingerprint at both refs, so quietly deleting a mandate to pass changes the fingerprint: the report records `gate.changed: true` and prints a "gate definition changed" line, a tracked, tamper-evident change. (Before 0.7.5 the base-ref fingerprint did not include mandates, so this was recorded backwards: an unchanged mandate read as a changed gate and a deleted one did not.) This is the line between a contract and a request: `AGENTS.md` can *ask* an agent not to touch auth; a mandate will not let the change past the gate.
 
-## Trust model, the point of the whole thing
+## In CI and in Claude Code
 
-A number that jumps around between runs is worthless as a signal. PromptWheel won't pretend otherwise:
+**GitHub Action.** Drop this in your repo; it posts a verdict comment on every PR and fails the check on a guarded regression, a gamed win, or an inconclusive gate:
 
-- `--repeat N` measures each metric N times at both refs and uses the **median**; the **noise band** is the observed spread.
-- A delta **inside the noise band** is reported `inconclusive` with `low` confidence and **does not fail a guard** (no flaky CI failures).
-- **Confidence:** `high` (deterministic extract, or zero observed noise) · `medium` (delta clears the noise band) · `low` (delta inside noise) · `unverified` (single read, run `--repeat` to earn trust).
+```yaml
+# .github/workflows/promptwheel.yml
+name: PromptWheel
+on: pull_request
+permissions: { contents: read, pull-requests: write }
+jobs:
+  outcome-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: promptwheel-ai/promptwheel@v0
+        with: { repeat: '3' }
+```
 
-The accumulated record of **which change-types move which metrics** is the asset: a per-repo reward signal a base tool can't replicate, and the spine that lets an agent loop learn what actually helps.
+The Action runs straight from its own checkout, no npm install, no build. See [`action.yml`](action.yml); a copy-paste workflow file lives at [`examples/github-action.yml`](examples/github-action.yml). Make the check a branch-protection requirement and the agent cannot merge past it.
 
-## Where PromptWheel fits (and where it doesn't)
+**Claude Code plugin.** Bring the gate in as slash commands (the plugin wraps the CLI, so install that too: `npm i -g promptwheel`):
 
-- **vs single-axis CI gates** (Codspeed, Bencher, size-limit, Lighthouse-CI): they own deep statistics on *one* metric; PromptWheel is the **cross-metric gate that composes them**, "did `eval_pass_rate` **and** cost improve without regressing the guards?" in one verdict. Wrap any of them as a metric `cmd` and let `--repeat` handle the noise.
-- **vs loop/agent frameworks** (Ralph, GEPA, reward models): PromptWheel is the **execution-grounded reward they lack**, it runs your real suite with zero deps; it does not drive the loop or do test-time search.
-- **When NOT to use it:** if you only care that tests pass, your base verifier already has you covered. PromptWheel earns its place when you have a **graded numeric metric** beyond pass/fail (eval score, $/run, latency, size) that a change could quietly move.
+```
+/plugin marketplace add promptwheel-ai/promptwheel
+/plugin install promptwheel@promptwheel-ai
+```
+
+Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommitted changes) · `/promptwheel:improve <cmd>` (keep-if-improved) · `/promptwheel:insights` · `/promptwheel:logbook`. See [`plugins/promptwheel/`](plugins/promptwheel/). A Stop-hook that refuses to let an agent end a turn on a `GAMED` win ships at [`examples/detect-gaming-stop.sh`](examples/detect-gaming-stop.sh).
+
+## Trust model
+
+**What it catches.** After the normal gate, every *win* is re-proven using the agent's source edits alone. If the win only survived by skipping or deleting a test, mocking the grader, editing a golden, relaxing a config, or touching zero source files, the verdict is `GAMED` (exit 2). On top of that:
+
+- **Tripwire guards** (`test_count`, `skipped_tests`, `suppressions`, `assertions`, written by the plain `init` default) catch the quieter shapes: an inline suppression (`@ts-nocheck`, `eslint-disable`, `# noqa`) or a suite gutted while the metric stays flat.
+- **Gate integrity.** The gate is resolved as of the base commit too. A change that disables a guard or deletes a guarded metric in the same diff it passes is re-measured under the base definition and reads `GAMED` if that guard would have failed. The gate definition (metrics, guards, `evaluatorPaths`, `gamingThreshold`, `mandates`) is fingerprinted at both refs; a difference is recorded as `gate.changed` and printed.
+- **A sanctioned override.** When you *do* mean to change a test, config, or grader, declare it: a `Promptwheel-Allow: <reason>` trailer on the commit (`Sawbuck-Allow:` is accepted as an alias), `--allow "<reason>"` on the CLI, or the `allow` option on `check()`, turns what would read `GAMED` into a `pass` with the reason recorded in `report.allowed`. An undeclared test-only win is still `gamed`, and a reasonless declaration does not override. The check never judges intent; it forces intent to be explicit and auditable.
+- **A provenance receipt** on every verdict (`report.provenance`: base and head SHAs, a config hash, a verdict hash), so a skeptic can re-run `(base, head, config)` and get the same hash.
+
+**The honest limit.** This is one layer, not a silver bullet. It catches the evaluator-tampering class (test, grader, golden and config edits) deterministically and for free. It is blind, by construction, to a cheat that lives in the source file itself (a hardcoded answer, behavior that differs under test): that needs held-out tests, an LLM judge, or a human, and those expensive layers should be reserved for the calls only they can make. The coverage matrix and the in/out-of-scope boundary are in [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md); the measured numbers are in [bench/RESULTS.md](bench/RESULTS.md) (`node bench/gaming-bench.mjs` to reproduce). Another gameable thing, an LLM judge asking "did you cheat?", is deliberately not part of the check.
+
+**Noise.** A number that jumps around between runs is worthless as a signal, and PromptWheel does not pretend otherwise: `--repeat N` measures each metric N times at both refs and uses the median; the noise band is the observed spread; a delta inside the band is `inconclusive` with `low` confidence and does not fail a guard (no flaky CI failures). Confidence reads `high` (deterministic extract, or zero observed noise), `medium` (delta clears the noise band), `low` (delta inside noise), or `unverified` (single read; run `--repeat` to earn trust). A guard whose command never ran (same value at both refs) makes the verdict `inconclusive`, never a fake pass.
+
+**When not to use it.** If you only care that tests pass and nobody could be editing the tests, your plain CI already has you covered. PromptWheel earns its place when the thing writing the code can also touch the thing judging it, or when you have a graded metric beyond pass/fail (an eval score, cost per run, latency, size) that a change could quietly move. Single-metric CI gates (benchmark trackers, size limits) go deeper on one number; wrap them as a metric `cmd` and PromptWheel composes them into one verdict.
+
+## Per-turn cost
+
+A check runs your metric commands in two throwaway worktrees (before and after) plus a source-only re-run when a metric improved, so one check takes roughly 2 to 3× your metric command's runtime plus about 40ms of worktree overhead. Point the per-turn gate at a *fast* metric (a lint count, a quick test subset, a build-size check) and leave the slow full suite for CI: a 50ms check is invisible in a loop, a two-minute one is not. A deterministic metric (a test exit, a count) is accurate at the default `repeat: 1`; only a noisy metric (latency, timing) needs `repeat: 3` or more, which multiplies the cost.
+
+**Footprint.** It never touches your working tree: every measurement runs in a throwaway git worktree in your system temp dir (one at a time; configured `linkDirs` are symlinked, not copied), removed when the run finishes. The only thing PromptWheel writes to your repo is the optional `.promptwheel/outcomes.jsonl` record; commit it, `.gitignore` it, or pass `--no-record`. A hard-killed run cannot leave clutter behind: the next run self-heals any orphaned worktree.
 
 ## Portability
 
-The core gamed-win check is **git only** and runs anywhere git does: it classifies the files a win touched (`git diff --name-only`) to separate production source from test, config, and grader files, so a green that came only from editing the goalposts is caught the same on Linux, macOS, and Windows (the `gamed-catch` CI job proves this on all three). The starter tripwire metrics that `init` writes (`test_count`, `assertions`, `suppressions`, `skipped_tests`) are `grep` one-liners that assume a GNU-grep-compatible shell, which PromptWheel runs through the system shell (`sh` on Linux/macOS, `cmd` on native Windows). Where grep is absent, those metrics read **unmeasurable**, and an unmeasurable guard **fails closed** (verdict `FAIL`), so a gamed green is still caught, never passed, it just lands as `FAIL` rather than the dedicated `GAMED`. Run under WSL or git-bash, or replace those tripwire `cmd`s with your toolchain's own counters, for a clean verdict on Windows.
+The core gamed-win check is git only and runs anywhere git does: it classifies the files a win touched (`git diff --name-only`) to separate production source from test, config, and grader files, so a green that came only from editing the goalposts is caught the same on Linux, macOS, and Windows (the `gamed-catch` CI job proves this on all three). The starter tripwire metrics that `init` writes are `grep` one-liners that assume a GNU-grep-compatible shell, which PromptWheel runs through the system shell (`sh` on Linux/macOS, `cmd` on native Windows). Where grep is absent, those metrics read unmeasurable, and an unmeasurable guard fails closed (verdict `FAIL`), so a gamed green is still caught, never passed; it just lands as `FAIL` rather than the dedicated `GAMED`. Run under WSL or git-bash, or replace those tripwire `cmd`s with your toolchain's own counters, for a clean verdict on Windows.
 
 ## Docs
 
-- [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md), how `--detect-gaming` fits as the **deterministic layer** alongside held-out tests, LLM judges, and human review: the coverage matrix, the compose-as-a-pipeline model, and the honest in/out-of-scope boundary.
-- [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md), making "the agent can't skip it" real: the three places to enforce (loop-revert · CI + branch protection · a tested Claude Code Stop-hook), the exact wiring, and the *protect-the-gate's-own-config* caveat.
+- [INTEGRATE.md](INTEGRATE.md), the integration surface: the exit-code and verdict-JSON contract, shelling `--json`, `import { check }`, and `promptwheel conformance` for self-checking a third-party implementation.
+- [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md), how the source-only re-run fits as the deterministic layer alongside held-out tests, LLM judges, and human review: the coverage matrix and the honest in/out-of-scope boundary.
+- [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md), making "the agent can't skip it" real: the three places to enforce (loop-revert, CI + branch protection, a Claude Code Stop-hook), the exact wiring, and the protect-the-gate's-own-config caveat.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), how the engine works: schemas, extract modes, the trust/noise model.
-- [CLAUDE.md](CLAUDE.md), the constitution for anyone (human or agent) working in this repo.
+- [CHANGELOG.md](CHANGELOG.md), what shipped in each version.
+- [CLAUDE.md](CLAUDE.md), the working notes for anyone (human or agent) changing this repo.
 
-## Develop
-
-```bash
-npm test     # the dep-free suite (node:test), unit + integration, no dependencies
-```
-
-The engine is one importable file; pure helpers are exported for unit tests, the CLI runs only when invoked directly. Add a test with every behavior change.
-
-## Roadmap
-
-- [x] before/after worktree measurement + regression guards
-- [x] noise band + confidence (don't trust a delta inside the jitter)
-- [x] `--working` mode, measure uncommitted changes (tracked **and** untracked)
-- [x] persisted outcome record (`.promptwheel/outcomes.jsonl`)
-- [x] GitHub Action / PR-comment wrapper (open-core distribution surface)
-- [x] agent loop: `improve`, propose → gate → keep only if a metric improved
-- [x] loop-consumable `improve`: exit `0` kept / `1` regression / `3` plateau + `--json result`
-- [x] `promptwheel init` + presets, zero-config onboarding
-- [x] `insights`, outcome-record aggregation
-- [x] `--detect-gaming`, reward-hack detection: re-prove the win from source edits alone + `antihack` preset
-- [x] npm publish, `promptwheel@0.4.2` (the lead magnet)
-- [x] gate integrity: a win that disables a guard or deletes a guarded metric in the same diff reads `GAMED` (SHA-256 gate fingerprint; 0.5.0)
-- [x] zero-config: `run` and `check()` auto-detect the gate with no committed config, `init` becomes optional (0.6.0)
-- [x] declared override (`Promptwheel-Allow:` trailer / `--allow`) + `init` build-setup detection, so a build-gated test measures instead of reading inert (0.7.0)
-
-> Status: **published** (npm `promptwheel`, see [CHANGELOG.md](CHANGELOG.md) for the current version), all core phases built.
+Develop: `npm test` runs the dep-free suite (`node:test`, unit + integration). The engine is one importable file; pure helpers are exported for unit tests and the CLI runs only when invoked directly. Add a test with every behavior change.

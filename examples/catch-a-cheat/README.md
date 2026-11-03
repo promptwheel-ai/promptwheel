@@ -23,5 +23,5 @@ Run it:
 ./run-demo.sh      # from a clone; uses the local bin/promptwheel.mjs
 ```
 
-For the npm-flow version (what a newcomer copy-pastes), see the "See it fire yourself"
-block in the top-level [README](../../README.md#catch-your-agent-cheating--on-by-default).
+For the npm-flow version (what a newcomer copy-pastes), see the 60-second block in the
+top-level [README](../../README.md#catch-your-agent-cheating-in-60-seconds).
