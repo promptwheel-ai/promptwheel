@@ -1140,6 +1140,7 @@ export function check(options = {}) {
   try {
     repo = options.repo ? realpathSync(options.repo)
                         : git(['rev-parse', '--show-toplevel'], process.cwd());
+    git(['rev-parse', '--show-toplevel'], repo);   // an existing path that is not a repository fails here
   } catch { bad(`promptwheel check: not inside a git repository (${options.repo || process.cwd()})`); }
 
   let config = options.config;
