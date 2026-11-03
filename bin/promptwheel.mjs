@@ -75,16 +75,15 @@ function resolveConfig(p, repo, label, seen) {
 }
 
 function loadConfig(repo) {
-  const candidates = ['promptwheel.config.json', 'outcome-gate.config.json']; // back-compat alias
-  const p = candidates.map((c) => join(repo, c)).find(existsSync);
-  if (!p) die('no promptwheel.config.json, run: promptwheel init   (writes one for your stack)');
+  const p = join(repo, 'promptwheel.config.json');
+  if (!existsSync(p)) die('no promptwheel.config.json, run: promptwheel init   (writes one for your stack)');
   const cfg = resolveConfig(p, repo, 'local', new Set());
   if (!Array.isArray(cfg.metrics) || cfg.metrics.length === 0) die('config.metrics must be a non-empty array');
   return cfg;
 }
 
 // does the repo have a committed gate config?
-const hasConfigFile = (repo) => ['promptwheel.config.json', 'outcome-gate.config.json'].some((f) => existsSync(join(repo, f)));
+const hasConfigFile = (repo) => existsSync(join(repo, 'promptwheel.config.json'));
 
 // the zero-config default: the gate `init` would write, built in memory from stack detection.
 // It gates the detected test command (gaming detection on) with the stack's env/linkDirs so the
@@ -465,8 +464,7 @@ function gateDefAtRef(repo, ref) {
     scalars.mandates = [...mandatesByName.values()];
     return { metrics: byName, scalars };
   };
-  for (const p of ['promptwheel.config.json', 'outcome-gate.config.json']) { const r = resolve(p); if (r) return r; } // first hit only: no spurious probe of the alias
-  return null;
+  return resolve('promptwheel.config.json');
 }
 
 // an order-independent SHA-256 (truncated) fingerprint of a gate definition, for the audit record
@@ -550,6 +548,57 @@ function readAllowTrailer(repo, ref) {
   return m && m[1].trim() ? { reason: m[1].trim().slice(0, 300) } : null;
 }
 
+// The three Section 3 checks, run only with detectGaming, in order: (1) re-prove every actual
+// win with the agent's source edits alone; (2) content-hash auto-fail: a declared evaluatorPath
+// gate file edited in this diff is a moved goalpost, so a metric that improved alongside it is
+// gamed by declaration, deterministic even if the source-only re-run read inert; (3) gate
+// integrity: resolve the gate as of BASE, re-measure any guard HEAD dropped under its base
+// definition (it only counts as tampering if it WOULD HAVE FAILED at head), and fingerprint the
+// gate definition at both refs (metrics, evaluatorPaths, gamingThreshold, mandates) so a quietly
+// deleted guard or mandate is tamper-evident: base != head is recorded as gate.changed and
+// printed, whatever the verdict. Mutates `metrics` in place (gamed/sourceOnly/retained/
+// gamingReason) and returns the report.gate record. An allow trailer can still clear a gamed
+// metric afterwards, in gate().
+function detectGamingPass(repo, base, head, cfg, metrics, repeat) {
+  for (const m of metrics) {
+    if (m.status !== 'improved') continue;
+    const cm = cfg.metrics.find((c) => c.name === m.name);
+    if (cm.gamingCheck === false) continue;   // tripwire / test-side guards aren't re-proven from source (their gain legitimately lives in test files)
+    const j = judgeGaming(m, measureSourceOnly(repo, base, head, cm, cfg, repeat), cm.gamingThreshold ?? cfg.gamingThreshold ?? 0.5);
+    m.gamed = j.gamed; m.sourceOnly = j.sourceOnly; m.retained = j.retained; m.gamingReason = j.reason;
+  }
+  const evalChanged = changedEvaluatorPaths(repo, base, head, cfg);
+  if (evalChanged.length) {
+    for (const m of metrics) {
+      if (m.status !== 'improved' || m.gamed === true) continue;
+      const cm = cfg.metrics.find((c) => c.name === m.name);
+      if (cm && cm.gamingCheck === false) continue; // tripwire/test-side guards legitimately live in gate files
+      m.gamed = true;
+      m.gamingReason = `a declared evaluatorPath gate file changed in this diff (${evalChanged.map((e) => e.path).join(', ')}); a win alongside a goalpost edit is gamed by declaration`;
+    }
+  }
+  const baseGate = gateDefAtRef(repo, base);
+  const weak = gateWeakenings(baseGate, cfg.metrics);
+  const weakened = [];
+  if (weak.length) {
+    const defs = weak.map((w) => w.def);
+    const b = measureAt(repo, base, { ...cfg, metrics: defs }, repeat);
+    const a = measureAt(repo, head, { ...cfg, metrics: defs }, repeat);
+    for (const w of weak) {
+      const ev = evaluate(w.def, b[w.name], a[w.name], repeat);
+      if (!ev.ok) weakened.push({ name: w.name, change: w.change, status: ev.status });
+    }
+  }
+  const fpBase = baseGate ? gateFingerprint([...baseGate.metrics.values()], baseGate.scalars) : null;
+  const fpHead = gateFingerprint(cfg.metrics, cfg);
+  return {
+    fingerprint: { base: fpBase, head: fpHead },
+    ...(fpBase && fpBase !== fpHead ? { changed: true } : {}),
+    ...(weakened.length ? { weakened } : {}),
+    ...(evalChanged.length ? { evaluatorChanged: evalChanged } : {}),
+  };
+}
+
 function gate(repo, opts) {
   selfHeal(repo);
   const cfg = opts.config ?? loadConfig(repo);
@@ -575,61 +624,8 @@ function gate(repo, opts) {
     const ev = evaluate(m, before[m.name], after[m.name], repeat);
     return { name: m.name, direction: m.direction || 'up', guard: !!m.guard, ...ev };
   });
-  // antihack: re-prove every actual win with the agent's source edits alone
-  if (opts.detectGaming) {
-    for (const m of metrics) {
-      if (m.status !== 'improved') continue;
-      const cm = cfg.metrics.find((c) => c.name === m.name);
-      if (cm.gamingCheck === false) continue;   // tripwire / test-side guards aren't re-proven from source (their gain legitimately lives in test files)
-      const j = judgeGaming(m, measureSourceOnly(repo, base, head, cm, cfg, repeat), cm.gamingThreshold ?? cfg.gamingThreshold ?? 0.5);
-      m.gamed = j.gamed; m.sourceOnly = j.sourceOnly; m.retained = j.retained; m.gamingReason = j.reason;
-    }
-  }
-  // content-hash auto-fail (Section 3): a declared evaluatorPath gate file edited in this diff is a
-  // moved goalpost, so a metric that improved alongside it is gamed by declaration - deterministic,
-  // even if the source-only re-run above read inert. An allow-trailer can still clear it, below.
-  let evalChanged = [];
-  if (opts.detectGaming) {
-    evalChanged = changedEvaluatorPaths(repo, base, head, cfg);
-    if (evalChanged.length) {
-      for (const m of metrics) {
-        if (m.status !== 'improved' || m.gamed === true) continue;
-        const cm = cfg.metrics.find((c) => c.name === m.name);
-        if (cm && cm.gamingCheck === false) continue; // tripwire/test-side guards legitimately live in gate files
-        m.gamed = true;
-        m.gamingReason = `a declared evaluatorPath gate file changed in this diff (${evalChanged.map((e) => e.path).join(', ')}); a win alongside a goalpost edit is gamed by declaration`;
-      }
-    }
-  }
-  // gate integrity (Section 3): did HEAD weaken the gate it is judged by? Resolve the gate as
-  // of BASE; a guard HEAD dropped is re-measured under its base definition and only counts as
-  // tampering if it WOULD HAVE FAILED at head (a real regression hidden by dropping the guard).
-  let gateInfo = null;
-  if (opts.detectGaming) {
-    const baseGate = gateDefAtRef(repo, base);
-    const weak = gateWeakenings(baseGate, cfg.metrics);
-    const weakened = [];
-    if (weak.length) {
-      const defs = weak.map((w) => w.def);
-      const b = measureAt(repo, base, { ...cfg, metrics: defs }, repeat);
-      const a = measureAt(repo, head, { ...cfg, metrics: defs }, repeat);
-      for (const w of weak) {
-        const ev = evaluate(w.def, b[w.name], a[w.name], repeat);
-        if (!ev.ok) weakened.push({ name: w.name, change: w.change, status: ev.status });
-      }
-    }
-    // the fingerprint covers metrics (name/guard/direction/gaming settings), evaluatorPaths,
-    // gamingThreshold and mandates at BOTH refs, so a quietly deleted mandate or guard is
-    // tamper-evident: base != head is recorded as gate.changed and printed, whatever the verdict.
-    const fpBase = baseGate ? gateFingerprint([...baseGate.metrics.values()], baseGate.scalars) : null;
-    const fpHead = gateFingerprint(cfg.metrics, cfg);
-    gateInfo = {
-      fingerprint: { base: fpBase, head: fpHead },
-      ...(fpBase && fpBase !== fpHead ? { changed: true } : {}),
-      ...(weakened.length ? { weakened } : {}),
-      ...(evalChanged.length ? { evaluatorChanged: evalChanged } : {}),
-    };
-  }
+  // Section 3 (gaming detection), on by default: mutates `metrics` and yields the gate record
+  const gateInfo = opts.detectGaming ? detectGamingPass(repo, base, head, cfg, metrics, repeat) : null;
   // declared override: a Promptwheel-Allow trailer (or --allow) acknowledges an intentional
   // goalpost/gate change, so a would-be GAMED becomes PASS, recorded in report.allowed for review.
   const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300) } : (opts.working ? null : readAllowTrailer(repo, head));
@@ -1033,11 +1029,11 @@ function parseArgs(argv) {
     else if (argv[i] === '--no-record') a.noRecord = true;
     else if (argv[i] === '--no-auto') a.noAuto = true;
     else if (argv[i] === '--allow') a.allow = argv[++i];
-    else if (argv[i] === '--detect-gaming' || argv[i] === '--antihack') a.detectGaming = true;
-    else if (argv[i] === '--no-detect-gaming' || argv[i] === '--no-antihack') a.detectGaming = false;
+    else if (argv[i] === '--detect-gaming') a.detectGaming = true;
+    else if (argv[i] === '--no-detect-gaming') a.detectGaming = false;
     else if (argv[i] === '--attempt') a.attempt = argv[++i];
     else if (argv[i] === '--json') a.json = true;
-    else if (argv[i] === '--markdown' || argv[i] === '--md') a.markdown = true;
+    else if (argv[i] === '--markdown') a.markdown = true;
   }
   return a;
 }
