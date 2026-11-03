@@ -1,5 +1,5 @@
 name: 'PromptWheel Outcome Gate'
-description: 'The reward gate for your AI coding loop — prove a change moved a metric without regressing another (in CI: your PR check).'
+description: 'The reward gate for your AI coding loop. It proves a change moved a metric without regressing another (in CI, your PR check).'
 branding:
   icon: 'check-circle'
   color: 'green'
