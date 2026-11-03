@@ -33,9 +33,7 @@ importing this package.
   "head": "e4f5g6h",
   "mode": "refs",
   "repeat": 3,
-  "cohort": "ci",
   "verdict": "gamed",
-  "subsystems": ["api", "auth"],
   "metrics": [
     {
       "name": "tests_pass",
@@ -134,7 +132,6 @@ Returns the Section 2 verdict object (identical to `run --json`). Reproducible f
 | `repeat` | number | `config.repeat ?? 1` | measurement repeats for the noise band |
 | `detectGaming` | boolean | `true` | run the Section 3 source-only re-proof |
 | `allow` | string | none | a declared override reason (the same as `--allow` / a `Promptwheel-Allow:` trailer): a would-be `gamed` reads `pass` with the reason recorded in `report.allowed` |
-| `label` | string | none | change-type label for the record |
 | `record` | boolean | `false` | append the run to `.promptwheel/outcomes.jsonl` |
 
 Preconditions throw (they do not exit the host): not inside a git repository; `auto: false`

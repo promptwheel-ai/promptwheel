@@ -304,18 +304,6 @@ function changedSourcePaths(repo, base, head, isEval = () => false) {
   return { source: all.filter((p) => !nonSrc(p)), nonSource: all.filter(nonSrc) };
 }
 
-// coarse change-location fingerprint for the outcome record: top source dirs of the diff
-function subsystemsOf(repo, base, head, cfg) {
-  try {
-    const counts = {};
-    for (const p of changedSourcePaths(repo, base, head, evaluatorMatcher(cfg)).source) {
-      const d = p.includes('/') ? p.slice(0, p.indexOf('/')) : '(root)';
-      counts[d] = (counts[d] || 0) + 1;
-    }
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([d]) => d);
-  } catch { return []; }
-}
-
 // measure `metric` in a worktree at `base` with ONLY the source slice of base→head applied.
 function measureSourceOnly(repo, base, head, metric, cfg, repeat) {
   const { source } = changedSourcePaths(repo, base, head, evaluatorMatcher(cfg));
@@ -668,11 +656,6 @@ function gate(repo, opts) {
   const verdict = (mandated || failed) ? 'fail' : gamed ? 'gamed' : inconclusive ? 'inconclusive' : 'pass';
   const report = {
     base: short(repo, base), head: short(repo, head), repeat, mode: opts.working ? 'working' : 'refs',
-    // learning-substrate fields (Phase 5): cohort segments reliability by environment,
-    // label attributes a change-type, subsystems fingerprint WHERE the change landed.
-    cohort: opts.cohort ?? (process.env.CI ? 'ci' : 'local'),
-    ...(opts.label ? { label: opts.label } : {}),
-    subsystems: subsystemsOf(repo, base, head, cfg),
     verdict, metrics,
     ...(mandateViolations.length ? { mandates: mandateViolations } : {}),
     ...(gateInfo ? { gate: gateInfo } : {}),
@@ -698,7 +681,7 @@ function run(argv) {
     config = autoConfig(repo);
     console.error(`no promptwheel.config.json, auto-gating the detected test command: ${config.metrics[0].cmd}  (promptwheel init to customize; --no-auto to require a config)`);
   }
-  const report = gate(repo, { base: args.base, head: args.head, working: args.working, repeat: args.repeat, noRecord: args.noRecord, detectGaming: args.detectGaming, label: args.label, allow: args.allow, config });
+  const report = gate(repo, { base: args.base, head: args.head, working: args.working, repeat: args.repeat, noRecord: args.noRecord, detectGaming: args.detectGaming, allow: args.allow, config });
   if (args.json) console.log(JSON.stringify(report, null, 2));
   else if (args.markdown) console.log(renderMarkdown(report));
   else printHuman(report);
@@ -726,7 +709,7 @@ function improve(argv) {
   try { execSync(args.attempt, { cwd: repo, stdio: 'inherit' }); }
   catch (e) { console.error(`  (attempt exited ${e.status ?? 1}, gating whatever it changed)`); }
 
-  const report = gate(repo, { working: true, repeat: args.repeat, noRecord: args.noRecord, detectGaming: args.detectGaming, label: args.label ?? args.attempt });
+  const report = gate(repo, { working: true, repeat: args.repeat, noRecord: args.noRecord, detectGaming: args.detectGaming });
   const noChange = report.metrics.every((m) => m.delta === 0 || m.delta == null);
   const improvedNames = report.metrics.filter((m) => m.status === 'improved').map((m) => m.name);
 
@@ -761,9 +744,9 @@ function revert(repo) {
   try { git(['clean', '-fd', '-e', '.promptwheel'], repo); } catch { /* best effort */ }
 }
 
-// Phase-5 seed: turn the accumulated reward stream into signal. Thin on purpose, 
-// this is the substrate a future outcome-curated playbook / UCB work-discovery loop trains on,
-// NOT that loop itself. Just honest aggregation, no model.
+// insights: honest aggregation of the per-repo outcome record (.promptwheel/outcomes.jsonl)
+// into per-metric counts. No model, no decay, no claims: just which metrics actually respond.
+// The reader is tolerant of older records that carry extra fields (cohort, label, subsystems).
 function insights(argv) {
   const args = parseArgs(argv);
   const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
@@ -788,149 +771,6 @@ function insights(argv) {
   }
   console.log('\n  lever = improved/runs, how reliably this metric actually responds. The');
   console.log('  highest-lever metrics are where an agent loop should spend its attempts.\n');
-}
-
-// ---------------------------------------------------------------------------
-// Phase 5, outcome-curated playbook + UCB work-discovery.
-// Unfrozen 2026-07-02 by explicit founder decision overriding D7 (see docs/LEARNING.md).
-// Design constraints that survive the unfreeze:
-//   - PURE VIEW: the append-only ledger (.promptwheel/outcomes.jsonl) is the only store;
-//     the playbook is re-derived on every read (decay at read time, no curator state to rot).
-//   - EVIDENCE-GATED: a key renders a claim only past MIN_MOVED weighted observations;
-//     everything below that is counted, not asserted.
-//   - CLAIM-GATED: no public compounding claim until bench/compounding-ab.mjs passes on
-//     real usage data. The gate on the CLAIM outlived the gate on the CODE.
-// ---------------------------------------------------------------------------
-const HALF_LIFE = 20;   // runs, an entry's weight halves every HALF_LIFE runs unless re-earned
-const MIN_MOVED = 3;    // weighted moved-observations before a key earns a rendered claim
-const EXPLORE_C = 1.0;  // UCB exploration constant
-
-function readLedger(repo) {
-  const f = join(repo, '.promptwheel', 'outcomes.jsonl');
-  if (!existsSync(f)) return [];
-  return readFileSync(f, 'utf8').split('\n').filter(Boolean)
-    .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
-}
-
-// fold the ledger into decayed per-key stats. keys: `metric` · `metric @ subsystem` · `metric # label`
-function foldOutcomes(runs) {
-  const keys = new Map();
-  const N = runs.length;
-  runs.forEach((r, idx) => {
-    const w = Math.pow(0.5, (N - 1 - idx) / HALF_LIFE);   // idx N-1 = newest → weight 1
-    for (const m of (r.metrics || [])) {
-      const tags = [m.name];
-      for (const s of (r.subsystems || [])) tags.push(`${m.name} @ ${s}`);
-      if (r.label) tags.push(`${m.name} # ${r.label}`);
-      for (const key of tags) {
-        const k = keys.get(key) ?? { key, metric: m.name, w: 0, n: 0, imp: 0, reg: 0, moved: 0, effects: [], cohorts: {}, last: null };
-        k.n += 1; k.w += w;
-        const coh = (k.cohorts[r.cohort || 'unknown'] ??= { imp: 0, reg: 0 });
-        if (m.status === 'improved') {
-          k.imp += w; k.moved += w; coh.imp += 1;
-          if (typeof m.delta === 'number' && m.delta !== 0) k.effects.push(Math.abs(m.delta));
-        } else if (m.status === 'regressed') { k.reg += w; k.moved += w; coh.reg += 1; }
-        k.last = r.ts || k.last;
-        keys.set(key, k);
-      }
-    }
-  });
-  return [...keys.values()];
-}
-
-const betaMean = (imp, reg) => (1 + imp) / (2 + imp + reg);   // Beta(1,1)-smoothed helpfulness
-
-// composite lever = smoothed helpfulness × responsiveness; UCB adds an exploration bonus
-function scoreKey(k, totalW) {
-  const p = betaMean(k.imp, k.reg);
-  const move = k.w ? k.moved / k.w : 0;
-  const lever = p * move;
-  const ucb = lever + EXPLORE_C * Math.sqrt(Math.log(Math.max(Math.E, totalW)) / Math.max(1e-6, k.w));
-  return { p: +p.toFixed(3), move: +move.toFixed(3), lever: +lever.toFixed(3), ucb: +ucb.toFixed(3), effect: +(median(k.effects) ?? 0).toFixed(6) };
-}
-
-// cohorts that disagree in sign are flagged, never averaged into a lie
-function cohortNote(k) {
-  const cs = Object.entries(k.cohorts).filter(([, c]) => c.imp + c.reg > 0);
-  if (cs.length < 2) return '';
-  const signs = new Set(cs.map(([, c]) => Math.sign(c.imp - c.reg)));
-  return signs.size > 1 ? ' · ⚠ cohort-dependent (ci vs local disagree)' : '';
-}
-
-function loadEntries(repo) {
-  const runs = readLedger(repo);
-  if (!runs.length) die('no outcome record yet, run the gate a few times first (.promptwheel/outcomes.jsonl)');
-  const keys = foldOutcomes(runs);
-  const totalW = keys.filter((k) => k.key === k.metric).reduce((s, k) => s + k.w, 0);
-  const entries = keys.map((k) => ({ ...k, ...scoreKey(k, totalW), sufficient: k.moved >= MIN_MOVED }))
-    .sort((a, b) => b.lever - a.lever || b.w - a.w);
-  return { runs, entries };
-}
-
-// the distilled, execution-earned context an agent (or CLAUDE.md) can consume
-function playbook(argv) {
-  const args = parseArgs(argv);
-  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
-  const { runs, entries } = loadEntries(repo);
-  if (args.json) { console.log(JSON.stringify({ runs: runs.length, halfLife: HALF_LIFE, minMoved: MIN_MOVED, entries }, null, 2)); return; }
-  const suff = entries.filter((e) => e.sufficient);
-  const pct = (x) => `${Math.round(x * 100)}%`;
-  const out = [];
-  out.push(`## Earned playbook, ${runs.length} gated runs, decay half-life ${HALF_LIFE} runs`);
-  out.push('*(every line below was measured by the gate, not asserted; entries decay unless re-earned)*', '');
-  if (!suff.length) {
-    out.push(`_Nothing has earned a claim yet, a key needs ≥${MIN_MOVED} weighted moved-observations. Keep gating; ${entries.length} keys are accumulating._`);
-  } else {
-    for (const e of suff.slice(0, 20)) {
-      out.push(`- **${e.key}**, helpful ${pct(e.p)} when it moves (${e.imp.toFixed(1)}✓/${e.reg.toFixed(1)}✗ weighted), responds in ${pct(e.move)} of runs, median effect ${e.effect}${cohortNote(e)}`);
-    }
-    const hidden = entries.length - suff.length;
-    if (hidden > 0) out.push('', `_${hidden} more keys below the evidence threshold, counted, not asserted._`);
-  }
-  console.log(out.join('\n'));
-}
-
-// UCB work-discovery: where should the loop spend its NEXT attempt? Proposes measured
-// targets (metric/subsystem arms), never code advice; the measurement stays the message.
-function suggest(argv) {
-  const args = parseArgs(argv);
-  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
-  const { runs, entries } = loadEntries(repo);
-  const arms = entries.filter((e) => e.key === e.metric || e.key.includes(' @ ')).sort((a, b) => b.ucb - a.ucb);
-  if (args.json) { console.log(JSON.stringify({ runs: runs.length, thin: runs.length < 10, arms: arms.slice(0, 10) }, null, 2)); return; }
-  console.log(`\nPromptWheel suggest, UCB over ${runs.length} gated runs${runs.length < 10 ? '  (thin record: exploration dominates, treat as a coin with opinions)' : ''}\n`);
-  for (const a of arms.slice(0, 5)) {
-    console.log(`  ${a.ucb.toFixed(3)}  ${a.key.padEnd(28)} lever ${a.lever.toFixed(3)} (helpful ${a.p}, responds ${a.move}) · evidence ${a.moved.toFixed(1)} moved / ${a.n} runs${a.sufficient ? '' : ' · below claim threshold'}`);
-  }
-  console.log('\n  score = lever + exploration bonus, high scores are either proven levers or under-explored arms.\n');
-}
-
-// backfill, seed the ledger from git history: replay past commits through the CURRENT
-// metrics (LEARNING.md harvest path 1). Deterministic, no LLM. Rows are cohort-tagged
-// 'backfill', historical human commits are NOT live agent-loop evidence; the cohort
-// machinery segments them and flags disagreement rather than averaging it away. The
-// conventional-commit type (fix/feat/refactor/…) becomes the change-type label for free.
-function backfill(argv) {
-  const args = parseArgs(argv);
-  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
-  const listArgs = ['rev-list', '--no-merges'];
-  if (args.since) listArgs.push(`${args.since}..HEAD`); else listArgs.push('-n', String(args.n ?? 30), 'HEAD');
-  const commits = git(listArgs, repo).split('\n').filter(Boolean).reverse(); // oldest first → ledger stays chronological, decay stays honest
-  if (!commits.length) die('no commits to backfill');
-  const seen = new Set(readLedger(repo).filter((r) => r.cohort === 'backfill').map((r) => r.head));
-  let done = 0, skipped = 0;
-  console.log(`\nbackfilling ${commits.length} commits through the current metrics (gaming detection ${args.dgExplicit && args.detectGaming ? 'ON' : 'off, pass --detect-gaming to audit history too'})\n`);
-  for (const c of commits) {
-    try { git(['rev-parse', `${c}~1`], repo); } catch { skipped++; continue; }        // root commit
-    if (seen.has(short(repo, c))) { skipped++; continue; }                            // already recorded
-    const subj = git(['log', '-1', '--format=%s', c], repo);
-    const type = /^(feat|fix|docs|test|chore|refactor|perf|ci|build|style)\b/i.exec(subj)?.[1]?.toLowerCase();
-    const report = gate(repo, { base: `${c}~1`, head: c, repeat: args.repeat, detectGaming: args.dgExplicit ? args.detectGaming : false, label: type, cohort: 'backfill' });
-    console.log(`  ${report.head} ${report.verdict.toUpperCase().padEnd(6)} ${type ? `#${type}`.padEnd(10) : ''.padEnd(10)} ${subj.slice(0, 56)}`);
-    done++;
-  }
-  console.log(`\n  backfilled ${done}${skipped ? ` (skipped ${skipped}: root or already recorded)` : ''}, old commits that no longer build record as unmeasurable, never faked.`);
-  console.log('  next:  promptwheel playbook   ·   promptwheel suggest\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -1193,12 +1033,9 @@ function parseArgs(argv) {
     else if (argv[i] === '--no-record') a.noRecord = true;
     else if (argv[i] === '--no-auto') a.noAuto = true;
     else if (argv[i] === '--allow') a.allow = argv[++i];
-    else if (argv[i] === '--detect-gaming' || argv[i] === '--antihack') { a.detectGaming = true; a.dgExplicit = true; }
-    else if (argv[i] === '--no-detect-gaming' || argv[i] === '--no-antihack') { a.detectGaming = false; a.dgExplicit = true; }
-    else if (argv[i] === '--since') a.since = argv[++i];
-    else if (argv[i] === '-n' || argv[i] === '--limit') a.n = parseInt(argv[++i], 10);
+    else if (argv[i] === '--detect-gaming' || argv[i] === '--antihack') a.detectGaming = true;
+    else if (argv[i] === '--no-detect-gaming' || argv[i] === '--no-antihack') a.detectGaming = false;
     else if (argv[i] === '--attempt') a.attempt = argv[++i];
-    else if (argv[i] === '--label') a.label = argv[++i];
     else if (argv[i] === '--json') a.json = true;
     else if (argv[i] === '--markdown' || argv[i] === '--md') a.markdown = true;
   }
@@ -1207,7 +1044,7 @@ function parseArgs(argv) {
 
 // pure, side-effect-free helpers are exported for unit testing; the CLI below only
 // runs when this file is executed directly (not when imported by the test suite).
-export { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, foldOutcomes, betaMean, scoreKey, verdictFingerprint };
+export { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public library API: the Verified-Outcome Contract, in process.
@@ -1250,8 +1087,7 @@ export function verdictExitCode(verdict) {
 //   auto          boolean  allow the zero-config auto-detect fallback (default true; false throws if no config)
 //   repeat        number   measurement repeats for the noise band (default: config.repeat ?? 1)
 //   detectGaming  boolean  run the Section 3 source-only re-proof (default: true)
-//   cohort        string   cohort tag for the record (default: CI ? 'ci' : 'local')
-//   label         string   change-type label
+//   allow         string   a declared override reason (same as --allow / a Promptwheel-Allow: trailer)
 //   record        boolean  append the run to .promptwheel/outcomes.jsonl (default: false)
 export function check(options = {}) {
   let repo;
@@ -1276,8 +1112,6 @@ export function check(options = {}) {
     config,
     repeat: options.repeat,
     detectGaming: options.detectGaming ?? true,
-    cohort: options.cohort,
-    label: options.label,
     allow: options.allow,
     noRecord: options.record !== true,
   });
@@ -1417,9 +1251,6 @@ function main() {
   if (cmd === 'run') run(rest);
   else if (cmd === 'improve') improve(rest);
   else if (cmd === 'insights') insights(rest);
-  else if (cmd === 'playbook') playbook(rest);
-  else if (cmd === 'suggest') suggest(rest);
-  else if (cmd === 'backfill') backfill(rest);
   else if (cmd === 'init') init(rest);
   else if (cmd === 'guards') guards(rest);
   else if (cmd === 'conformance') conformance(rest);
@@ -1439,11 +1270,8 @@ function main() {
       '  promptwheel run --allow "<reason>"           acknowledge an intentional test/config change (or a `Promptwheel-Allow: <reason>` commit trailer; `Sawbuck-Allow:` is an alias): recorded, not flagged GAMED',
       '  promptwheel improve --attempt "<cmd>"        run an agent/script; keep only if a metric improved',
       '                                               exit 0=kept · 1=regression · 2=gamed · 3=plateau/inconclusive (all but 0 reverted) · add --json',
-      '  promptwheel insights                         which metrics actually respond (raw counts)',
-      '  promptwheel playbook [--json]                the earned playbook: decayed, evidence-gated claims distilled from the record',
-      '  promptwheel suggest [--json]                 UCB work-discovery: where the next attempt should go (experimental)',
-      '  promptwheel backfill [-n N | --since <ref>]  seed the ledger from git history (cohort-tagged; commit types become labels)',
-      '  promptwheel guards                           show the effective guardrails (incl. inherited) + flag record',
+      '  promptwheel insights [--json]                which metrics actually respond (raw counts from .promptwheel/outcomes.jsonl)',
+      '  promptwheel guards [--json]                  show the effective guardrails (incl. inherited) + flag record',
       '  promptwheel conformance [file|-] [--cmd C]   check a verdict JSON (or a command) against the Contract (exit 0 = conforms)',
       '',
       'Exit codes: 0 pass · 1 fail (a guarded metric regressed, or a mandate was violated) · 2 gamed · 3 inconclusive · 64 usage or config error (never a verdict).',

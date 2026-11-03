@@ -29,10 +29,7 @@ The working tree is **never** touched - every read happens in a temp worktree th
 | `run --working` | gate **uncommitted** changes incl. newly added files (temp-index `write-tree`/`commit-tree` snapshot; real index + tree untouched) |
 | `run --no-record` | don't append to the reward stream |
 | `improve --attempt "<cmd>"` | run any agent/script, gate, **keep only if a metric improved** (commit) else revert. Exit `0` kept / `1` regression / `2` gamed / `3` plateau or inconclusive (the same codes as `run`); `--json` adds a top-level `result` |
-| `insights [--json]` | aggregate `.promptwheel/outcomes.jsonl` into per-metric lever scores |
-| `playbook [--json]` | the earned playbook: decayed, evidence-gated claims distilled from the outcome record |
-| `suggest [--json]` | UCB work-discovery: where the next attempt should go (experimental) |
-| `backfill [-n N \| --since <ref>]` | seed the ledger from git history (cohort-tagged `backfill`; conventional-commit types become labels) |
+| `insights [--json]` | aggregate `.promptwheel/outcomes.jsonl` into per-metric counts (how often each metric improved, regressed, read inconclusive) |
 | `init [--preset <name> \| --list] [--no-agent-block]` | write a starter config (detect stack; presets `tests-pass`/`lint`/`bundle-size`/`security`/`llm-eval`/`antihack`/`no-ai-tells`/`security-antihack`) and an agent-orienting block in `AGENTS.md` |
 | `guards [--json]` | list the effective guardrails (incl. inherited via `extends`) with provenance + each guard's flag record |
 | `conformance [file \| -] [--cmd C]` | validate a verdict JSON (or a command's `--json` output and exit code) against the Verified-Outcome Contract; exit 0 conforms, 1 otherwise |

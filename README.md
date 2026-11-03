@@ -97,11 +97,6 @@ npx promptwheel improve --attempt "claude -p 'reduce lint errors'"
 
 # what's actually responding in this repo? (aggregates .promptwheel/outcomes.jsonl)
 npx promptwheel insights
-
-# EXPERIMENTAL (Phase 5): the earned playbook + where the next attempt should go
-npx promptwheel playbook                  # decayed, evidence-gated claims distilled from the record
-npx promptwheel suggest                   # UCB over the lever scores, proven levers vs under-explored arms
-npx promptwheel backfill -n 30            # cold start: seed the record from git history (cohort-tagged, commit types → labels)
 ```
 
 ## Give your agent the gate
@@ -113,7 +108,7 @@ npx promptwheel backfill -n 30            # cold start: seed the record from git
     config, or grader, not the source, so revert and earn it in the source. Exit 1 means a guarded
     metric regressed, revert that too. Never weaken, skip, or delete a test to go green.
 
-**The consequence ledger.** git records *what changed*; PromptWheel records *what the change did*, same trust model (local, deterministic, append-only, no server, no LLM in the verdict). `playbook` and `suggest` are pure re-derivations over that ledger: every rendered line was measured by the gate, decays unless re-earned, and stays hidden below an evidence threshold. No compounding claim is made for them until the A/B acceptance test (`bench/compounding-ab.mjs`) passes on real usage data.
+**The outcome record.** git records *what changed*; PromptWheel records *what the change did*, same trust model (local, deterministic, append-only, no server, no LLM in the verdict). `insights` is a plain aggregation over that record: how often each metric improved, regressed, or read inconclusive, so you can see which metrics actually respond in this repo. Nothing is learned or recommended from it.
 
 **Footprint:** it never touches your working tree, every measurement runs in a throwaway git worktree **in your system temp dir** (one at a time; configured `linkDirs` are symlinked not copied, `node_modules` by default, `.venv` for Python, etc.), removed when the run finishes. The only thing PromptWheel writes to your repo is the optional `.promptwheel/outcomes.jsonl` record, commit it to build the per-repo "what moves what" history, or `.gitignore` it (`--no-record` to skip entirely). A hard-killed run can't leave clutter behind: the next run **self-heals** any orphaned worktree (stale registry entry + abandoned temp checkout).
 
@@ -252,7 +247,6 @@ The core gamed-win check is **git only** and runs anywhere git does: it classifi
 - [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md), how `--detect-gaming` fits as the **deterministic layer** alongside held-out tests, LLM judges, and human review: the coverage matrix, the compose-as-a-pipeline model, and the honest in/out-of-scope boundary.
 - [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md), making "the agent can't skip it" real: the three places to enforce (loop-revert · CI + branch protection · a tested Claude Code Stop-hook), the exact wiring, and the *protect-the-gate's-own-config* caveat.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), how the engine works: schemas, extract modes, the trust/noise model.
-- [docs/LEARNING.md](docs/LEARNING.md), the (research-gated) Phase-5 design: outcome-curated playbook (Agentic Context Engineering, Stanford 2510.04618) + UCB work-discovery.
 - [CLAUDE.md](CLAUDE.md), the constitution for anyone (human or agent) working in this repo.
 
 ## Develop
@@ -268,15 +262,14 @@ The engine is one importable file; pure helpers are exported for unit tests, the
 - [x] before/after worktree measurement + regression guards
 - [x] noise band + confidence (don't trust a delta inside the jitter)
 - [x] `--working` mode, measure uncommitted changes (tracked **and** untracked)
-- [x] persisted reward stream (`.promptwheel/outcomes.jsonl`), the compounding "what moves what" record
+- [x] persisted outcome record (`.promptwheel/outcomes.jsonl`)
 - [x] GitHub Action / PR-comment wrapper (open-core distribution surface)
 - [x] agent loop: `improve`, propose → gate → keep only if a metric improved
 - [x] loop-consumable `improve`: exit `0` kept / `1` regression / `3` plateau + `--json result`
 - [x] `promptwheel init` + presets, zero-config onboarding
-- [x] `insights`, reward-stream aggregation (Phase-5 seed)
+- [x] `insights`, outcome-record aggregation
 - [x] `--detect-gaming`, reward-hack detection: re-prove the win from source edits alone + `antihack` preset
 - [x] npm publish, `promptwheel@0.4.2` (the lead magnet)
-- [x] outcome-curated learning + UCB work-discovery, `playbook` + `suggest` + the compounding A/B harness (**experimental**; compounding *claims* stay gated on real-data proof, see [docs/LEARNING.md](docs/LEARNING.md))
 - [x] gate integrity: a win that disables a guard or deletes a guarded metric in the same diff reads `GAMED` (SHA-256 gate fingerprint; 0.5.0)
 - [x] zero-config: `run` and `check()` auto-detect the gate with no committed config, `init` becomes optional (0.6.0)
 - [x] declared override (`Promptwheel-Allow:` trailer / `--allow`) + `init` build-setup detection, so a build-gated test measures instead of reading inert (0.7.0)
