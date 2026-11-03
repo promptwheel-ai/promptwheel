@@ -233,16 +233,12 @@ export declare const DIRECTIONS: readonly ['up', 'down', 'pass'];
 export declare function verdictExitCode(verdict: Verdict | string): 0 | 1 | 2 | 3;
 
 /**
- * Run the gate in process and return the Section 2 verdict object (identical to `run --json`).
+ * Runs the gate in process and returns the Section 2 verdict object (identical to `run --json`).
  * Measures only in throwaway git worktrees, never the caller's working tree. Never prints and
- * never calls `process.exit`; throws a plain `Error` on a precondition failure (not a git
- * repository, `auto: false` with no config, a `config` without a non-empty `metrics` array).
- */
-/**
- * Runs the gate in process and returns the report. Never prints and never exits the process: a
- * precondition failure (not a git repository, a missing, malformed or cyclic config, a missing
- * `extends` target, no commits yet) throws an Error whose `name` is `'ConfigError'` and whose
- * `exitCode` is 64, the code the CLI exits with for the same condition.
+ * never calls `process.exit`: every precondition failure (not a git repository, `auto: false`
+ * with no config, a `config` without a non-empty `metrics` array, a malformed or cyclic config,
+ * a missing `extends` target, no commits yet) throws an Error whose `name` is `'ConfigError'`
+ * and whose `exitCode` is 64, the code the CLI exits with for the same condition.
  */
 export declare function check(options?: CheckOptions): Report;
 

@@ -928,7 +928,12 @@ test('check(): with auto:false throws (does not exit) on a missing config', () =
   const g = (a) => execFileSync('git', a, { cwd: d });
   g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
   writeFileSync(join(d, 'x.js'), '1\n'); commitAll(d, 'base');
-  assert.throws(() => check({ repo: d, auto: false }), /no promptwheel\.config\.json/);
+  assert.throws(() => check({ repo: d, auto: false }), (e) => e.name === 'ConfigError' && e.exitCode === 64 && /no promptwheel\.config\.json/.test(e.message));
+  // the other two preconditions carry the same name and code
+  assert.throws(() => check({ repo: d, config: { metrics: [] } }), (e) => e.name === 'ConfigError' && e.exitCode === 64);
+  const notRepo = mkdtempSync(join(tmpdir(), 'pw-norepo-'));
+  assert.throws(() => check({ repo: notRepo }), (e) => e.name === 'ConfigError' && e.exitCode === 64 && /not inside a git repository/.test(e.message));
+  rmSync(notRepo, { recursive: true, force: true });
   rmSync(d, { recursive: true, force: true });
 });
 test('check(): accepts an in-process config object (no config file needed)', () => {

@@ -1120,8 +1120,9 @@ export function verdictExitCode(verdict) {
 // Run the gate in process and RETURN the Section 2 verdict object (identical to what
 // `run --json` prints). Measurement happens only in throwaway worktrees, never the
 // caller's working tree (constitution #4). This function never prints and never calls
-// process.exit; it throws a plain Error on a precondition failure (not a git repo, or a
-// missing / invalid config). Reproducible from (base, head, config) alone.
+// process.exit; every precondition failure (not a git repo, a missing / invalid config, no
+// commits) throws an Error named ConfigError with exitCode 64. Reproducible from (base, head,
+// config) alone.
 //
 //   repo          string   repo path (default: discovered from process.cwd())
 //   base          string   base ref (default: merge-base vs origin/main..., else HEAD~1)
@@ -1139,14 +1140,14 @@ export function check(options = {}) {
   try {
     repo = options.repo ? realpathSync(options.repo)
                         : git(['rev-parse', '--show-toplevel'], process.cwd());
-  } catch { throw new Error(`promptwheel check: not inside a git repository (${options.repo || process.cwd()})`); }
+  } catch { bad(`promptwheel check: not inside a git repository (${options.repo || process.cwd()})`); }
 
   let config = options.config;
   if (config !== undefined) {
     if (!config || typeof config !== 'object' || !Array.isArray(config.metrics) || config.metrics.length === 0)
-      throw new Error('promptwheel check: options.config.metrics must be a non-empty array');
+      bad('promptwheel check: options.config.metrics must be a non-empty array');
   } else if (!hasConfigFile(repo)) {
-    if (options.auto === false) throw new Error(`promptwheel check: no promptwheel.config.json in ${repo} (pass options.config, or allow auto-detect)`);
+    if (options.auto === false) bad(`promptwheel check: no promptwheel.config.json in ${repo} (pass options.config, or allow auto-detect)`);
     config = autoConfig(repo);   // zero-config: gate the detected test command in process
   }
 

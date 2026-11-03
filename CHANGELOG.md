@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.8 (2026-11-03): every precondition of check() is a ConfigError
+
+- **Library:** `check()` threw a plain `Error` for three preconditions (not a git repository, `auto: false` with no config, an `options.config` without a non-empty `metrics` array) while the config loaders threw the `ConfigError` 0.7.7 introduced. All of them now carry `name: 'ConfigError'` and `exitCode: 64`, as the types say, and the duplicated doc comment on `check` is one again.
+
 ## 0.7.7 (2026-11-03): a narrowed mandate stays in force, and the library never exits your process
 
 - **Mandates: narrowing a rule in the change that breaks it no longer clears it.** 0.7.5 kept a mandate in force for the change that *deletes* it, but matched base and head mandates by name only, so a change that rewrote `paths: ["test/**"]` to `paths: ["test/legacy/**"]` and edited `test/a.js` in the same commit passed with only a gate-changed warning. The base version of a mandate is now tested too unless head carries it unchanged (same name, same paths); a hit on the edited base version is reported with `edited: true` and the CLI line says so. One entry per mandate name (files unioned). `MandateViolation.edited` is declared in the types.
