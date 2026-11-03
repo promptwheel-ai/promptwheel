@@ -165,7 +165,7 @@ jobs:
         with: { repeat: '3' }
 ```
 
-The Action runs straight from its own checkout, no npm install, no build. See [`action.yml`](action.yml).
+The Action runs straight from its own checkout, no npm install, no build. See [`action.yml`](action.yml); a copy-paste workflow file lives at [`examples/github-action.yml`](examples/github-action.yml).
 
 ## Config, `promptwheel.config.json`
 

@@ -43,3 +43,7 @@ See **[`reliability-sprint/`](reliability-sprint/)** - gates `eval_pass_rate` (u
 ## Runnable demos
 - **[`catch-a-cheat/`](catch-a-cheat/)** - the 60-second "watch it fire": an agent greens a suite by editing the test → `GAMED`.
 - **[`test-change-verdicts/`](test-change-verdicts/)** - *"but what if I legitimately change a test?"* Three scenarios in one script (refactor → PASS · fix+test-edit → PASS · test-only → GAMED). Same metric move, opposite verdict - it keys on whether **source** carried the win, not whether a test was touched.
+
+## Wiring
+- **[`github-action.yml`](github-action.yml)** - a copy-paste PR workflow for the GitHub Action (verdict comment + failing check).
+- **[`detect-gaming-stop.sh`](detect-gaming-stop.sh)** - a Claude Code Stop-hook that refuses to let an agent end a turn on a GAMED win; wiring in [`../docs/ENFORCEMENT.md`](../docs/ENFORCEMENT.md).

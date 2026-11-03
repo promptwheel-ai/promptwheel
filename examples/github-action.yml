@@ -1,6 +1,7 @@
-# Example — copy this into YOUR repo (it needs a promptwheel.config.json at the root).
-# Posts an outcome-gate verdict comment on every PR and fails the check on a
-# guarded regression beyond the noise band.
+# Example: copy this into YOUR repo as .github/workflows/promptwheel.yml (zero-config works;
+# a promptwheel.config.json at the root customizes what is measured).
+# Posts a verdict comment on every PR and fails the check on a guarded regression beyond
+# the noise band, a GAMED win (exit 2), or an inconclusive gate (exit 3).
 name: PromptWheel
 
 on:
