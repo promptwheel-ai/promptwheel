@@ -43,22 +43,22 @@ When `LOGBOOK.md` exists:
    layer. Verify every lead that materially affects the work with
    `git show <sha>` and confirm it still applies at HEAD.
 
-Findings are leads, not verdicts — a suppression event means "a human should
+Findings are leads, not verdicts: a suppression event means "a human should
 look here," not misconduct. If the repo is shallow, offer
 `git fetch --unshallow` first.
 
 ## Investigation mode (when the user asks to dig into findings)
 
 For each Notable event or flagged lead worth pursuing: `git show <sha>` the
-commit, read the actual diff, and classify it — real weakening / sanctioned
-maintenance / classifier artifact — with one line of evidence each. Check
+commit, read the actual diff, and classify it (real weakening / sanctioned
+maintenance / classifier artifact) with one line of evidence each. Check
 whether flagged suppressions are STILL in the current tree (grep HEAD for
 the skip/ignore near the flagged location). Present the triage as YOUR
-judgment layered on the deterministic record — never edit the logbook files
+judgment layered on the deterministic record; never edit the logbook files
 to match your conclusions; the record and the reading stay separate.
 
 PERSIST what you learn (lazy enrichment): when an investigation establishes
-WHY something happened — a revert's failure mode, a suppression's cause —
+WHY something happened (a revert's failure mode, a suppression's cause),
 save it so the next session gets it free instead of re-investigating:
 
 ```bash
@@ -69,13 +69,13 @@ Annotations are sha-keyed, attributed, dated, and merged into LOGBOOK.md as
 "why (inferred)" lines immediately when a usable ledger exists, otherwise on
 the next run. Judgments, not records: only annotate
 causes you verified in the actual diffs, and treat old annotations as aged
-testimony — the fact never changes, but its force can (a "reverted because
+testimony: the fact never changes, but its force can (a "reverted because
 webpack4 broke" constraint stops binding once webpack4 is dead).
 
 ## Querying the full record (events.jsonl)
 
-The digest truncates with "…and N more — full record in events.jsonl". When
-completeness matters, query the record — never read it whole (it can exceed the
+The digest truncates with "...and N more - full record in events.jsonl". When
+completeness matters, query the record; never read it whole (it can exceed the
 context window). Start with task paths and event type before broad terms:
 
 ```bash
