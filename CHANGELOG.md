@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.7 (2026-11-03): a narrowed mandate stays in force, and the library never exits your process
+
+- **Mandates: narrowing a rule in the change that breaks it no longer clears it.** 0.7.5 kept a mandate in force for the change that *deletes* it, but matched base and head mandates by name only, so a change that rewrote `paths: ["test/**"]` to `paths: ["test/legacy/**"]` and edited `test/a.js` in the same commit passed with only a gate-changed warning. The base version of a mandate is now tested too unless head carries it unchanged (same name, same paths); a hit on the edited base version is reported with `edited: true` and the CLI line says so. One entry per mandate name (files unioned). `MandateViolation.edited` is declared in the types.
+- **`check()` throws instead of exiting.** A malformed config, a missing `extends` target, an inheritance cycle, an empty `metrics` list, or a repo with no commits used to reach `die()` and exit the *host* process with code 64 from inside the library call. They now throw an `Error` with `name: 'ConfigError'` and `exitCode: 64`; `promptwheel run` catches it in `main()` and exits 64 exactly as before.
+- **Plugin 0.1.9:** the disclosure says that `/promptwheel:improve` runs the attempt command you name (nothing the plugin composes), and the logbook skill pins `npx -y @promptwheel/logbook@0.9.8` (the same text as logbook's own `plugin/SKILL.md`).
+
 ## 0.7.6 (2026-11-03): types, a lean plugin skill, and the security-pack gitignore trap
 
 - **Types for library consumers:** `bin/promptwheel.d.ts` is hand-written (no build step, no TypeScript dependency) and declares every runtime export plus the `Report`, `CheckOptions` and `Config` shapes. `package.json` points `types` and the `.` export's `types` condition at it, and a test keeps the declaration list in step with the engine's exports.
