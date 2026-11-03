@@ -469,6 +469,38 @@ test('init --preset security-antihack: security gate + tripwires + evaluatorPath
   rmSync(d, { recursive: true, force: true });
 });
 
+test('init --preset security: the pack is copied from the package into .promptwheel and measured from there; an ignored .promptwheel/ is warned about', () => {
+  // the designed path: the pack is committed with the config, so the worktrees contain it and
+  // the metric measures the real finding count (an npm user has no packs/ directory of their own)
+  const d = mkdtempSync(join(tmpdir(), 'pw-secpack-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  mkdirSync(join(d, 'src'));
+  writeFileSync(join(d, 'src/a.js'), "res.setHeader('Access-Control-Allow-Origin', '*');\n"); commitAll(d, 'base: a CORS wildcard');
+  let r = pw(d, ['init', '--preset', 'security', '--no-agent-block']);
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /gitignored/, 'nothing is ignored here, so no warning');
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  assert.equal(cfg.metrics[0].cmd, 'node .promptwheel/packs/security/scan.mjs .', 'the preset command is rewritten to the copied pack');
+  assert.ok(existsSync(join(d, '.promptwheel/packs/security/patterns.json')), 'the whole pack is copied, not just the scanner');
+  commitAll(d, 'config + pack');
+  writeFileSync(join(d, 'src/a.js'), 'export const a = 1;\n'); commitAll(d, 'fix the wildcard');
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /security_findings\s+1 →\s+0 .*improved/, 'the copied scanner ran in the worktrees and measured 1 -> 0');
+  // the trap: with .promptwheel/ ignored the pack never reaches a worktree and the metric reads
+  // unmeasurable at both refs; init must say so instead of leaving a FAIL with no hint why
+  const d2 = mkdtempSync(join(tmpdir(), 'pw-secpack-ign-'));
+  const g2 = (a) => execFileSync('git', a, { cwd: d2 });
+  g2(['init', '-q']); g2(['config', 'user.email', 't@t']); g2(['config', 'user.name', 't']);
+  writeFileSync(join(d2, '.gitignore'), '.promptwheel/\n'); writeFileSync(join(d2, 'a.js'), '1\n'); commitAll(d2, 'base');
+  r = pw(d2, ['init', '--preset', 'security', '--no-agent-block']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /\.promptwheel\/packs\/security is gitignored/, 'init warns that the copied pack will not reach the measurement worktrees');
+  assert.match(r.out, /!\.promptwheel\/packs\//, 'and names the .gitignore rule that fixes it');
+  rmSync(d, { recursive: true, force: true }); rmSync(d2, { recursive: true, force: true });
+});
+
 // ---------------------- the newcomer's first cheat: gut the tests, metric stays flat
 test('default init config: weakening the suite (flat metric) FAILS via tripwires', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-gut-'));

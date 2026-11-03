@@ -9,17 +9,27 @@ lower the count by editing the pattern file or a config, only by fixing the code
 
 ## Use it
 
-In your `promptwheel.config.json`:
+The pack ships inside the `promptwheel` package, not in your repo, so install it with the
+preset:
 
-```json
-{ "extends": ["packs/security/pack.json"] }
+```bash
+promptwheel init --preset security            # or --preset security-antihack, which adds the tripwires
 ```
 
-Then gate as usual:
+`init` copies the pack into `.promptwheel/packs/security/` and writes a `security_findings`
+metric that runs it from there. Commit the pack with the config: the gate measures in clean
+git worktrees, so a pack that is not in git is absent at both refs and the metric reads
+`unmeasurable` (init warns when `.promptwheel/` is gitignored; change that rule to
+`.promptwheel/*` plus `!.promptwheel/packs/`, since git cannot re-include a file under an
+ignored directory). Then gate as usual:
 
 ```bash
 promptwheel run --working          # fails if security_findings increased
 ```
+
+`pack.json` is the same metric as a config fragment for `extends`
+(`{ "extends": ["packs/security/pack.json"] }`); its command is relative to a repo that
+holds the pack at `packs/security/`, such as a vendored copy or this repository.
 
 A finding-count that drops because you fixed the code is a `PASS`; a "fix" that
 only survives with test/config/pattern edits reverted is `GAMED`.

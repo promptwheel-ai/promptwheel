@@ -884,6 +884,13 @@ function hasEslint(repo) {
   } catch { return false; }
 }
 
+// does git ignore this repo-relative path? `check-ignore -q` exits 0 when it does; 1 when it does
+// not; anything else (not a git repo) counts as not ignored, so init never fails on the check.
+function gitIgnores(repo, relPath) {
+  try { execFileSync('git', ['check-ignore', '-q', relPath], { cwd: repo, stdio: 'ignore' }); return true; }
+  catch { return false; }
+}
+
 function init(argv) {
   if (argv.includes('--list')) {
     console.log('PromptWheel presets (promptwheel init --preset <name>):\n');
@@ -911,8 +918,14 @@ function init(argv) {
       const src = fileURLToPath(new URL(`../${pk[2]}/`, import.meta.url));
       const dst = join(repo, '.promptwheel', pk[2]);
       mkdirSync(dst, { recursive: true });
-      for (const f of readdirSync(src)) copyFileSync(join(src, f), join(dst, f));
+      const files = readdirSync(src);
+      for (const f of files) copyFileSync(join(src, f), join(dst, f));
       console.log(`  ✓ installed ${pk[2]} → .promptwheel/${pk[2]} (commit it with the config)`);
+      // the gate measures in clean worktrees, so a pack that git ignores (common: the outcome
+      // record lives in .promptwheel/ too) is absent at both refs and the metric reads
+      // unmeasurable, failing the guard with no hint why. Say so now, while it is one edit.
+      if (files.length && gitIgnores(repo, `.promptwheel/${pk[2]}/${files[0]}`))
+        console.log(`  ⚠ .promptwheel/${pk[2]} is gitignored: the gate measures in clean worktrees, so an ignored pack is absent at both refs and ${m.name} reads unmeasurable (the guard fails). Replace ".promptwheel/" in .gitignore with ".promptwheel/*" and "!.promptwheel/packs/", then commit the pack`);
       return { ...m, cmd: m.cmd.replaceAll(pk[2] + '/', `.promptwheel/${pk[2]}/`) };
     });
     note = presetName;
