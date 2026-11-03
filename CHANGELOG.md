@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.6 (unreleased): types, a lean plugin skill, and the security-pack gitignore trap
+## 0.7.6 (2026-11-03): types, a lean plugin skill, and the security-pack gitignore trap
 
 - **Types for library consumers:** `bin/promptwheel.d.ts` is hand-written (no build step, no TypeScript dependency) and declares every runtime export plus the `Report`, `CheckOptions` and `Config` shapes. `package.json` points `types` and the `.` export's `types` condition at it, and a test keeps the declaration list in step with the engine's exports.
 - **`init --preset security` warns when the copied pack is gitignored.** The pack is copied from the installed package into `.promptwheel/packs/security/` and the metric runs it from there (unchanged). But the gate measures in clean worktrees, so in a repo whose `.gitignore` covers `.promptwheel/` (common: the outcome record lives there) the pack was absent at both refs, `security_findings` read `unmeasurable`, and every run was a FAIL with no hint why. `init` now says so and names the rule to change (`.promptwheel/*` plus `!.promptwheel/packs/`). The pack README leads with the preset instead of an `extends` path that only resolves inside this repository.
