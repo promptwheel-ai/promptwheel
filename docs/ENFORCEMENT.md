@@ -8,11 +8,11 @@ There are exactly three places to put it, ordered from softest to hardest. Use t
 
 ## 1. The `improve` loop - PromptWheel holds the commit (hardest for a loop you drive)
 
-When you wrap an agent in `promptwheel improve`, **PromptWheel does the `git commit`, not the agent.** A gamed turn is reverted (`git reset --hard`) and the loop reports exit `1`. The change is *gone* - the agent never had the keys to the commit.
+When you wrap an agent in `promptwheel improve`, **PromptWheel does the `git commit`, not the agent.** A gamed turn is reverted (`git reset --hard`) and the loop reports exit `2`. The change is *gone* - the agent never had the keys to the commit.
 
 ```bash
 while promptwheel improve --attempt "$YOUR_AGENT_CMD" --detect-gaming; do :; done
-#   exit 0 = kept a real win · 1 = regression OR gamed (reverted) · 3 = plateau (reverted)
+#   exit 0 = kept a real win · 1 = regression (reverted) · 2 = gamed (reverted) · 3 = plateau (reverted)
 ```
 
 This is the cleanest enforcement: nothing gamed can persist, because the thing that decides "keep or revert" is PromptWheel, not the thing being judged.

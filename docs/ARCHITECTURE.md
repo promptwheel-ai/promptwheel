@@ -28,7 +28,7 @@ The working tree is **never** touched - every read happens in a temp worktree th
 | `run --detect-gaming` / `--no-detect-gaming` | antihack is **on by default**: re-prove each win from source edits alone (verdict `gamed`, exit 2); `--no-detect-gaming` for the bare gate. `--markdown` emits a PR-comment table |
 | `run --working` | gate **uncommitted** changes incl. newly added files (temp-index `write-tree`/`commit-tree` snapshot; real index + tree untouched) |
 | `run --no-record` | don't append to the reward stream |
-| `improve --attempt "<cmd>"` | run any agent/script, gate, **keep only if a metric improved** (commit) else revert. Exit `0` kept / `1` regression / `3` plateau; `--json` adds a top-level `result` |
+| `improve --attempt "<cmd>"` | run any agent/script, gate, **keep only if a metric improved** (commit) else revert. Exit `0` kept / `1` regression / `2` gamed / `3` plateau or inconclusive (the same codes as `run`); `--json` adds a top-level `result` |
 | `insights [--json]` | aggregate `.promptwheel/outcomes.jsonl` into per-metric lever scores |
 | `playbook [--json]` | the earned playbook: decayed, evidence-gated claims distilled from the outcome record |
 | `suggest [--json]` | UCB work-discovery: where the next attempt should go (experimental) |

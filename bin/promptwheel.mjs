@@ -728,11 +728,12 @@ function improve(argv) {
   const noChange = report.metrics.every((m) => m.delta === 0 || m.delta == null);
   const improvedNames = report.metrics.filter((m) => m.status === 'improved').map((m) => m.name);
 
-  // result + exit code express loop progress so `while improve; do :; done` converges:
-  //   0 = kept a real win · 1 = guarded regression (reverted) · 3 = plateau/no-op OR inconclusive (reverted)
+  // result + exit code express loop progress so `while improve; do :; done` converges, with the
+  // same codes as `run`: 0 = kept a real win · 1 = guarded regression (reverted) · 2 = gamed
+  // (reverted) · 3 = plateau/no-op OR inconclusive (reverted)
   let result, exit, note;
   if (report.verdict === 'fail') { result = 'regression'; exit = 1; revert(repo); note = '✗ guarded regression, reverted'; }
-  else if (report.verdict === 'gamed') { result = 'gamed'; exit = 1; revert(repo); note = '🚩 gamed, a metric "improved" by editing tests/config, not source, reverted'; }
+  else if (report.verdict === 'gamed') { result = 'gamed'; exit = 2; revert(repo); note = '🚩 gamed, a metric "improved" by editing tests/config, not source, reverted'; }
   else if (report.verdict === 'inconclusive') { result = 'inconclusive'; exit = 3; revert(repo); note = '≈ inconclusive, a guard measured nothing (inert); reverted'; }
   else if (noChange || improvedNames.length === 0) {
     result = 'plateau'; exit = 3; revert(repo);
@@ -1434,7 +1435,7 @@ function main() {
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
       '  promptwheel run --allow "<reason>"           acknowledge an intentional test/config change (or a `Sawbuck-Allow: <reason>` commit trailer): recorded, not flagged GAMED',
       '  promptwheel improve --attempt "<cmd>"        run an agent/script; keep only if a metric improved',
-      '                                               exit 0=kept · 1=regression · 3=plateau · add --json',
+      '                                               exit 0=kept · 1=regression · 2=gamed · 3=plateau/inconclusive (all but 0 reverted) · add --json',
       '  promptwheel insights                         which metrics actually respond (raw counts)',
       '  promptwheel playbook [--json]                the earned playbook: decayed, evidence-gated claims distilled from the record',
       '  promptwheel suggest [--json]                 UCB work-discovery: where the next attempt should go (experimental)',

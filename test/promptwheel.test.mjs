@@ -399,6 +399,18 @@ test('improve: exit 0=kept / 1=regression / 3=plateau, with --json result field'
   rmSync(d, { recursive: true, force: true });
 });
 
+test('improve: a gamed attempt (test edited to pass, source untouched) exits 2 and is reverted', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');   // BUG
+  writeFileSync(join(d, 'calc.test.mjs'), "import { test } from 'node:test'; import assert from 'node:assert'; import { sub } from './calc.mjs'; test('s', () => assert.strictEqual(sub(5, 3), 2));\n");
+  commitAll(d, 'base: red'); const base = rev(d);
+  const r = pw(d, ['improve', '--json', '--attempt', "sed -i 's|, 2))|, 8))|' calc.test.mjs"]); // green by editing the TEST
+  assert.equal(r.code, 2, r.out); assert.equal(jsonOf(r.out).result, 'gamed');
+  assert.equal(rev(d), base);                                                     // reverted, no commit
+  assert.match(readFileSync(join(d, 'calc.test.mjs'), 'utf8'), /, 2\)\)/);         // the test edit is gone
+  rmSync(d, { recursive: true, force: true });
+});
+
 // --------------------------------------------------------------- R4: init + presets
 test('init: writes a starter config for the stack, refuses overwrite without --force', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-init-'));

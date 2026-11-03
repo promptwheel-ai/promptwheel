@@ -93,7 +93,7 @@ npx promptwheel run --repeat 5 --json     # measure 5× to establish a noise ban
 
 # the loop: run any agent/script, keep the change ONLY if a metric improved
 npx promptwheel improve --attempt "claude -p 'reduce lint errors'"
-#   exit 0 = kept a real win · 1 = guarded regression (reverted) · 3 = plateau / inconclusive (reverted) · add --json
+#   exit 0 = kept a real win · 1 = guarded regression (reverted) · 2 = gamed (reverted) · 3 = plateau / inconclusive (reverted) · add --json
 
 # what's actually responding in this repo? (aggregates .promptwheel/outcomes.jsonl)
 npx promptwheel insights
@@ -131,7 +131,7 @@ while npx promptwheel improve --attempt "claude -p 'speed up the hot path'"; do 
 npx promptwheel run --working --json    # branch on .verdict / per-metric .status
 ```
 
-The exit code is the contract, `0` kept · `1` regression · `3` plateau, so any driver (`/loop`, a Ralph `while`, a Beads pull-loop) converges without parsing anything. PromptWheel never drives the loop; it only says whether the turn counted.
+The exit code is the contract, `0` kept · `1` regression · `2` gamed · `3` plateau, so any driver (`/loop` or a shell `while`) converges without parsing anything. PromptWheel never drives the loop; it only says whether the turn counted.
 
 **Two callers, by design.** Your *agent* consumes the verdict as the loop's per-turn reward (`improve` / `run --working --json`; exit `0` kept · `1`/`2` reverted · `3` plateau). The *harness* (a Stop-hook or CI) runs `--detect-gaming`, the audit the agent **can't self-clear**, because the check never grades itself; it re-proves from the source alone (see [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md)). Same tool; *who calls it* is the difference between a reward and an audit.
 
