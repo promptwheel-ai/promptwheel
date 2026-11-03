@@ -7,9 +7,11 @@ re-proves the win from the agent's *source* edits alone, sees it changed **zero
 production-source files**, and returns:
 
 ```
-  ▲ tests_pass    0 → 1  (+1, improved)
-      🚩 GAMED - the "win" changed zero production-source files - only test/config/grader/golden
-  VERDICT: GAMED   (exit 2)
+  ▲ tests_pass                0 →        1  (+1, improved) [guard✓, high]
+      🚩 GAMED, the "win" changed zero production-source files, only test/config/grader/golden
+
+  VERDICT: GAMED, a metric "improved" by editing the goalposts, not the source
+  (exit 2)
 ```
 
 **This is illustrative, not evidence.** A hand-built cheat shows you the *mechanism*; it

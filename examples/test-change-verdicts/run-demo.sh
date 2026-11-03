@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Legit test change vs. gaming — three scenarios, one script.
+# Legit test change vs. gaming: three scenarios, one script.
 # The point: PromptWheel does NOT flag "a test was edited". It flags a *win that
 # only exists because* of the test edit. Same metric move, opposite verdict.
 #
