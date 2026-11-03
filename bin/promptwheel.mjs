@@ -419,8 +419,9 @@ function selfHeal(repo) {
 // Python editable installs (src-layout `pip install -e .`) can pin imports to the ORIGINAL
 // checkout: the worktree's tests then import your current tree at BOTH refs and every delta
 // reads 0, the gate is structurally blind on that repo shape. Undetectable from the verdict
-// (it looks like "unchanged"), so detect the editable install itself and warn. Verified by a
-// controlled repro (CHANGELOG 0.2.2).
+// (it looks like "unchanged"), so `init` detects the editable install itself and warns once.
+// Verified by a controlled repro (CHANGELOG 0.2.2). Deliberately NOT run by gate(): it spawns
+// python3 with a 5 s timeout and prints, and the library path (check) must do neither.
 function warnEditableInstall(repo) {
   if (!existsSync(join(repo, 'pyproject.toml')) && !existsSync(join(repo, 'setup.py'))) return;
   try {
@@ -433,7 +434,7 @@ function warnEditableInstall(repo) {
       'print("HIT" if hit else "")',
     ].join('\n');
     const out = execFileSync('python3', ['-c', probe, repo], { encoding: 'utf8', timeout: 5000 }).trim();
-    if (out === 'HIT') console.error('⚠ editable install of this repo detected (pip install -e): worktree measurements may import your ORIGINAL checkout, not the measured ref, deltas can read 0. Use a non-editable install in the measuring venv, or put the worktree src on PYTHONPATH.');
+    if (out === 'HIT') console.error('⚠ editable install of this repo detected (pip install -e): worktree measurements could import your ORIGINAL checkout instead of the measured ref, so deltas would read 0. The written config puts the worktree first on PYTHONPATH to counter this; if deltas still read 0, use a non-editable install in the measuring venv.');
   } catch { /* no python / cannot tell, stay quiet */ }
 }
 
@@ -563,7 +564,6 @@ function readAllowTrailer(repo, ref) {
 
 function gate(repo, opts) {
   selfHeal(repo);
-  warnEditableInstall(repo);
   const cfg = opts.config ?? loadConfig(repo);
   const repeat = Math.max(1, opts.repeat ?? cfg.repeat ?? 1);
 
@@ -1076,6 +1076,7 @@ function init(argv) {
   if (envCfg.linkDirs) note += ` · linking ${envCfg.linkDirs.join(', ')}`;
   writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, ...(evaluatorPaths ? { evaluatorPaths } : {}), metrics }, null, 2) + '\n');
   console.log(`✓ wrote promptwheel.config.json, ${note}`);
+  warnEditableInstall(repo);   // one-time advice at setup, never on the per-turn path
   if (!argv.includes('--no-agent-block')) {
     const wrote = writeAgentBlock(repo);
     if (wrote.length) console.log(`✓ wrote the agent guide (when to run the gate) to ${wrote.join(', ')}`);
