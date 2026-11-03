@@ -129,16 +129,19 @@ Returns the Section 2 verdict object (identical to `run --json`). Reproducible f
 | `base` | string | merge-base vs `origin/main`..., else `HEAD~1` | base ref |
 | `head` | string | `HEAD` | head ref |
 | `working` | boolean | `false` | gate uncommitted changes instead of `base..head` |
-| `config` | object | load `promptwheel.config.json` from the repo | a resolved config `{ metrics: [...], ... }`, supplied in process |
+| `config` | object | load `promptwheel.config.json`, or auto-detect | a resolved config `{ metrics: [...], ... }`, supplied in process |
+| `auto` | boolean | `true` | with no config file and no `config` option, gate the auto-detected test command (zero-config); `false` throws instead |
 | `repeat` | number | `config.repeat ?? 1` | measurement repeats for the noise band |
 | `detectGaming` | boolean | `true` | run the Section 3 source-only re-proof |
-| `cohort` | string | `CI ? 'ci' : 'local'` | cohort tag for the record |
-| `label` | string | none | change-type label |
+| `allow` | string | none | a declared override reason (the same as `--allow` / a `Promptwheel-Allow:` trailer): a would-be `gamed` reads `pass` with the reason recorded in `report.allowed` |
+| `label` | string | none | change-type label for the record |
 | `record` | boolean | `false` | append the run to `.promptwheel/outcomes.jsonl` |
 
-Preconditions throw (they do not exit the host): not inside a git repository; no
-`promptwheel.config.json` and no `config` option; a `config` with no non-empty `metrics`
-array. Supplying `config` needs no file on disk:
+Preconditions throw (they do not exit the host): not inside a git repository; `auto: false`
+with no `promptwheel.config.json` and no `config` option; a `config` with no non-empty
+`metrics` array. With neither a file nor `config`, the default is zero-config: the detected
+test command is gated (an inert command reads `inconclusive`, never a fake pass). Supplying
+`config` needs no file on disk:
 
 ```js
 const report = check({

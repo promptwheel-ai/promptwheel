@@ -33,8 +33,9 @@ The working tree is **never** touched - every read happens in a temp worktree th
 | `playbook [--json]` | the earned playbook: decayed, evidence-gated claims distilled from the outcome record |
 | `suggest [--json]` | UCB work-discovery: where the next attempt should go (experimental) |
 | `backfill [-n N \| --since <ref>]` | seed the ledger from git history (cohort-tagged `backfill`; conventional-commit types become labels) |
-| `init [--preset <name> \| --list]` | write a starter config (detect stack; presets `tests-pass`/`lint`/`bundle-size`/`llm-eval`/`antihack`) |
+| `init [--preset <name> \| --list] [--no-agent-block]` | write a starter config (detect stack; presets `tests-pass`/`lint`/`bundle-size`/`security`/`llm-eval`/`antihack`/`no-ai-tells`/`security-antihack`) and an agent-orienting block in `AGENTS.md` |
 | `guards [--json]` | list the effective guardrails (incl. inherited via `extends`) with provenance + each guard's flag record |
+| `conformance [file \| -] [--cmd C]` | validate a verdict JSON (or a command's `--json` output and exit code) against the Verified-Outcome Contract; exit 0 conforms, 1 otherwise |
 
 `run` and `improve` share one `gate(repo, opts)` core. `improve` requires a clean tree (ignoring `.promptwheel/`), runs the attempt, gates working-vs-HEAD, then **commits** on a real improvement or reverts (`git reset --hard` + `git clean -fd -e .promptwheel`) on a regression / no-op.
 

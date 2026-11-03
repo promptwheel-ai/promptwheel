@@ -32,7 +32,7 @@ Tests live in `test/promptwheel.test.mjs` - keep them **dep-free** (`node:test`)
 
 ## Don'ts
 
-- Don't re-add orchestration, "spin", trajectories, or formulas - that lineage is archived (`_archive/promptwheel-orchestration`, recoverable from GitHub).
+- Don't re-add orchestration, "spin", trajectories, or formulas - that lineage was retired in June 2026 and is not in this repo (it survives only in git history before the pivot).
 - Don't add heavy deps, a framework, or a build pipeline.
 - Don't let a guard fail on a within-noise delta.
 - Don't bake cloud/billing into the OSS core.

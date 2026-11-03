@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.5 (unreleased): cleanup
+
+(entry written at the end of this cleanup; see the commits on main)
+
+## 0.7.4 (2026-11-02): mandates (protected-path hard rules)
+
+- **`mandates`: named hard rules that fail the gate before any metric is read.** A `mandates` config entry names a protected-path rule (for example, never touch `src/auth/**`) that compiles to a deterministic, zero-LLM gate: any change touching a protected path fails the gate regardless of metrics (verdict `fail`, exit 1), rides at the top of the human and markdown report with its reason, inherits through `extends` (a parent scope's rule holds for every repo beneath it), and is folded into the gate fingerprint. This is the contract-vs-request line: `AGENTS.md` asks; a mandate will not let the change past the gate. `conformsToContract` accepts the optional `mandates` record.
+- **Fixed:** `git apply --3way` printed "Applied patch ... cleanly" to stderr during gaming detection, which corrupted `--json` for callers that fold stderr into stdout. Silenced.
+- **CI: cross-OS proof of the headline claim.** A `gamed-catch` job stages a red-to-green-by-editing-the-test win on ubuntu, macos and windows and asserts it is caught (never exit 0) and flagged `GAMED`. README gained a Portability note: the core check is git-only; the starter grep tripwires need a GNU-grep-compatible shell and fail closed (unmeasurable, verdict `FAIL`) where one is absent, so a gamed green is still never passed.
+
+## 0.7.3 (2026-11-01): evaluatorPaths content-hash auto-fail + provenance receipt + Apache-2.0
+
+- **Declared gate files are gamed by declaration.** A path listed in `evaluatorPaths` whose content changed between base and head, in the same diff that improves a metric, is now `gamed` deterministically (a content-hash check), even when the source-only re-run reads inert. Recorded in `gate.evaluatorChanged`. Only declared files trigger it, so the opt-in semantics hold: an undeclared config file still counts as source (the documented miss).
+- **Provenance receipt on every verdict.** `report.provenance = { tool, toolVersion, baseSha, headSha, configHash, verdictHash }`, so a skeptic can re-run `(base, head, config)` and get the same `verdictHash`. Additive; never changes the verdict.
+- **Relicensed MIT to Apache-2.0** (canonical text in `LICENSE`, copyright in `NOTICE`, `license` fields updated). Still permissive; adds the explicit patent grant.
+- **bench:** `redteam-bench.mjs` emits `bench/redteam-claims.json`, the single source of truth for outward claims (ecosystems, scenarios, caught classes, the honest caught scope, the opt-in misses); `--claims-only` regenerates it without the full run.
+
 ## 0.7.2 (2026-11-01): agent-orienting starter block + output hygiene
 
 - **`init` writes an agent-orienting gate block.** `promptwheel init` now writes a short "when to run the gate / what GAMED means" block into `AGENTS.md` (and `CLAUDE.md` / `.cursorrules` when present), sentinel-delimited and idempotent, so the coding agent (or a loop) runs the gate itself, not just the human. `--no-agent-block` skips it. The README documents the block too (for manual paste). Status line bumped to the current version.

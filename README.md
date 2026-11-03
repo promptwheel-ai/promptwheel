@@ -84,7 +84,7 @@ This is **one layer**, not a silver bullet: it catches the evaluator-tampering c
 ```bash
 # 0. write a starter config for your stack (or hand-write promptwheel.config.json)
 npx promptwheel init                      # detects stack → guarded tests + antihack tripwires (+ lint if eslint is set up)
-npx promptwheel init --list               # presets: tests-pass · lint · bundle-size · llm-eval · antihack
+npx promptwheel init --list               # presets: tests-pass · lint · bundle-size · security · llm-eval · antihack · no-ai-tells · security-antihack
 
 # measure a change
 npx promptwheel run                       # base = merge-base with main, head = HEAD · reward-hack detection ON
@@ -189,7 +189,7 @@ The Action runs straight from its own checkout, no npm install, no build. See [`
 
 Dependency & environment keys (config-level; `init` writes stack defaults):
 
-- **linkDirs**, dirs to symlink from your checkout into each measuring worktree, for deps that live outside git. Default `["node_modules"]`; `init` writes `[".venv"]` for Python, `["target"]` for Rust. (`"linkNodeModules": false` still works as shorthand for "link nothing".)
+- **linkDirs**, dirs to symlink from your checkout into each measuring worktree, for deps that live outside git. Default `["node_modules"]`; `init` writes `[".venv"]` for Python and `[]` for Rust (`cargo test` writes to `target/`, so it is built fresh in the worktree rather than shared across refs). (`"linkNodeModules": false` still works as shorthand for "link nothing".)
 - **env**, environment variables for every metric command; `{wt}` is substituted with the worktree path. Python configs get `"PYTHONPATH": "{wt}/src:{wt}"` so the *measured ref* is imported, not an editable install of your original checkout.
 - **setup**, an optional command run once per ref before metrics (e.g. `npm run build`, `pip install -e .`), after any source patch, so a build-gated suite measures the ref it's actually on.
 
@@ -283,4 +283,4 @@ The engine is one importable file; pure helpers are exported for unit tests, the
 - [x] zero-config: `run` and `check()` auto-detect the gate with no committed config, `init` becomes optional (0.6.0)
 - [x] declared override (`Sawbuck-Allow:` trailer / `--allow`) + `init` build-setup detection, so a build-gated test measures instead of reading inert (0.7.0)
 
-> Status: **published** (npm `promptwheel`, v0.7.1), all core phases built. Lineage: CommandLayer → BlockSpool → PromptWheel (orchestrator, archived) → **PromptWheel (outcome gate)**.
+> Status: **published** (npm `promptwheel`, see [CHANGELOG.md](CHANGELOG.md) for the current version), all core phases built.
