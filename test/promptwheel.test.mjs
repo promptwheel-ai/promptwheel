@@ -1136,6 +1136,23 @@ test('Sawbuck-Allow: a trailer with no reason does NOT override (still gamed)', 
   rmSync(d, { recursive: true, force: true });
 });
 
+// ---------------------------------------------------- integration: CLI entry (version / help / unknown)
+test('cli: --version prints the package version (exit 0); --help exits 0; an unknown command exits 64', () => {
+  const pkgVersion = JSON.parse(readFileSync(join(dirname(ENGINE), '..', 'package.json'), 'utf8')).version;
+  const d = tmpRepo([TODOS]);
+  let r = pw(d, ['--version']);
+  assert.equal(r.code, 0); assert.equal(r.out.trim(), pkgVersion);
+  r = pw(d, ['-v']);
+  assert.equal(r.code, 0); assert.equal(r.out.trim(), pkgVersion);
+  r = pw(d, ['--help']);
+  assert.equal(r.code, 0); assert.match(r.out, /promptwheel run/);
+  r = pw(d, []);
+  assert.equal(r.code, 0); assert.match(r.out, /promptwheel run/);
+  r = pw(d, ['frobnicate']);
+  assert.equal(r.code, 64); assert.match(r.out, /unknown command: frobnicate/);
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------- integration: build-setup detection (inert gap)
 test('init: detects a build step so a build-dependent gate measures instead of reading inert', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-build-'));

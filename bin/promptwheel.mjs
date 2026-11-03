@@ -29,6 +29,10 @@ const median = (xs) => {
 };
 const spread = (xs) => { const a = xs.filter((x) => x != null); return a.length ? Math.max(...a) - Math.min(...a) : 0; };
 
+// usage / config errors exit 64 (EX_USAGE), so they can never be confused with a verdict
+// (0 pass, 1 fail, 2 gamed, 3 inconclusive): in CI a config typo must not read as GAMED.
+const EX_USAGE = 64;
+
 function readConfigFile(p) {
   try { return JSON.parse(readFileSync(p, 'utf8')); }
   catch (e) { console.error(`invalid config ${p}: ${e.message}`); process.exit(2); }
@@ -1397,6 +1401,7 @@ function conformance(argv) {
 
 function main() {
   const [cmd, ...rest] = process.argv.slice(2);
+  if (cmd === '--version' || cmd === '-v') { console.log(TOOL_VERSION ?? 'unknown'); process.exit(0); }
   if (cmd === 'run') run(rest);
   else if (cmd === 'improve') improve(rest);
   else if (cmd === 'insights') insights(rest);
@@ -1407,9 +1412,13 @@ function main() {
   else if (cmd === 'guards') guards(rest);
   else if (cmd === 'conformance') conformance(rest);
   else {
+    const help = !cmd || cmd === '--help' || cmd === '-h' || cmd === 'help';
+    if (!help) console.error(`unknown command: ${cmd}`);
     console.log([
       'PromptWheel, catch your agent cheating. Prove a change moved a real metric (and that the agent earned it, not gamed it). The per-turn reward + source-only audit for AI coding loops.',
       '',
+      '  promptwheel --version | -v                   print the version',
+      '  promptwheel --help | -h                      this banner',
       '  promptwheel init [--preset <name> | --list] [--no-agent-block]  write a starter config + an AGENTS.md guide so your agent runs the gate (OPTIONAL: run works zero-config, auto-detecting your test command)',
       '  promptwheel run [--base R] [--head R] [--repeat N] [--json|--markdown]',
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',
@@ -1430,7 +1439,7 @@ function main() {
       'Config:   promptwheel.config.json → { extends?, metrics:[{ name, cmd, direction, extract?, guard? }] }   (or: promptwheel init)',
       '          extends: a path (or array) to a shared base config, repos INHERIT its guardrails; local metrics override by name.',
     ].join('\n'));
-    process.exit(cmd ? 2 : 0);
+    process.exit(help ? 0 : EX_USAGE);
   }
 }
 
