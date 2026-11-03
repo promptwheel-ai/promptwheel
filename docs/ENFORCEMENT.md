@@ -39,7 +39,7 @@ Then in **Settings → Branches → Branch protection rules**: require the `Prom
 
 ## 3. A Claude Code Stop-hook - the in-session nudge
 
-Fires the instant the agent tries to finish a turn. On a gamed change it exits `2`, which tells Claude Code **not to let the agent stop** and feeds the reason back to the model, so it has to go fix the source. The script is tested and ships at [`plugins/promptwheel/hooks/detect-gaming-stop.sh`](../plugins/promptwheel/hooks/detect-gaming-stop.sh).
+Fires the instant the agent tries to finish a turn. On a gamed change it exits `2`, which tells Claude Code **not to let the agent stop** and feeds the reason back to the model, so it has to go fix the source. The script ships as a copyable example at [`examples/detect-gaming-stop.sh`](../examples/detect-gaming-stop.sh) (the plugin registers no hooks itself; you wire this one by hand so it lives in settings the agent cannot edit).
 
 Wire it in `settings.json` (schema confirmed against the Claude Code hooks docs):
 
@@ -58,7 +58,7 @@ Wire it in `settings.json` (schema confirmed against the Claude Code hooks docs)
 }
 ```
 
-- Copy the script to `.claude/hooks/detect-gaming-stop.sh` (commit it) and make it executable. `promptwheel` must be on `PATH` (`npm i -g promptwheel`) or set `PROMPTWHEEL="npx promptwheel"` in the script.
+- Copy `examples/detect-gaming-stop.sh` to `.claude/hooks/detect-gaming-stop.sh` (commit it) and make it executable. `promptwheel` must be on `PATH` (`npm i -g promptwheel`) or set `PROMPTWHEEL="npx promptwheel"` in the script.
 - **Where to put the hook config:** `~/.claude/settings.json` (your global user settings) is the version an in-repo agent **can't edit** - best for "can't disable." `.claude/settings.json` (committed) shares it with the team but the agent *could* edit the file; `.claude/settings.local.json` (gitignored) is local-only.
 - **Loop safety:** the script reads stdin and bails out if `stop_hook_active` is already true, so it nudges once and won't trap the agent in an infinite block loop - CI (#2) is the hard stop if the agent keeps gaming.
 
