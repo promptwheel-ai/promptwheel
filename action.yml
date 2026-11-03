@@ -1,5 +1,5 @@
 name: 'PromptWheel Outcome Gate'
-description: "A deterministic, zero-LLM check for your coding loop. It proves every change earned its win by re-running the result from the agent's source edits alone, so a green that came from editing the test reads GAMED (exit 2). Runs as your PR check."
+description: "Deterministic, zero-LLM PR check: a win must survive a re-run from the source edits alone, or it reads GAMED (exit 2)."
 branding:
   icon: 'check-circle'
   color: 'green'
