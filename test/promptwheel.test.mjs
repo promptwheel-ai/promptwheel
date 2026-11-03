@@ -997,6 +997,53 @@ test('gate integrity: an unchanged mandate (local or inherited) yields identical
   rmSync(d, { recursive: true, force: true });
 });
 
+test('mandates: deleting a mandate in the same change that violates it does not clear it (base mandates stay in force)', () => {
+  const MD = { name: 'no-secrets', paths: ['secrets.json'], reason: 'frozen' };
+  const mk = (touchProtected) => {
+    const d = tmpRepo([TODOS]);
+    writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, mandates: [MD], metrics: [TODOS] }));
+    writeFileSync(join(d, 'secrets.json'), '{"v":1}\n'); writeFileSync(join(d, 'app.js'), 'x // TODO\n'); commitAll(d, 'base');
+    writeFileSync(join(d, 'app.js'), 'x\n');
+    writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [TODOS] }));   // mandate deleted at head
+    if (touchProtected) writeFileSync(join(d, 'secrets.json'), '{"v":2}\n');
+    commitAll(d, 'head');
+    return d;
+  };
+  // the bypass: delete the rule and break it in one commit -> still FAIL, reported as removed, exit 1
+  let d = mk(true);
+  let r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'fail');
+  assert.ok(r.mandates && r.mandates[0].name === 'no-secrets' && r.mandates[0].removed === true, JSON.stringify(r.mandates));
+  assert.equal(r.gate.changed, true);
+  assert.equal(conformsToContract(r).ok, true, conformsToContract(r).errors.join('; '));
+  const cli = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.equal(cli.code, 1);
+  assert.match(cli.out, /MANDATE "no-secrets" violated/);
+  assert.match(cli.out, /deleted in this same change/);
+  // without gaming detection the base mandates are still enforced
+  r = check({ repo: d, base: 'HEAD~1', head: 'HEAD', detectGaming: false });
+  assert.equal(r.verdict, 'fail');
+  rmSync(d, { recursive: true, force: true });
+  // retiring the mandate in its own change (protected path untouched): allowed, PASS, fingerprint change recorded
+  d = mk(false);
+  r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'pass');
+  assert.ok(!r.mandates);
+  assert.equal(r.gate.changed, true);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('resolveBase: on the trunk itself (merge-base == HEAD) the default base is the last commit, never HEAD vs HEAD', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'x // TODO\n'); commitAll(d, 'base');
+  execFileSync('git', ['branch', '-M', 'main'], { cwd: d });
+  writeFileSync(join(d, 'app.js'), 'x\n'); commitAll(d, 'head');
+  const r = check({ repo: d });                                     // no base/head given, on main
+  assert.notEqual(r.base, r.head, 'a bare run on main must compare the last commit, not a commit to itself');
+  assert.equal(r.metrics[0].status, 'improved');
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---------------------------------------------------- integration: zero-config (no config file)
 function bareRepo() {
   const d = mkdtempSync(join(tmpdir(), 'pw-zc-'));

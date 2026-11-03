@@ -96,8 +96,13 @@ function autoConfig(repo) {
 
 function resolveBase(repo, base) {
   if (base) return base;
+  const head = git(['rev-parse', 'HEAD'], repo);
   for (const b of ['origin/main', 'origin/master', 'main', 'master']) {
-    try { return git(['merge-base', 'HEAD', b], repo); } catch { /* keep trying */ }
+    let mb = '';
+    try { mb = git(['merge-base', 'HEAD', b], repo); } catch { continue; }
+    // on the trunk itself the merge-base IS HEAD; comparing a commit to itself would be a
+    // trivial PASS that verified nothing, so fall through to the last commit instead.
+    if (mb && mb !== head) return mb;
   }
   return git(['rev-parse', 'HEAD~1'], repo);
 }
@@ -278,8 +283,15 @@ function evaluatorMatcher(cfg) {
 // forbids ANY change to its paths (same glob semantics as evaluatorPaths). A hit fails the gate
 // regardless of metrics and rides at the top of the report; mandates inherit through `extends`,
 // so a parent scope's rule holds for every repo beneath it.
-function checkMandates(repo, base, head, cfg) {
-  const mandates = Array.isArray(cfg.mandates) ? cfg.mandates : [];
+// The mandates in force are the UNION of the head config's and the base ref's (`baseMandates`,
+// resolved by gateDefAtRef): deleting a mandate in the same change that violates it does not
+// clear it. A mandate removed at head but violated in the diff is reported with `removed: true`.
+// The honest way to retire one is a separate change that only edits the config.
+function checkMandates(repo, base, head, cfg, baseMandates) {
+  const headList = Array.isArray(cfg.mandates) ? cfg.mandates : [];
+  const headNames = new Set(headList.map((m) => m && m.name).filter(Boolean));
+  const removed = (Array.isArray(baseMandates) ? baseMandates : []).filter((m) => m && m.name && !headNames.has(m.name));
+  const mandates = [...headList, ...removed.map((m) => ({ ...m, __removed: true }))];
   if (!mandates.length) return [];
   let changed = [];
   try { changed = git(['diff', '--name-only', base, head], repo).split('\n').filter(Boolean); } catch { return []; }
@@ -289,7 +301,7 @@ function checkMandates(repo, base, head, cfg) {
     if (!pats.length) continue;
     const res = pats.map(globToRe);
     const hit = changed.filter((f) => res.some((re) => re.test(f)));
-    if (hit.length) out.push({ name: String(m.name || 'mandate'), reason: m.reason ? String(m.reason).slice(0, 300) : '', files: hit.slice(0, 20) });
+    if (hit.length) out.push({ name: String(m.name || 'mandate'), reason: m.reason ? String(m.reason).slice(0, 300) : '', files: hit.slice(0, 20), ...(m.__removed ? { removed: true } : {}) });
   }
   return out;
 }
@@ -591,12 +603,16 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat) {
   }
   const fpBase = baseGate ? gateFingerprint([...baseGate.metrics.values()], baseGate.scalars) : null;
   const fpHead = gateFingerprint(cfg.metrics, cfg);
-  return {
+  const info = {
     fingerprint: { base: fpBase, head: fpHead },
     ...(fpBase && fpBase !== fpHead ? { changed: true } : {}),
     ...(weakened.length ? { weakened } : {}),
     ...(evalChanged.length ? { evaluatorChanged: evalChanged } : {}),
   };
+  // hand the base ref's mandates to gate() (not part of the record) so checkMandates can hold a
+  // change to a mandate it deleted in the same diff.
+  Object.defineProperty(info, 'baseMandates', { value: baseGate ? baseGate.scalars.mandates || [] : null, enumerable: false });
+  return info;
 }
 
 function gate(repo, opts) {
@@ -640,7 +656,10 @@ function gate(repo, opts) {
     }
   }
   // mandates run first: a protected-path hard rule fails the gate no matter what the metrics say.
-  const mandateViolations = checkMandates(repo, base, head, cfg);
+  // The base ref's mandates count too (resolved through `extends` by gateDefAtRef), so a change
+  // cannot clear a mandate by deleting it in the same diff that violates it.
+  const baseMandates = (gateInfo && gateInfo.baseMandates) || (!opts.detectGaming ? ((gateDefAtRef(repo, base) || {}).scalars || {}).mandates : null);
+  const mandateViolations = checkMandates(repo, base, head, cfg, baseMandates);
   const mandated = mandateViolations.length > 0;
   const failed = metrics.some((m) => m.guard && !m.ok);
   const gamed = metrics.some((m) => m.gamed === true) || !!(gateInfo && gateInfo.weakened && !gateInfo.allowed);
@@ -974,7 +993,7 @@ const short = (repo, ref) => { try { return git(['rev-parse', '--short', ref], r
 function printHuman(r) {
   const arrowFor = (m) => (m.delta == null ? '?' : m.delta > 0 ? '▲' : m.delta < 0 ? '▼' : '=');
   console.log(`\nPromptWheel  ${r.base} → ${r.head}${r.repeat > 1 ? `  (×${r.repeat})` : ''}\n`);
-  if (r.mandates) for (const md of r.mandates) console.log(`  ⛔ MANDATE "${md.name}" violated${md.reason ? ': ' + md.reason : ''}  (touched: ${md.files.join(', ')})`);
+  if (r.mandates) for (const md of r.mandates) console.log(`  ⛔ MANDATE "${md.name}" violated${md.reason ? ': ' + md.reason : ''}  (touched: ${md.files.join(', ')})${md.removed ? '  [deleted in this same change; a mandate stays in force for the change that removes it]' : ''}`);
   for (const m of r.metrics) {
     const tag = m.guard ? (m.ok ? 'guard✓' : 'GUARD✗') : 'info';
     const d = m.delta == null ? 'n/a' : (m.delta > 0 ? `+${m.delta}` : `${m.delta}`);
@@ -1006,7 +1025,7 @@ function renderMarkdown(r) {
     '',
     `\`${r.base} → ${r.head}\` · ${r.mode} mode${r.repeat > 1 ? ` · ×${r.repeat}` : ''}`,
     '',
-    ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Mandate violated:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)`).join('\n'), ''] : []),
+    ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Mandate violated:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : ''}`).join('\n'), ''] : []),
     '| metric | before | after | Δ | status | confidence |',
     '|---|--:|--:|--:|---|---|',
     rows,
