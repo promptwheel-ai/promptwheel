@@ -156,6 +156,8 @@ export interface MandateViolation {
   files: string[];
   /** The mandate was deleted in this same change; it stays in force for the change that removes it. */
   removed?: true;
+  /** The mandate's paths were edited in this same change; the version before the change stays in force for the change that edits it. */
+  edited?: true;
 }
 
 export interface GateWeakening {
@@ -235,6 +237,12 @@ export declare function verdictExitCode(verdict: Verdict | string): 0 | 1 | 2 | 
  * Measures only in throwaway git worktrees, never the caller's working tree. Never prints and
  * never calls `process.exit`; throws a plain `Error` on a precondition failure (not a git
  * repository, `auto: false` with no config, a `config` without a non-empty `metrics` array).
+ */
+/**
+ * Runs the gate in process and returns the report. Never prints and never exits the process: a
+ * precondition failure (not a git repository, a missing, malformed or cyclic config, a missing
+ * `extends` target, no commits yet) throws an Error whose `name` is `'ConfigError'` and whose
+ * `exitCode` is 64, the code the CLI exits with for the same condition.
  */
 export declare function check(options?: CheckOptions): Report;
 

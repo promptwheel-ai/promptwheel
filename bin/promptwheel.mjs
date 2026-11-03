@@ -35,10 +35,13 @@ const spread = (xs) => { const a = xs.filter((x) => x != null); return a.length 
 // (0 pass, 1 fail, 2 gamed, 3 inconclusive): in CI a config typo must not read as GAMED.
 const EX_USAGE = 64;
 function die(msg) { console.error(msg); process.exit(EX_USAGE); }
+// a config or precondition error: thrown, so the library path (check()) surfaces it to the caller
+// instead of exiting the host process; the CLI catches it in main() and exits EX_USAGE.
+function bad(msg) { const e = new Error(msg); e.name = 'ConfigError'; e.exitCode = EX_USAGE; throw e; }
 
 function readConfigFile(p) {
   try { return JSON.parse(readFileSync(p, 'utf8')); }
-  catch (e) { die(`invalid config ${p}: ${e.message}`); }
+  catch (e) { bad(`invalid config ${p}: ${e.message}`); }
 }
 
 const relOf = (repo, p) => { try { return relative(repo, p) || p; } catch { return p; } };
@@ -48,7 +51,7 @@ const relOf = (repo, p) => { try { return relative(repo, p) || p; } catch { retu
 // a repo INHERITS their guardrails, and a local metric of the same name overrides the inherited one.
 function resolveConfig(p, repo, label, seen) {
   const abs = realpathSync(p);
-  if (seen.has(abs)) die(`config inheritance cycle at ${relOf(repo, p)}`);
+  if (seen.has(abs)) bad(`config inheritance cycle at ${relOf(repo, p)}`);
   seen.add(abs);
   try {
     const cfg = readConfigFile(p);
@@ -57,7 +60,7 @@ function resolveConfig(p, repo, label, seen) {
     const scalars = {};
     for (const ref of [].concat(cfg.extends || [])) {
       const bp = isAbsolute(ref) ? ref : join(dirname(p), ref);
-      if (!existsSync(bp)) die(`extends target not found: ${ref} (from ${relOf(repo, p)})`);
+      if (!existsSync(bp)) bad(`extends target not found: ${ref} (from ${relOf(repo, p)})`);
       const base = resolveConfig(bp, repo, relOf(repo, bp), seen);
       for (const m of base.metrics) byName.set(m.name, m);
       for (const md of (base.mandates || [])) if (md && md.name) mandatesByName.set(md.name, md);
@@ -76,9 +79,9 @@ function resolveConfig(p, repo, label, seen) {
 
 function loadConfig(repo) {
   const p = join(repo, 'promptwheel.config.json');
-  if (!existsSync(p)) die('no promptwheel.config.json, run: promptwheel init   (writes one for your stack)');
+  if (!existsSync(p)) bad('no promptwheel.config.json, run: promptwheel init   (writes one for your stack)');
   const cfg = resolveConfig(p, repo, 'local', new Set());
-  if (!Array.isArray(cfg.metrics) || cfg.metrics.length === 0) die('config.metrics must be a non-empty array');
+  if (!Array.isArray(cfg.metrics) || cfg.metrics.length === 0) bad('config.metrics must be a non-empty array');
   return cfg;
 }
 
@@ -285,13 +288,18 @@ function evaluatorMatcher(cfg) {
 // so a parent scope's rule holds for every repo beneath it.
 // The mandates in force are the UNION of the head config's and the base ref's (`baseMandates`,
 // resolved by gateDefAtRef): deleting a mandate in the same change that violates it does not
-// clear it. A mandate removed at head but violated in the diff is reported with `removed: true`.
+// clear it. A mandate removed at head but violated in the diff is reported with `removed: true`; one
+// whose paths were edited at head (same name, different paths) is tested in BOTH versions and reported
+// with `edited: true`, so narrowing a rule in the change that breaks it does not clear it either.
 // The honest way to retire one is a separate change that only edits the config.
 function checkMandates(repo, base, head, cfg, baseMandates) {
   const headList = Array.isArray(cfg.mandates) ? cfg.mandates : [];
   const headNames = new Set(headList.map((m) => m && m.name).filter(Boolean));
-  const removed = (Array.isArray(baseMandates) ? baseMandates : []).filter((m) => m && m.name && !headNames.has(m.name));
-  const mandates = [...headList, ...removed.map((m) => ({ ...m, __removed: true }))];
+  const key = (m) => JSON.stringify([String(m.name), [...(Array.isArray(m.paths) ? m.paths : [])].filter((x) => typeof x === 'string').sort()]);
+  const headKeys = new Set(headList.filter((m) => m && m.name).map(key));
+  const kept = (Array.isArray(baseMandates) ? baseMandates : []).filter((m) => m && m.name && !headKeys.has(key(m)))
+    .map((m) => (headNames.has(m.name) ? { ...m, __edited: true } : { ...m, __removed: true }));
+  const mandates = [...headList, ...kept];
   if (!mandates.length) return [];
   let changed = [];
   try { changed = git(['diff', '--name-only', base, head], repo).split('\n').filter(Boolean); } catch { return []; }
@@ -301,9 +309,18 @@ function checkMandates(repo, base, head, cfg, baseMandates) {
     if (!pats.length) continue;
     const res = pats.map(globToRe);
     const hit = changed.filter((f) => res.some((re) => re.test(f)));
-    if (hit.length) out.push({ name: String(m.name || 'mandate'), reason: m.reason ? String(m.reason).slice(0, 300) : '', files: hit.slice(0, 20), ...(m.__removed ? { removed: true } : {}) });
+    if (hit.length) out.push({ name: String(m.name || 'mandate'), reason: m.reason ? String(m.reason).slice(0, 300) : '', files: hit.slice(0, 20), ...(m.__removed ? { removed: true } : {}), ...(m.__edited ? { edited: true } : {}) });
   }
-  return out;
+  // one entry per name: the head version and the edited base version of a rule merge (files unioned)
+  const merged = [];
+  for (const v of out) {
+    const prev = merged.find((x) => x.name === v.name);
+    if (!prev) { merged.push(v); continue; }
+    prev.files = [...new Set([...prev.files, ...v.files])].slice(0, 20);
+    if (v.edited) prev.edited = true;
+    if (!prev.reason && v.reason) prev.reason = v.reason;
+  }
+  return merged;
 }
 
 // split the agent's changed files into production-source vs test/config/grader/golden.
@@ -626,7 +643,7 @@ function gate(repo, opts) {
     // never touches the real index or working tree. (A loop agent's most common action
     // is to ADD a file; `git stash create` omits untracked, which silently reverted them.)
     try { git(['rev-parse', '--verify', 'HEAD'], repo); }
-    catch { die('no commits yet, make an initial commit before gating --working changes'); }
+    catch { bad('no commits yet, make an initial commit before gating --working changes'); }
     base = 'HEAD';
     head = workingSnapshot(repo);
   } else {
@@ -1006,7 +1023,7 @@ const short = (repo, ref) => { try { return git(['rev-parse', '--short', ref], r
 function printHuman(r) {
   const arrowFor = (m) => (m.delta == null ? '?' : m.delta > 0 ? '▲' : m.delta < 0 ? '▼' : '=');
   console.log(`\nPromptWheel  ${r.base} → ${r.head}${r.repeat > 1 ? `  (×${r.repeat})` : ''}\n`);
-  if (r.mandates) for (const md of r.mandates) console.log(`  ⛔ MANDATE "${md.name}" violated${md.reason ? ': ' + md.reason : ''}  (touched: ${md.files.join(', ')})${md.removed ? '  [deleted in this same change; a mandate stays in force for the change that removes it]' : ''}`);
+  if (r.mandates) for (const md of r.mandates) console.log(`  ⛔ MANDATE "${md.name}" violated${md.reason ? ': ' + md.reason : ''}  (touched: ${md.files.join(', ')})${md.removed ? '  [deleted in this same change; a mandate stays in force for the change that removes it]' : md.edited ? '  [edited in this same change; the version before the change stays in force for the change that edits it]' : ''}`);
   for (const m of r.metrics) {
     const tag = m.guard ? (m.ok ? 'guard✓' : 'GUARD✗') : 'info';
     const d = m.delta == null ? 'n/a' : (m.delta > 0 ? `+${m.delta}` : `${m.delta}`);
@@ -1038,7 +1055,7 @@ function renderMarkdown(r) {
     '',
     `\`${r.base} → ${r.head}\` · ${r.mode} mode${r.repeat > 1 ? ` · ×${r.repeat}` : ''}`,
     '',
-    ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Mandate violated:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : ''}`).join('\n'), ''] : []),
+    ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Mandate violated:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : md.edited ? ' (edited in this same change; the version before the change stays in force for the change that edits it)' : ''}`).join('\n'), ''] : []),
     '| metric | before | after | Δ | status | confidence |',
     '|---|--:|--:|--:|---|---|',
     rows,
@@ -1273,7 +1290,7 @@ function conformance(argv) {
   process.exit(1);
 }
 
-function main() {
+function dispatch() {
   const [cmd, ...rest] = process.argv.slice(2);
   if (cmd === '--version' || cmd === '-v') { console.log(TOOL_VERSION ?? 'unknown'); process.exit(0); }
   if (cmd === 'run') run(rest);
@@ -1315,4 +1332,8 @@ function main() {
 // run the CLI only when invoked directly (resolves symlinks so the npm bin still works)
 let isMain = false;
 try { isMain = !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { /* not main */ }
+function main() {
+  try { dispatch(); }
+  catch (e) { if (e && e.name === 'ConfigError') die(e.message); throw e; }
+}
 if (isMain) main();

@@ -1082,6 +1082,51 @@ test('mandates: deleting a mandate in the same change that violates it does not 
   rmSync(d, { recursive: true, force: true });
 });
 
+test('mandates: narrowing a mandate in the same change that violates it does not clear it (the base version stays in force, reported as edited)', () => {
+  const mk = (touchProtected) => {
+    const d = tmpRepo([TODOS]);
+    mkdirSync(join(d, 'test', 'legacy'), { recursive: true });
+    writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, mandates: [{ name: 'tests', paths: ['test/**'], reason: 'frozen' }], metrics: [TODOS] }));
+    writeFileSync(join(d, 'test', 'a.js'), '1\n'); writeFileSync(join(d, 'test', 'legacy', 'b.js'), '1\n'); writeFileSync(join(d, 'app.js'), 'x // TODO\n'); commitAll(d, 'base');
+    writeFileSync(join(d, 'app.js'), 'x\n');
+    writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, mandates: [{ name: 'tests', paths: ['test/legacy/**'], reason: 'frozen' }], metrics: [TODOS] }));   // narrowed at head
+    if (touchProtected) writeFileSync(join(d, 'test', 'a.js'), '2\n');   // outside the narrowed paths, inside the base ones
+    commitAll(d, 'head');
+    return d;
+  };
+  let d = mk(true);
+  let r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'fail');
+  assert.ok(r.mandates && r.mandates.length === 1 && r.mandates[0].name === 'tests' && r.mandates[0].edited === true && !r.mandates[0].removed, JSON.stringify(r.mandates));
+  assert.deepEqual(r.mandates[0].files, ['test/a.js']);
+  assert.equal(conformsToContract(r).ok, true, conformsToContract(r).errors.join('; '));
+  const cli = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.equal(cli.code, 1);
+  assert.match(cli.out, /MANDATE "tests" violated/);
+  assert.match(cli.out, /edited in this same change/);
+  rmSync(d, { recursive: true, force: true });
+  // narrowing the rule in its own change (nothing protected touched): allowed, PASS, fingerprint change recorded
+  d = mk(false);
+  r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'pass');
+  assert.ok(!r.mandates);
+  assert.equal(r.gate.changed, true);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('check(): a malformed config or a missing extends target throws a ConfigError (exitCode 64), never exits the host process', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'x\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'promptwheel.config.json'), '{ not json');
+  assert.throws(() => check({ repo: d }), (e) => e.name === 'ConfigError' && e.exitCode === 64 && /invalid config/.test(e.message));
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ extends: './missing.json', metrics: [TODOS] }));
+  assert.throws(() => check({ repo: d }), (e) => e.name === 'ConfigError' && /extends target not found/.test(e.message));
+  // the CLI maps the same error to exit 64
+  const cli = pw(d, ['run', '--base', 'HEAD', '--head', 'HEAD', '--no-record']);
+  assert.equal(cli.code, 64, cli.out);
+  rmSync(d, { recursive: true, force: true });
+});
+
 test('resolveBase: on the trunk itself (merge-base == HEAD) the default base is the last commit, never HEAD vs HEAD', () => {
   const d = tmpRepo([TODOS]);
   writeFileSync(join(d, 'app.js'), 'x // TODO\n'); commitAll(d, 'base');
