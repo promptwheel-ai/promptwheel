@@ -1,7 +1,7 @@
 ---
 description: Gate the current uncommitted changes through PromptWheel - prove they moved a metric without regressing another (the per-turn reward for an AI coding loop). Use after making a change that should improve a measurable outcome.
 arguments: "[optional flags, e.g. --repeat 5]"
-allowed-tools: ["Bash"]
+allowed-tools: ["Bash(promptwheel:*)"]
 ---
 
 Run the PromptWheel outcome gate on the current uncommitted changes.

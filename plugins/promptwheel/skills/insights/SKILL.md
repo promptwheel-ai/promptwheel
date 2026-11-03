@@ -1,6 +1,6 @@
 ---
 description: Summarize PromptWheel's accumulated outcome record - which metrics actually respond to changes in this repo (the loop's memory). Use to see what is worth optimizing.
-allowed-tools: ["Bash"]
+allowed-tools: ["Bash(promptwheel:*)"]
 ---
 
 Show what PromptWheel has learned in this repo.

@@ -1,7 +1,7 @@
 ---
 description: Run an agent or shell command through PromptWheel's keep-if-improved loop - it gates the result and keeps the change only if a metric improved, otherwise reverts. Use to make a change that is automatically rolled back unless it provably helps.
 arguments: "<the command/agent to run as the attempt, e.g. aider --message 'speed up the hot path'>"
-allowed-tools: ["Bash"]
+allowed-tools: ["Bash(promptwheel:*)"]
 ---
 
 Run one gated improvement attempt with PromptWheel.
