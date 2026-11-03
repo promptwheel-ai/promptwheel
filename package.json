@@ -6,8 +6,12 @@
   "bin": {
     "promptwheel": "bin/promptwheel.mjs"
   },
+  "types": "./bin/promptwheel.d.ts",
   "exports": {
-    ".": "./bin/promptwheel.mjs",
+    ".": {
+      "types": "./bin/promptwheel.d.ts",
+      "default": "./bin/promptwheel.mjs"
+    },
     "./bin/promptwheel.mjs": "./bin/promptwheel.mjs",
     "./package.json": "./package.json"
   },

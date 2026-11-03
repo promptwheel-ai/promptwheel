@@ -713,7 +713,24 @@ test("published tarball includes every file the CLI shells out to", () => {
     cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
   const files = JSON.parse(out)[0].files.map((f) => f.path);
   assert.ok(files.includes("packs/security/scan.mjs"),
-    "security playbook's scanner must ship in the tarball");
+    "security preset's scanner must ship in the tarball");
+  assert.ok(files.includes("bin/promptwheel.d.ts"), "the type declarations must ship in the tarball");
+});
+
+// ---------------------------------------------------- types: the hand-written .d.ts tracks the runtime exports
+test('types: bin/promptwheel.d.ts exists, declares every runtime export, and package.json points at it', async () => {
+  const dtsPath = join(dirname(ENGINE), 'promptwheel.d.ts');
+  assert.ok(existsSync(dtsPath), 'bin/promptwheel.d.ts is missing');
+  const dts = readFileSync(dtsPath, 'utf8');
+  const runtime = Object.keys(await import('../bin/promptwheel.mjs')).sort();
+  assert.ok(runtime.length >= 16, `expected the engine's export list, got ${runtime.length}`);
+  for (const name of runtime) {
+    assert.match(dts, new RegExp(`^export declare (function|const) ${name}\\b`, 'm'), `promptwheel.d.ts does not declare the runtime export "${name}"`);
+  }
+  const pkg = JSON.parse(readFileSync(join(dirname(ENGINE), '..', 'package.json'), 'utf8'));
+  assert.equal(pkg.types, './bin/promptwheel.d.ts');
+  assert.equal(pkg.exports['.'].types, './bin/promptwheel.d.ts', 'the "." export must carry a types condition');
+  assert.equal(pkg.exports['.'].default, './bin/promptwheel.mjs', 'the "." export must still resolve to the engine');
 });
 
 test("a preset whose command cannot run must NOT pass, cold llm-eval with missing scripts", () => {

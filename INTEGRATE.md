@@ -103,7 +103,9 @@ measurement runs in a throwaway git worktree.
 
 Zero dependencies, no build step, the whole engine is one file. `check()` runs the gate in
 process and returns the Section 2 object. It never prints and never calls `process.exit`; it
-throws a plain `Error` on a precondition failure.
+throws a plain `Error` on a precondition failure. Types ship in the package
+(`bin/promptwheel.d.ts`, hand-written, no build step): `import type { Report, CheckOptions, Config } from 'promptwheel'`
+works in TypeScript, and editors complete the options and the report in plain JavaScript.
 
 ```js
 import { check, verdictExitCode, conformsToContract, VERDICTS, CONTRACT_VERSION } from 'promptwheel';
