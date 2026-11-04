@@ -4,7 +4,8 @@
 // modules, routes, public entry points, and the network hosts the source names. The gate then holds that
 // shape: anything the lock has not seen is drift.
 //   node lock.mjs write [path]            write or refresh promptwheel.lock.json
-//   node lock.mjs drift [path] [--list]   print how many items the tree has that the lock does not
+//   node lock.mjs drift [path] [--list] [--routes]   print how many items the tree has that the lock does not
+//                                         (routes are locked and listed, and counted only with --routes)
 // The lock lists structure, not content, so ordinary edits never touch it. There is no timestamp in it:
 // the same tree always writes the same bytes. JS and TS only for edges, routes and hosts today.
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
@@ -26,8 +27,8 @@ const NOT_A_HOST = /(^|\.)(example\.(com|org|net)|localhost|w3\.org|schema\.org|
 // the top-level module a path belongs to: packages/x, apps/x, src/x, lib/x, or the first directory
 export function moduleOf(path) {
   const p = path.split('/');
-  for (const pre of [['src', 'app'], ['src', 'lib'], ['apps'], ['packages'], ['src'], ['lib']])
-    if (p.length > pre.length + 1 && pre.every((s, i) => p[i] === s)) return p.slice(0, pre.length + 1).join('/');
+  for (const pre of [['src', 'lib'], ['apps'], ['packages'], ['src'], ['lib']])
+    if (p.length > pre.length + 1 && pre.every((s, i) => p[i] === s)) return p.slice(0, pre.length + 1).join('/');   // src/app stays one module: a new page is a route, not a new module
   return p.length > 1 ? p[0] : '.';
 }
 function routeOf(path) {
@@ -106,9 +107,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const root = args[1] || '.';
   if (args[0] === 'write') { process.stdout.write(`${writeLock(root)} items locked in ${LOCK_FILE}\n`); }
   else if (args[0] === 'drift') {
-    const d = driftOf(root);
+    const all = driftOf(root);
+    // a new route is ordinary feature work, so by default it is reported, not held; --routes holds it too
+    const d = all && (process.argv.includes('--routes') ? all : all.filter((i) => !i.startsWith('route:')));
     if (d === null) { process.stderr.write(`no readable ${LOCK_FILE}: run promptwheel lock\n`); process.exit(1); }   // unmeasurable, never a clean 0
-    if (process.argv.includes('--list')) for (const i of d) process.stderr.write(`  ${i}\n`);
+    if (process.argv.includes('--list')) for (const i of all) process.stderr.write(`  ${i}\n`);
     process.stdout.write(`${d.length}\n`);
   } else { process.stderr.write('usage: node lock.mjs <write|drift> [path] [--list]\n'); process.exit(64); }
 }

