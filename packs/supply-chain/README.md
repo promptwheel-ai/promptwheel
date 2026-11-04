@@ -77,13 +77,12 @@ and a mandate deleted or narrowed in the same change that violates it stays in f
 | build-images-frozen | `Dockerfile*`, `docker-compose*` | what runs at build and deploy time |
 | publish-scripts-frozen | `scripts/release*`, `scripts/publish*` | the publish path is how a compromise spreads |
 | codeowners-frozen | `CODEOWNERS` | review ownership is set by people |
+| contract-frozen | `promptwheel.config.json`, `sawbuck.config.json` | the contract changes with a reason from a person (`--allow`) |
 | hooks-frozen | `.claude/settings.json`, `.claude/settings.local.json`, `.sawbuck/**` | the hooks that enforce the contract are wired by a person |
 
-The contract itself (`promptwheel.config.json`, `sawbuck.config.json`) is protected as an
-`evaluatorPaths` entry rather than a mandate: a change that edits it alongside a win is `GAMED` by
-declaration unless the change carries a declared reason, while a change that only edits the
-contract (a person retiring a rule) still passes. A mandate there would make the contract
-un-editable through the gate.
+The contract itself (`promptwheel.config.json`, `sawbuck.config.json`) is frozen too, and it is also an
+`evaluatorPaths` entry. A change to it needs `--allow "<reason>"` from a person. Without that, a change that
+only weakens a rule would pass, and the next change would be judged by the weakened contract.
 
 A person who needs to change a frozen path does it in a separate change that only touches that
 path, reviewed as such.

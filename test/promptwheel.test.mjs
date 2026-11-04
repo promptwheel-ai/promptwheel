@@ -681,7 +681,7 @@ test('init --preset supply-chain: the held counts, the lock, the mandates, the c
   const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
   assert.deepEqual(cfg.metrics.map((m) => m.name), ['lifecycle_scripts', 'dependency_entries', 'lock_nonregistry_sources', 'unpinned_execution', 'install_policy_gaps', 'lock_drift', 'pins_changed']);
   assert.ok(cfg.metrics.every((m) => m.guard === true && m.gamingCheck === false && m.allowable === 'flag' && m.cmd.startsWith('node .promptwheel/packs/supply-chain/')), JSON.stringify(cfg.metrics));
-  assert.deepEqual(cfg.mandates.map((m) => m.name), ['workflows-frozen', 'registry-config-frozen', 'build-images-frozen', 'publish-scripts-frozen', 'codeowners-frozen', 'scanner-frozen', 'lock-frozen', 'hooks-frozen']);
+  assert.deepEqual(cfg.mandates.map((m) => m.name), ['contract-frozen', 'workflows-frozen', 'registry-config-frozen', 'build-images-frozen', 'publish-scripts-frozen', 'codeowners-frozen', 'scanner-frozen', 'lock-frozen', 'hooks-frozen']);
   assert.ok(cfg.mandates.every((m) => Array.isArray(m.paths) && m.paths.length && m.reason));
   assert.deepEqual(cfg.evaluatorPaths, ['promptwheel.config.json', 'sawbuck.config.json'], 'the contract is an evaluatorPath, not a mandate: a person can still retire a rule in a change that only edits it');
   for (const f of ['scan.mjs', 'pack.json', 'README.md']) assert.ok(existsSync(join(d, '.promptwheel/packs/supply-chain', f)), f + ' copied in');
@@ -754,9 +754,11 @@ test('supply-chain gate: a lifecycle script, a dependency or a non-registry lock
   assert.ok(r.rep.gate && Array.isArray(r.rep.gate.weakened) && r.rep.gate.weakened.some((w) => w.name === 'lifecycle_scripts'), 'the dropped guard is re-measured under its committed definition: ' + JSON.stringify(r.rep.gate));
   reset();
 
-  // a change that only edits the contract (a person retiring a rule) still passes
+  // a change that only edits the contract fails, and a person retires a rule with --allow
   writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...cfg, repeat: 2 }, null, 2) + '\n');
   r = run();
+  assert.equal(r.code, 1, r.out); assert.equal(r.rep.mandates[0].name, 'contract-frozen');
+  r = run('--allow', 'a person changed the contract');
   assert.equal(r.code, 0, r.out);
   rmSync(d, { recursive: true, force: true });
 });
@@ -1770,3 +1772,65 @@ test('gaming: two improved metrics are re-proven in ONE source-only checkout (se
   assert.equal(setups, 3, `base + head + ONE source-only checkout, got ${setups}`);
   rmSync(d, { recursive: true, force: true }); rmSync(dirname(log), { recursive: true, force: true });
 });
+
+// ------------------------------------------- launch audit 2026-11-04: holes found by running the published packages
+const repoWith = (files) => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-hole-'));
+  const g = (a) => execFileSync('git', a, { cwd: d, stdio: 'ignore' });
+  g(['init', '-q']); g(['config', 'user.email', 'a@b.c']); g(['config', 'user.name', 'a']);
+  for (const [f, c] of Object.entries(files)) { mkdirSync(join(d, dirname(f)), { recursive: true }); writeFileSync(join(d, f), c); }
+  commitAll(d, 'base'); return d;
+};
+const NODE_TEST = (body) => `require('node:test').test('t', () => require('node:assert').equal(${body}))\n`;
+const js = (test) => ({ 'package.json': JSON.stringify({ name: 'a', scripts: { test } }), 'src/a.js': 'exports.f = () => 1\n', 'test/a.test.js': NODE_TEST("require('../src/a.js').f(), 2") });
+const gateRun = (d, extra = []) => { const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto', '--json', ...extra]); return { code: r.code, rep: JSON.parse(r.out) }; };
+const cfgOf = (cmd) => JSON.stringify({ repeat: 1, metrics: [{ name: 'tests_pass', cmd, extract: 'exit', direction: 'pass', guard: true }] });
+
+test('a test command edited in package.json cannot carry a win; a real source fix still does', () => {
+  let d = repoWith({ ...js('node --test'), 'promptwheel.config.json': cfgOf('npm test --silent') });
+  const pkg = JSON.parse(readFileSync(join(d, 'package.json'), 'utf8'));
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ ...pkg, scripts: { test: 'true' } })); commitAll(d, 'cheat');
+  assert.equal(gateRun(d).rep.verdict, 'gamed');
+  d = repoWith({ ...js('node --test'), 'promptwheel.config.json': cfgOf('npm test --silent') });
+  const p2 = JSON.parse(readFileSync(join(d, 'package.json'), 'utf8'));
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ ...p2, dependencies: {} }));
+  writeFileSync(join(d, 'src/a.js'), 'exports.f = () => 2\n'); commitAll(d, 'real fix, package.json edited too');
+  assert.equal(gateRun(d).rep.verdict, 'pass');
+});
+
+test('pytest options in pyproject.toml cannot carry a win', () => {
+  const py = { 'pyproject.toml': '[project]\nname = "a"\n\n[tool.x]\ny = 1\n', 'promptwheel.config.json': cfgOf("sh -c 'grep -q skipall pyproject.toml'") };
+  const d = repoWith(py);
+  writeFileSync(join(d, 'pyproject.toml'), '[project]\nname = "a"\n\n[tool.pytest.ini_options]\naddopts = "skipall"\n\n[tool.x]\ny = 1\n'); commitAll(d, 'cheat');
+  assert.equal(gateRun(d).rep.verdict, 'gamed');
+});
+
+test('moving a file out of a protected path touches that path', () => {
+  const d = repoWith({ 'src/auth/login.js': 'x\n', 'promptwheel.config.json': JSON.stringify({ ...JSON.parse(cfgOf('true')), mandates: [{ name: 'auth', paths: ['src/auth/**'], reason: 'auth' }] }) });
+  execFileSync('git', ['mv', 'src/auth/login.js', 'src/login.js'], { cwd: d }); commitAll(d, 'move');
+  const r = gateRun(d); assert.equal(r.code, 1); assert.ok(r.rep.mandates.some((m) => m.name === 'auth'));
+});
+
+test('the preset freezes the contract: weakening it alone fails, a person lifts it with --allow, a trailer cannot', () => {
+  const d = repoWith({ 'package.json': JSON.stringify({ name: 'a' }) });
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0); commitAll(d, 'sign');
+  const f = join(d, 'promptwheel.config.json'); const c = JSON.parse(readFileSync(f, 'utf8'));
+  writeFileSync(f, JSON.stringify({ ...c, mandates: [] }, null, 2)); commitAll(d, 'drop the rules\n\nPromptwheel-Allow: because');
+  assert.equal(gateRun(d).code, 1, 'a trailer does not lift it');
+  assert.equal(gateRun(d, ['--allow', 'a person retired these']).code, 0);
+});
+
+test('a green held by test edits gets a note, not a verdict; an honest fix gets neither', () => {
+  const pass = { 'package.json': JSON.stringify({ name: 'a', scripts: { test: 'node --test' } }), 'src/a.js': 'exports.f = () => 2\n', 'test/a.test.js': NODE_TEST("require('../src/a.js').f(), 2"), 'promptwheel.config.json': cfgOf('npm test --silent') };
+  let d = repoWith(pass);
+  writeFileSync(join(d, 'src/a.js'), 'exports.f = () => 3\n'); writeFileSync(join(d, 'test/a.test.js'), NODE_TEST('1, 1')); commitAll(d, 'break it, neuter the test');
+  let r = gateRun(d); assert.equal(r.rep.verdict, 'pass'); assert.equal(r.rep.metrics[0].heldByTestEdit, true);
+  d = repoWith(pass);
+  writeFileSync(join(d, 'src/a.js'), 'exports.f = () => 2 // same\n'); writeFileSync(join(d, 'test/a.test.js'), NODE_TEST("require('../src/a.js').f(), 2") + '// more\n'); commitAll(d, 'honest');
+  r = gateRun(d); assert.equal(r.rep.metrics[0].heldByTestEdit, undefined);
+});
+
+test('deriveVerdict: a tripwire moving is not a win over a test that never ran', () => {
+  assert.equal(deriveVerdict([{ name: 't', guard: true, ok: true, status: 'unchanged', inert: true }, { name: 'c', guard: true, ok: true, status: 'improved', tripwire: true }]), 'inconclusive');
+});
+

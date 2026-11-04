@@ -330,7 +330,7 @@ function checkMandates(repo, base, head, cfg, baseMandates) {
   const mandates = [...headList.filter((m) => m && baseNames.has(m.name)), ...kept];
   if (!mandates.length) return [];
   let changed = [];
-  try { changed = git(['diff', '--name-only', base, head], repo).split('\n').filter(Boolean); } catch { return []; }
+  try { changed = git(['diff', '--name-only', '--no-renames', base, head], repo).split('\n').filter(Boolean); } catch { return []; }   // --no-renames: a move out of a protected path also touches it
   const out = [];
   for (const m of mandates) {
     const pats = (Array.isArray(m.paths) ? m.paths : []).filter((s) => typeof s === 'string' && s.trim());
@@ -355,7 +355,7 @@ function checkMandates(repo, base, head, cfg, baseMandates) {
 // `isEval` is the repo's opt-in evaluator-path matcher, treated as non-source alongside
 // the built-in classifier, so a cheat that only edits a declared gate file is caught.
 function changedSourcePaths(repo, base, head, isEval = () => false) {
-  const all = git(['diff', '--name-only', base, head], repo).split('\n').filter(Boolean);
+  const all = git(['diff', '--name-only', '--no-renames', base, head], repo).split('\n').filter(Boolean);
   const nonSrc = (p) => isNonSource(p) || isEval(p);
   return { source: all.filter((p) => !nonSrc(p)), nonSource: all.filter(nonSrc) };
 }
@@ -363,6 +363,37 @@ function changedSourcePaths(repo, base, head, isEval = () => false) {
 // measure the given metric defs in ONE worktree at `base` with ONLY the source slice of base→head
 // applied (checked out once, patched once, set up once), so re-proving three improved metrics costs
 // one checkout, not three. Returns { [name]: { samples, hadSourceChange, applyFailed? } }.
+// package.json and pyproject.toml are source and goalposts in one file: dependencies belong to the
+// change, the test command and the test runner's options do not. The source-only tree keeps the change's
+// file but puts those keys back as they were at base, so `"test": "true"` or `addopts = "-k mul"` cannot
+// carry a win. A test command that really had to change is a declared change: --allow.
+const JS_TEST_KEYS = ['scripts', 'jest', 'ava', 'mocha', 'nyc', 'c8', 'vitest', 'tap'];
+const PY_TEST_TABLE = /^\[\s*tool\.(pytest|coverage|tox)[\].]/;
+function tomlTables(text) {   // [header, lines] pairs in file order; the first has no header
+  const out = [[null, []]];
+  for (const line of text.split('\n')) { if (/^\s*\[/.test(line)) out.push([line.trim(), [line]]); else out[out.length - 1][1].push(line); }
+  return out;
+}
+function holdGoalposts(repo, base, wt, source) {
+  for (const p of source) {
+    const name = p.split('/').pop();
+    if (name !== 'package.json' && name !== 'pyproject.toml') continue;
+    let before; try { before = git(['show', `${base}:${p}`], repo); } catch { continue; }   // a new file has no base to hold
+    const f = join(wt, p);
+    try {
+      if (name === 'package.json') {
+        const a = JSON.parse(before), b = JSON.parse(readFileSync(f, 'utf8'));
+        for (const k of JS_TEST_KEYS) { if (k in a) b[k] = a[k]; else delete b[k]; }
+        writeFileSync(f, JSON.stringify(b, null, 2) + '\n');
+      } else {
+        const held = tomlTables(before).filter(([h]) => h && PY_TEST_TABLE.test(h));
+        const kept = tomlTables(readFileSync(f, 'utf8')).filter(([h]) => !h || !PY_TEST_TABLE.test(h));
+        writeFileSync(f, [...kept, ...held].map(([, l]) => l.join('\n')).join('\n') + '\n');
+      }
+    } catch { /* an unreadable manifest stays as the change left it */ }
+  }
+}
+
 function measureSourceOnlyAll(repo, base, head, defs, cfg, repeat) {
   const out = {};
   if (!defs.length) return out;
@@ -383,6 +414,7 @@ function measureSourceOnlyAll(repo, base, head, defs, cfg, repeat) {
       try { tryApply(['--3way']); }
       catch { try { tryApply([]); } catch { for (const m of defs) out[m.name] = { samples: [], hadSourceChange: true, applyFailed: true }; return out; } }
     }
+    holdGoalposts(repo, base, wt, source);   // the parts of a mixed file that define the tests stay as they were at base
     runSetup(wt, cfg, env); // build the patched tree, so a build-gated metric measures the source edit
     for (const m of defs) {
       const samples = [];
@@ -576,7 +608,7 @@ function blobHashAt(repo, ref, path) {
 function changedEvaluatorPaths(repo, base, head, cfg) {
   const isEval = evaluatorMatcher(cfg);
   let changed = [];
-  try { changed = git(['diff', '--name-only', base, head], repo).split('\n').filter(Boolean).filter(isEval); }
+  try { changed = git(['diff', '--name-only', '--no-renames', base, head], repo).split('\n').filter(Boolean).filter(isEval); }
   catch { return []; }
   return changed.map((p) => ({ path: p, base: blobHashAt(repo, base, p), head: blobHashAt(repo, head, p) }))
     .filter((e) => e.base !== e.head);
@@ -648,6 +680,16 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat) {
     m.gamed = j.gamed; m.sourceOnly = j.sourceOnly; m.retained = j.retained; m.gamingReason = j.reason;
     if (j.unprovable) m.unprovable = true;
   }
+  // A green that stays green proves nothing about the tests. When a change edits the source and the tests
+  // together, run the old tests on the new source: if they fail, say so. Only a note, never a verdict: an
+  // intended API change does this too, and no deterministic check can tell the two apart.
+  const split = changedSourcePaths(repo, base, head, evaluatorMatcher(cfg));
+  if (split.source.length && split.nonSource.length) {
+    const held = metrics.filter((m) => m.status === 'unchanged' && m.direction === 'pass' && m.after === 1 && !m.tripwire);
+    const defs = held.map((m) => cfg.metrics.find((c) => c.name === m.name)).filter(Boolean);
+    const res = measureSourceOnlyAll(repo, base, head, defs, cfg, repeat);
+    for (const m of held) { const r = res[m.name]; if (r && r.samples && r.samples.length && median(r.samples) !== 1) m.heldByTestEdit = true; }
+  }
   const evalChanged = changedEvaluatorPaths(repo, base, head, cfg);
   if (evalChanged.length) {
     for (const m of metrics) {
@@ -695,7 +737,7 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat) {
 export function deriveVerdict(metrics, gateInfo = null, mandated = false) {
   const failed = metrics.some((m) => m.guard && !m.ok);
   const gamed = metrics.some((m) => m.gamed === true) || !!(gateInfo && gateInfo.weakened && !gateInfo.allowed);
-  const inertNoWin = metrics.some((m) => m.inert) && !metrics.some((m) => m.status === 'improved');
+  const inertNoWin = metrics.some((m) => m.inert) && !metrics.some((m) => m.status === 'improved' && !m.tripwire);   // a tripwire moving is not a measured win
   const unprovable = metrics.some((m) => m.unprovable === true);
   const inconclusive = !failed && !gamed && (inertNoWin || unprovable);
   return (mandated || failed) ? 'fail' : gamed ? 'gamed' : inconclusive ? 'inconclusive' : 'pass';
@@ -732,7 +774,7 @@ function gate(repo, opts) {
   const metrics = cfg.metrics.map((m) => {
     const ev = evaluate(m, before[m.name], after[m.name], repeat);
     if (ev.status === 'unmeasurable' && ev.before == null && ev.after != null && adopted(m.name)) { ev.ok = true; ev.adopted = true; }
-    return { name: m.name, direction: m.direction || 'up', guard: !!m.guard, ...ev };
+    return { name: m.name, direction: m.direction || 'up', guard: !!m.guard, ...(m.gamingCheck === false ? { tripwire: true } : {}), ...ev };
   });
   // Section 3 (gaming detection), on by default: mutates `metrics` and yields the gate record
   const gateInfo = opts.detectGaming ? detectGamingPass(repo, base, head, cfg, metrics, repeat) : null;
@@ -945,10 +987,12 @@ const PRESETS = {
   // edit (a lifecycle script, a new dependency, a non-registry lock source, a workflow or publish
   // config). Paths and counts, checked deterministically: three guarded counts that must not rise
   // without a declared reason (`allowable`), plus mandates that freeze the paths. The contract itself is
-  // an evaluatorPath, not a mandate, so a person can still retire a rule in a change that only edits it.
+  // one of those paths, lifted only by a person's --allow: otherwise a change that only weakens a rule
+  // passes, and the next change is judged by the weakened contract.
   'supply-chain': { allowTrailer: false, desc: 'gate: no new lifecycle scripts, dependencies, or non-registry lock sources without a recorded reason; the agent cannot touch workflows, registries, publish scripts, or the contract',
     evaluatorPaths: ['promptwheel.config.json', 'sawbuck.config.json'],
     mandates: [
+      { name: 'contract-frozen', paths: ['promptwheel.config.json', 'sawbuck.config.json'], allowable: 'flag', reason: 'the contract changes with a reason from a person (--allow), never as a side effect of a change' },
       { name: 'workflows-frozen', paths: ['.github/workflows/**'], reason: 'workflows run with the repository secrets; change them in a separate, reviewed change' },
       { name: 'registry-config-frozen', paths: ['.npmrc', '.yarnrc', '.yarnrc.yml'], reason: 'registry and token configuration decides where packages come from and where credentials go' },
       { name: 'build-images-frozen', paths: ['Dockerfile*', 'docker-compose*'], reason: 'what runs at build and deploy time is not an agent decision' },
