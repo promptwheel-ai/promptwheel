@@ -108,7 +108,7 @@ export interface CheckOptions {
   repeat?: number;
   /** Run the Section 3 source-only re-proof. Default `true`. */
   detectGaming?: boolean;
-  /** A declared override reason (the same as `--allow` or a `Promptwheel-Allow:` commit trailer): a would-be `gamed` reads `pass`, recorded in `report.allowed`. */
+  /** A declared override reason (the same as `--allow` or a `Promptwheel-Allow:` commit trailer): a would-be `gamed`, or an `unprovable` win (its source-only re-run could not be applied), reads `pass`, recorded in `report.allowed`. */
   allow?: string;
   /** Append the run to `.promptwheel/outcomes.jsonl`. Default `false`. */
   record?: boolean;
@@ -140,14 +140,14 @@ export interface MetricResult extends Evaluation {
   guard: boolean;
   /** `true` when the win did not survive the source-only re-run; `null` when the source-only patch could not be applied (then `unprovable` is set and the verdict is `inconclusive`, never `pass`). Absent without gaming detection or when the metric did not improve. */
   gamed?: boolean | null;
-  /** The source-only patch could not be applied, so this win could not be re-proven: the verdict is `inconclusive`. */
-  unprovable?: true;
+  /** `true`: the source-only patch could not be applied, so this win could not be re-proven and the verdict is `inconclusive`. `false` only after a declared override cleared it (then `allowed` is `true`). */
+  unprovable?: boolean;
   /** The metric's value with only the source edits applied. */
   sourceOnly?: number | null;
   /** The fraction of the gain that survived source-only (0..1). */
   retained?: number | null;
   gamingReason?: string;
-  /** Set when a declared override cleared a `gamed` on this metric. */
+  /** Set when a declared override cleared a `gamed` or an `unprovable` on this metric. */
   allowed?: true;
 }
 

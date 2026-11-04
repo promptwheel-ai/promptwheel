@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.7.10 (2026-11-03): a declared override covers an unprovable win; self-heal bounds every orphan
+
+- **`--allow` (and a `Promptwheel-Allow:` trailer) now clears an `unprovable` win too.** 0.7.9 made a
+  win whose source-only re-run could not be applied read `inconclusive` (exit 3) instead of `pass`,
+  but the declared override cleared only `gamed`, so an intentional, declared goalpost change whose
+  source slice will not re-apply (an LFS-smudged blob, a file created beneath a symlink the slice does
+  not remove) had no way to pass short of `gamingCheck: false`. The override names the metric in
+  `allowed.cleared`, sets `unprovable: false` and `allowed: true` on it, and `conformsToContract`
+  accepts exactly that shape (an `unprovable: false` without `allowed: true` is rejected).
+- **The apply-failure path is exercised end to end.** A test drives a real `git apply` refusal through
+  the gate (a source file created beneath a symlink whose own change is non-source): the metric reads
+  `unprovable`, the CLI exits 3, the report conforms, and `--allow` turns it into a pass.
+- **`promptwheel run` outside a repository prints one line.** `repoRoot` no longer lets git's own
+  `fatal: not a git repository` through above the exit-64 message.
+- **Self-heal prunes another repository's orphaned checkout after a day.** 0.7.9 skipped any temp
+  dir tagged for another repo forever, so a measurement crashed in a repo that was later deleted or
+  moved (a new path is a new tag) leaked its checkout for good. This repo's dirs still go after an
+  hour, untagged legacy dirs after a day, and another repo's tagged dirs after a day too.
+- **An unknown flag is a usage error on every command.** `run --bogus-flag` used to run the gate
+  as if the flag were not there (a typo in a CI step could silently drop `--no-detect-gaming` or
+  `--allow`), while INTEGRATE.md promised a bad flag exits 64. Every command now checks its flags
+  against the documented list and exits 64 naming the flag; `promptwheel run --help` prints the
+  banner instead of gating.
+- **Plugin 0.1.13.** The disclosure of what the plugin writes now names `.cursorrules` (a setup block
+  when the file already exists), the security pack copy under `.promptwheel/packs/security/`, and
+  what `improve` does to the working tree (a commit when a metric improved, otherwise a hard reset
+  plus a clean of untracked files). The logbook skill and README pin `@promptwheel/logbook@0.9.10`,
+  with a test that fails when the pin drifts from the release named in the suite; the marketplace
+  entry carries the plugin version.
+- **INTEGRATE.md lists `none` among the confidence values** (an unmeasurable metric reports it).
+
 ## 0.7.9 (2026-11-03): a win the engine cannot re-prove is never a pass
 
 - **A source-only patch that fails to apply no longer reads PASS.** An improved metric whose source

@@ -47,7 +47,8 @@ function bad(msg) { const e = new Error(msg); e.name = 'ConfigError'; e.exitCode
 
 // the repository root, or a ConfigError: a non-repo cwd must exit 64, never 1 (the FAIL verdict code)
 function repoRoot(cwd) {
-  try { return git(['rev-parse', '--show-toplevel'], cwd); }
+  // stderr ignored: git's own "fatal: not a git repository" must not print above the ConfigError line
+  try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
   catch { bad(`promptwheel: not inside a git repository (${cwd})`); }
 }
 // a ref the gate is about to check out must be in this clone; the usual miss is a shallow CI
@@ -448,7 +449,9 @@ function workingSnapshot(repo) {
 // self-heal: a hard-killed run (SIGKILL / power loss) can leave an orphaned worktree, 
 // its `finally` never ran. On the next run, drop stale worktree registry entries and any
 // abandoned /tmp checkout, so nothing accumulates in your repo or temp dir. Never touches a
-// live worktree (a still-registered dir, or a checkout younger than 1h).
+// live worktree (a still-registered dir, or this repo's checkout younger than 1h). A dir tagged
+// for ANOTHER repo may be mid-measurement, so it gets a full day; after that it is an orphan of a
+// repo that was deleted or moved (a new real path is a new tag nobody will ever claim).
 function selfHeal(repo) {
   try {
     git(['worktree', 'prune'], repo); // remove registry entries whose dir is already gone (always safe)
@@ -461,8 +464,8 @@ function selfHeal(repo) {
     for (const name of readdirSync(tmp)) {
       if (!name.startsWith('promptwheel-') && !name.startsWith('pw-idx-')) continue; // worktrees + temp-index dirs
       const tag = (name.match(TAGGED) || [])[2] || null;
-      if (tag && tag !== mine) continue;              // another repo's checkout, maybe mid-measurement: never ours to remove
-      const maxAge = tag ? 3600_000 : 86_400_000;     // an untagged dir (an older engine's) only after a full day
+      // ours after an hour; another repo's, or an untagged dir (an older engine's), only after a full day
+      const maxAge = tag === mine ? 3600_000 : 86_400_000;
       const p = join(tmp, name);
       if (tracked.has(p)) continue;                   // a live/registered worktree, leave it
       try { if (statSync(p).mtimeMs < now - maxAge) rmSync(p, { recursive: true, force: true }); } catch { /* */ }
@@ -725,14 +728,20 @@ function gate(repo, opts) {
   const gateInfo = opts.detectGaming ? detectGamingPass(repo, base, head, cfg, metrics, repeat) : null;
   // declared override: a Promptwheel-Allow trailer (or --allow) acknowledges an intentional
   // goalpost/gate change, so a would-be GAMED becomes PASS, recorded in report.allowed for review.
+  // It covers an `unprovable` win too (the source-only re-run could not be applied): the declared
+  // intent is exactly the uncertainty that verdict expresses, and without this a declared change
+  // whose source slice will not re-apply had no override short of turning the check off.
   const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300) } : (opts.working ? null : readAllowTrailer(repo, head));
   let allowed = null;
   if (opts.detectGaming && allow) {
     const gm = metrics.filter((m) => m.gamed === true);
+    const up = metrics.filter((m) => m.unprovable === true);
     const gw = !!(gateInfo && gateInfo.weakened);
-    if (gm.length || gw) {
-      allowed = { reason: allow.reason, cleared: [...gm.map((m) => m.name), ...(gw ? ['gate'] : [])] };
+    if (gm.length || up.length || gw) {
+      const names = [...new Set([...gm, ...up].map((m) => m.name))];
+      allowed = { reason: allow.reason, cleared: [...names, ...(gw ? ['gate'] : [])] };
       for (const m of gm) { m.gamed = false; m.allowed = true; }
+      for (const m of up) { m.unprovable = false; m.allowed = true; }
       if (gw) gateInfo.allowed = true;
     }
   }
@@ -1257,7 +1266,8 @@ export function conformsToContract(report) {
     if (m.noise !== undefined && !(isNum(m.noise) && m.noise >= 0)) E(`${at}.noise must be a number >= 0 (the measured jitter band; repeat count is the top-level report.repeat)`);
     if (m.confidence !== undefined && typeof m.confidence !== 'string') E(`${at}.confidence must be a string`);
     if (m.gamed !== undefined && m.gamed !== null && typeof m.gamed !== 'boolean') E(`${at}.gamed must be a boolean, or null when the win could not be re-proven`);
-    if (m.unprovable !== undefined && m.unprovable !== true) E(`${at}.unprovable must be true when present`);
+    if (m.unprovable !== undefined && typeof m.unprovable !== 'boolean') E(`${at}.unprovable must be a boolean when present`);
+    if (m.unprovable === false && m.allowed !== true) E(`${at}.unprovable is false but no declared override cleared it (allowed must be true)`);
     if (m.allowed !== undefined && typeof m.allowed !== 'boolean') E(`${at}.allowed must be a boolean`);
     if (m.sourceOnly !== undefined && !numOrNull(m.sourceOnly)) E(`${at}.sourceOnly must be a number or null`);
     if (m.retained !== undefined && !numOrNull(m.retained)) E(`${at}.retained must be a number or null`);
@@ -1351,9 +1361,31 @@ function conformance(argv) {
   process.exit(1);
 }
 
+// the flags each command accepts. An unknown --flag is a usage error (exit 64), never silently
+// ignored: a typo in a CI step must not turn `--no-detect-gaming` into the default gate or `--allow`
+// into nothing, and INTEGRATE.md promises a bad flag exits 64. A flag that takes a value consumes
+// the next argument; anything not starting with `-` (or a bare `-`, stdin for conformance) is positional.
+const GATE_FLAGS = ['--base', '--head', '--repeat', '--working', '--no-record', '--no-auto', '--allow', '--detect-gaming', '--no-detect-gaming', '--json', '--markdown'];
+const COMMAND_FLAGS = {
+  run: GATE_FLAGS, improve: [...GATE_FLAGS, '--attempt'], insights: ['--json'], guards: ['--json'],
+  init: ['--preset', '--list', '--force', '--no-agent-block'], conformance: ['--cmd'],
+};
+const VALUED_FLAGS = new Set(['--base', '--head', '--repeat', '--allow', '--attempt', '--preset', '--cmd']);
+function checkFlags(cmd, argv) {
+  const known = new Set(COMMAND_FLAGS[cmd]);
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '-' || !a.startsWith('-')) continue;
+    if (!known.has(a)) bad(`promptwheel ${cmd}: unknown flag ${a} (see promptwheel --help)`);
+    if (VALUED_FLAGS.has(a)) i++;
+  }
+}
+
 function dispatch() {
-  const [cmd, ...rest] = process.argv.slice(2);
-  if (cmd === '--version' || cmd === '-v') { console.log(TOOL_VERSION ?? 'unknown'); process.exit(0); }
+  const [first, ...rest] = process.argv.slice(2);
+  if (first === '--version' || first === '-v') { console.log(TOOL_VERSION ?? 'unknown'); process.exit(0); }
+  const cmd = (rest.includes('--help') || rest.includes('-h')) ? 'help' : first;   // `promptwheel run --help` is a help request, not a gate run
+  if (cmd in COMMAND_FLAGS) checkFlags(cmd, rest);
   if (cmd === 'run') run(rest);
   else if (cmd === 'improve') improve(rest);
   else if (cmd === 'insights') insights(rest);

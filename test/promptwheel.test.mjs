@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, utimesSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, utimesSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -677,18 +677,22 @@ test('self-heal: a stale /tmp worktree from a crashed run is cleaned on the next
   assert.equal(existsSync(legacy), false);          // and the day-old untagged one
   rmSync(d, { recursive: true, force: true });
 });
-test('self-heal: another repo\'s checkout is never pruned, however old; an untagged dir survives under a day', () => {
+test('self-heal: another repo\'s checkout survives for a day (mid-measurement for all we know), then is pruned as an orphan; an untagged dir survives under a day', () => {
   const d = tmpRepo([TODOS]);
-  const other = join(tmpdir(), 'promptwheel-0badc0de-OTHERREPO');    // some other repo, mid-measurement for all we know
+  const other = join(tmpdir(), 'promptwheel-0badc0de-OTHERREPO');    // some other repo, 2h old: maybe still measuring
+  const stale = join(tmpdir(), 'promptwheel-0badc0de-OTHERSTALE');   // the same tag, 25h old: a repo that was deleted or moved left it behind
   const young = join(tmpdir(), 'promptwheel-ORPHANYOUNG');          // untagged, 2h old: not yet
-  for (const p of [other, young]) { rmSync(p, { recursive: true, force: true }); mkdirSync(p, { recursive: true }); }
+  for (const p of [other, stale, young]) { rmSync(p, { recursive: true, force: true }); mkdirSync(p, { recursive: true }); }
   const old = new Date(Date.now() - 7200_000);
   utimesSync(other, old, old); utimesSync(young, old, old);
+  const day = new Date(Date.now() - 90_000_000);
+  utimesSync(stale, day, day);
   writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
   pw(d, ['run', '--working', '--no-record']);
-  assert.equal(existsSync(other), true, 'a dir tagged for another repo must survive');
+  assert.equal(existsSync(other), true, 'a dir tagged for another repo must survive the first day');
+  assert.equal(existsSync(stale), false, 'a day-old dir of another repo is an orphan nobody will claim: pruned');
   assert.equal(existsSync(young), true, 'an untagged dir younger than a day must survive');
-  for (const p of [other, young, d]) rmSync(p, { recursive: true, force: true });
+  for (const p of [other, stale, young, d]) rmSync(p, { recursive: true, force: true });
 });
 
 // ---------------------------------------- guardrail inheritance + observability
@@ -1366,6 +1370,7 @@ test('exit 64: a non-repo cwd, a base ref missing from this clone (shallow-check
   let r = pw(nonRepo, ['run', '--no-record']);
   assert.equal(r.code, 64, r.out); assert.match(r.out, /not inside a git repository/);
   assert.doesNotMatch(r.out, /at .*promptwheel\.mjs:\d+/, 'no stack trace');
+  assert.doesNotMatch(r.out, /fatal:/, 'git\'s own stderr is not leaked above the usage line');
   const d = tmpRepo([TODOS]);
   writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'only');
   r = pw(d, ['run', '--base', '0000000000000000000000000000000000000000', '--head', 'HEAD', '--no-record']);
@@ -1378,6 +1383,82 @@ test('exit 64: a non-repo cwd, a base ref missing from this clone (shallow-check
     assert.ok(err && err.name === 'ConfigError' && err.exitCode === 64, `${JSON.stringify(opts)} -> ${err && err.message}`);
   }
   rmSync(d, { recursive: true, force: true }); rmSync(nonRepo, { recursive: true, force: true });
+});
+
+// ------------------------------------- review 5: the apply-failure path through the real gate, and --allow over it
+test('gaming: a source-only patch git cannot apply reads INCONCLUSIVE through the real gate (exit 3), and --allow clears it to PASS', () => {
+  // `golden` is a symlink at base; its own change is non-source (the golden pattern), so the source slice
+  // only CREATES golden/x.js, beneath the base worktree's symlink, and git apply refuses on both attempts
+  // ("beyond a symbolic link"). The test-only edit greens the suite, so there is a win to re-prove.
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');   // BUG
+  writeFileSync(join(d, 'calc.test.mjs'), CALC(2));
+  mkdirSync(join(d, 'fixtures')); writeFileSync(join(d, 'fixtures', 'data.txt'), 'data\n');
+  symlinkSync('fixtures', join(d, 'golden'));
+  commitAll(d, 'base: red, golden is a symlink to fixtures');
+  writeFileSync(join(d, 'calc.test.mjs'), CALC(8));                               // the test-only "win"
+  unlinkSync(join(d, 'golden')); mkdirSync(join(d, 'golden')); writeFileSync(join(d, 'golden', 'x.js'), 'export const x = 1;\n');
+  commitAll(d, 'edit the test; materialize golden');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.metrics[0].unprovable, true, JSON.stringify(r.metrics));
+  assert.equal(r.metrics[0].gamed, null);
+  assert.equal(r.verdict, 'inconclusive');
+  assert.equal(conformsToContract(r).ok, true, conformsToContract(r).errors.join('; '));
+  const cli = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+  assert.equal(cli.code, 3, cli.out); assert.match(cli.out, /INCONCLUSIVE/i);
+  // the declared override covers exactly this uncertainty: 0.7.9 left it with no way to pass
+  const a = check({ repo: d, base: 'HEAD~1', head: 'HEAD', allow: 'expectation was wrong' });
+  assert.equal(a.verdict, 'pass', JSON.stringify(a));
+  assert.deepEqual(a.allowed.cleared, ['tests_pass']); assert.equal(a.allowed.reason, 'expectation was wrong');
+  assert.equal(a.metrics[0].unprovable, false); assert.equal(a.metrics[0].allowed, true);
+  assert.equal(conformsToContract(a).ok, true, conformsToContract(a).errors.join('; '));
+  const cliA = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--allow', 'expectation was wrong']);
+  assert.equal(cliA.code, 0, cliA.out); assert.match(cliA.out, /allowed: tests_pass/);
+  // unprovable:false is only a conforming shape when a declared override produced it
+  const stripped = JSON.parse(JSON.stringify(a)); delete stripped.metrics[0].allowed;
+  assert.equal(conformsToContract(stripped).ok, false);
+  assert.match(conformsToContract(stripped).errors.join('; '), /allowed must be true/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ------------------------------------------- review 5: an unknown flag exits 64 on every command
+test('cli: an unknown flag is a usage error (64) on every command, never silently ignored; --help after a command is help', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  for (const argv of [['run', '--bogus-flag', '--no-record'], ['improve', '--attempt', 'true', '--nope'], ['insights', '--jsno'],
+                      ['guards', '--base', 'HEAD'], ['init', '--preset', 'tests-pass', '--forced'], ['conformance', '--cmd', 'true', '--strict']]) {
+    const r = pw(d, argv);
+    assert.equal(r.code, 64, `${argv.join(' ')} -> ${r.out}`);
+    assert.match(r.out, /unknown flag --/, argv.join(' ')); assert.match(r.out, /promptwheel --help/);
+    assert.doesNotMatch(r.out, /at .*promptwheel\.mjs:\d+/, 'no stack trace');
+  }
+  let r = pw(d, ['run', '--help']);
+  assert.equal(r.code, 0, r.out); assert.match(r.out, /promptwheel run/);
+  // the documented flags still work, with and without values
+  r = pw(d, ['run', '--working', '--no-record', '--json', '--no-detect-gaming', '--repeat', '1']);
+  assert.equal(r.code, 0, r.out); assert.equal(JSON.parse(r.out).verdict, 'pass');
+  r = pw(d, ['run', '--base', 'HEAD', '--head', 'HEAD', '--no-record', '--allow', 'a reason', '--markdown']);
+  assert.equal(r.code, 0, r.out);
+  r = pw(d, ['init', '--list']);
+  assert.equal(r.code, 0, r.out); assert.match(r.out, /tests-pass/);
+  r = pw(d, ['guards', '--json']);
+  assert.equal(r.code, 0, r.out);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ------------------------------------------- review 5: the plugin pins the live logbook and its versions agree
+const LOGBOOK_PIN = '0.9.10';
+test('plugin: the logbook skill and the plugin README pin the live @promptwheel/logbook, and the plugin version matches the marketplace entry', () => {
+  const root = join(dirname(ENGINE), '..');
+  for (const f of ['plugins/promptwheel/skills/logbook/SKILL.md', 'plugins/promptwheel/README.md']) {
+    const text = readFileSync(join(root, f), 'utf8');
+    const pins = [...text.matchAll(/@promptwheel\/logbook@([0-9][0-9.]*[0-9])/g)].map((x) => x[1]);
+    assert.ok(pins.length > 0, `${f} carries a pin`);
+    for (const pin of pins) assert.equal(pin, LOGBOOK_PIN, `${f} pins ${pin}, the live release is ${LOGBOOK_PIN}`);
+  }
+  const plugin = JSON.parse(readFileSync(join(root, 'plugins/promptwheel/.claude-plugin/plugin.json'), 'utf8'));
+  const market = JSON.parse(readFileSync(join(root, '.claude-plugin/marketplace.json'), 'utf8'));
+  assert.equal(market.plugins.find((x) => x.name === 'promptwheel').version, plugin.version, 'plugin.json and marketplace.json agree on the version');
 });
 
 // ------------------------------------------------------ review 4: check({ repo }) from a subdirectory

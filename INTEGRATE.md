@@ -65,7 +65,7 @@ Fixed vocabularies (use exactly these):
 `noise` is the measured jitter band, a single number, across the top-level `repeat` runs; a
 delta inside it is `inconclusive`, never a regression. `retained` is the fraction of a
 metric's gain that survived the source-only re-run (Section 3). `confidence`
-(`unverified | low | medium | high`) and `sourceOnly` are informational fields this
+(`none | unverified | low | medium | high`, `none` for an unmeasurable metric) and `sourceOnly` are informational fields this
 implementation adds; a minimal conforming report may omit them. `gate` (optional) records a
 truncated SHA-256 fingerprint of the gate definition (metrics, guards, `evaluatorPaths`,
 `gamingThreshold`, `mandates`) at base and head, sets `gate.changed: true` when they differ,
@@ -134,7 +134,7 @@ Returns the Section 2 verdict object (identical to `run --json`). Reproducible f
 | `auto` | boolean | `true` | with no config file and no `config` option, gate the auto-detected test command (zero-config); `false` throws instead |
 | `repeat` | number | `config.repeat ?? 1` | measurement repeats for the noise band |
 | `detectGaming` | boolean | `true` | run the Section 3 source-only re-proof |
-| `allow` | string | none | a declared override reason (the same as `--allow` / a `Promptwheel-Allow:` trailer): a would-be `gamed` reads `pass` with the reason recorded in `report.allowed` |
+| `allow` | string | none | a declared override reason (the same as `--allow` / a `Promptwheel-Allow:` trailer): a would-be `gamed`, or an `unprovable` win (its source-only re-run could not be applied), reads `pass` with the reason recorded in `report.allowed` |
 | `record` | boolean | `false` | append the run to `.promptwheel/outcomes.jsonl` |
 
 Preconditions throw (they do not exit the host): not inside a git repository; `auto: false`
