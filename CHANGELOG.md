@@ -1,20 +1,14 @@
 # Changelog
 
-## Unreleased: the supply-chain preset
+## 0.7.11 (2026-11-04): the supply-chain preset and the architecture lock
 
-- **`promptwheel init --preset supply-chain`.** Three guarded counts that must not rise, measured by a
-  zero-dep pack copied into `.promptwheel/packs/supply-chain/`: `lifecycle_scripts` (install-time
-  script entries across every package.json), `dependency_entries` (dependency entries across every
-  package.json), `lock_drift` (structure the architecture lock has not seen; `promptwheel lock` writes it, and the lock file changes only with a person's --allow), `pins_changed` (the resolved dependency tree by hash, so a new version under an old name fails), `allowTrailer: false` (commit trailers off, read from the contract at the base ref), `unpinned_execution` (actions not pinned by SHA, npx or global installs with no exact version, a remote script piped to a shell), `install_policy_gaps` (install scripts not disabled, no release-age cooldown), `lock_nonregistry_sources` (lockfile entries resolved from outside the npm registry,
-  plus registry entries with no integrity hash; npm, pnpm, yarn classic and yarn berry locks). Plus
-  mandates that freeze workflows, registry config, Docker files, publish scripts, CODEOWNERS and the
-  Claude Code hook files, and the contract itself under `evaluatorPaths`.
-- **`allowable: true` on a metric.** A declared reason (`--allow`, a `Promptwheel-Allow:` trailer,
-  `check({ allow })`) clears that metric's guarded regression for the run, recorded in `report.allowed`
-  and on the metric as `allowed: true`; a failed allowable guard without a reason carries
-  `allowable: true` in the report and the human hint names `--allow`. A preset may now carry
-  `mandates`, which `init` writes into the config. A pack that several metrics run is installed and
-  announced once.
+- **`promptwheel init --preset supply-chain`.** Seven guarded metrics, seven frozen paths, and a pack copied into `.promptwheel/packs/supply-chain/`. Guards: `lifecycle_scripts`, `dependency_entries`, `lock_nonregistry_sources`, `unpinned_execution` (actions not pinned by SHA, npx or global installs with no exact version, a remote script piped to a shell), `install_policy_gaps`, `lock_drift`, `pins_changed`. Frozen: workflows, registry config, build images, publish scripts, CODEOWNERS, the scanners, the hooks.
+- **`promptwheel lock`** writes `promptwheel.lock.json`, the shape of a repo: dependencies, script bodies, install scripts, workflows, modules, import edges, routes, entry points, hosts, what each module can do (network, process spawn, eval), native binaries. No model, no timestamp. `lock_drift` fails what the lock has not seen; a new route is reported, and held with `--routes`. Edges, routes, hosts and capabilities read JS and TS today.
+- **`pins_changed`** compares a fingerprint of the resolved dependency tree base to head (new metric option `exact: true`: any change regresses), so a new version under an old name fails, an approved update never blinds the next check, and the lock does not change across updates.
+- **Allowable mandates and `allowable: 'flag'`.** The lock file is a mandate only a person's `--allow` clears, and these guards take a reason from the flag only: an agent can write a commit trailer.
+- **`allowTrailer: false`** turns commit trailers off, read from the contract at the base ref too, so a change cannot turn them back on for itself. `PROMPTWHEEL_NO_ALLOW_TRAILER` does the same for a caller checking an agent's commit. The preset sets it.
+- **The Action** takes an `allow` input, and pins its own action by SHA. Workflows pin actions by SHA; `.npmrc` sets `ignore-scripts` and a release-age cooldown.
+- Measured on 1,403 commits across eight repositories: structure stops 5.1%, pins 8.7% (all real dependency changes). Red team: 22 of 25 direct attacks caught; the misses are one class, an address assembled at runtime in a module that already uses the network, and that is a stated limit.
 
 ## 0.7.10 (2026-11-03): a declared override covers an unprovable win; self-heal bounds every orphan
 
