@@ -138,8 +138,10 @@ export interface MetricResult extends Evaluation {
   name: string;
   direction: Direction;
   guard: boolean;
-  /** `true` when the win did not survive the source-only re-run; `null` when the source-only patch did not apply. Absent without gaming detection or when the metric did not improve. */
+  /** `true` when the win did not survive the source-only re-run; `null` when the source-only patch could not be applied (then `unprovable` is set and the verdict is `inconclusive`, never `pass`). Absent without gaming detection or when the metric did not improve. */
   gamed?: boolean | null;
+  /** The source-only patch could not be applied, so this win could not be re-proven: the verdict is `inconclusive`. */
+  unprovable?: true;
   /** The metric's value with only the source edits applied. */
   sourceOnly?: number | null;
   /** The fraction of the gain that survived source-only (0..1). */
@@ -233,12 +235,22 @@ export declare const DIRECTIONS: readonly ['up', 'down', 'pass'];
 export declare function verdictExitCode(verdict: Verdict | string): 0 | 1 | 2 | 3;
 
 /**
+ * The Section 1 verdict from measured metrics, pure. A mandate hit (`mandated`) or a guarded
+ * regression is `fail`; a `gamed:true` metric or an unallowed weakened gate is `gamed`;
+ * `inconclusive` when an inert guard measured nothing and no metric improved, or when an improved
+ * metric is `unprovable` (its source-only re-run could not be applied); else `pass`.
+ */
+export declare function deriveVerdict(metrics: ReadonlyArray<Partial<MetricResult>>, gateInfo?: { weakened?: unknown[]; allowed?: boolean } | null, mandated?: boolean): Verdict;
+
+/**
  * Runs the gate in process and returns the Section 2 verdict object (identical to `run --json`).
  * Measures only in throwaway git worktrees, never the caller's working tree. Never prints and
  * never calls `process.exit`: every precondition failure (not a git repository, `auto: false`
  * with no config, a `config` without a non-empty `metrics` array, a malformed or cyclic config,
- * a missing `extends` target, no commits yet) throws an Error whose `name` is `'ConfigError'`
- * and whose `exitCode` is 64, the code the CLI exits with for the same condition.
+ * a missing `extends` target, no commits yet, a base or head ref that is not in this clone, no
+ * commit to compare against) throws an Error whose `name` is `'ConfigError'` and whose `exitCode`
+ * is 64, the code the CLI exits with for the same condition. A `repo` that names a subdirectory
+ * is resolved to the repository root, where the config lives and the record is written.
  */
 export declare function check(options?: CheckOptions): Report;
 
@@ -292,8 +304,10 @@ export interface SourceOnlyResult {
 }
 
 export interface GamingJudgement {
-  /** `null` when the source-only patch did not apply. */
+  /** `null` when the source-only patch did not apply (then `unprovable` is `true`). */
   gamed: boolean | null;
+  /** The win could not be re-proven; gate() makes the verdict `inconclusive`. */
+  unprovable?: true;
   sourceOnly: number | null;
   retained: number | null;
   reason: string;

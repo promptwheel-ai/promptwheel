@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.7.9 (2026-11-03): a win the engine cannot re-prove is never a pass
+
+- **A source-only patch that fails to apply no longer reads PASS.** An improved metric whose source
+  slice could not be re-applied used to come back `gamed: null`, which the verdict counted as not
+  gamed, so a green earned by editing the test passed whenever the source patch would not apply
+  (a binary file under `src/`, a `-diff` attribute, a conflicting hunk). The patch is now built with
+  `git diff --binary` so binary source edits apply, and a win that still cannot be re-proven marks
+  the metric `unprovable` and the verdict `inconclusive` (exit 3). `conformsToContract` rejects a
+  `pass` that carries one. The verdict precedence is now one pure, exported function,
+  `deriveVerdict`.
+- **Production files named `evaluate.ts`, `evaluation.js`, `scoreboard.js`, `scores.ts` stay in the
+  source slice.** The grader/eval/score classifier was a prefix match, so an honest fix in such a
+  file read GAMED ("zero production-source files"). It now matches the whole name token
+  (`eval.ts`, `grader-x.js`, `score.test.mjs`, `scoring.ts`), never a prefix.
+- **Git preconditions exit 64, never 1.** A non-repo cwd, a base or head ref missing from a shallow
+  checkout (the `actions/checkout` default is `fetch-depth: 1`), and a single-commit or shallow clone
+  with no `--base` used to throw a stack trace with exit 1, the FAIL verdict code, so a PR gate
+  failed as a regression. Each is a ConfigError now, with the fix in the message (`fetch-depth: 0`,
+  pass `--base`, or `--working`); `check()` throws the same ConfigError.
+- **`check({ repo })` with a subdirectory runs at the repository root**, where the config lives and
+  `.promptwheel/` is written, exactly as the CLI does from that directory.
+- **Self-heal never removes another repo's checkout.** Every temp dir the engine creates carries a
+  short hash of its owning repo in the name; the stale-worktree sweep prunes only this repo's own
+  (older than 1 h), leaves another repo's alone however old, and removes an untagged dir from an
+  older engine only after a full day.
+- **The repo's own `tests_passing` metric forces the TAP reporter** (`node --test --test-reporter=tap`):
+  Node 24 prints the spec reporter even when piped, so the metric's `grep -cE "^ok "` counted zero and
+  the gate read its own suite as unmeasurable. If your config counts `ok` lines, do the same.
+- **One patched worktree re-proves every improved metric.** The source-only phase checked out,
+  patched and set up a worktree once per improved metric; it does it once per run.
+
 ## 0.7.8 (2026-11-03): every precondition of check() is a ConfigError
 
 - **Library:** `check()` threw a plain `Error` for three preconditions (not a git repository, `auto: false` with no config, an `options.config` without a non-empty `metrics` array) while the config loaders threw the `ConfigError` 0.7.7 introduced. All of them now carry `name: 'ConfigError'` and `exitCode: 64`, as the types say, and the duplicated doc comment on `check` is one again.

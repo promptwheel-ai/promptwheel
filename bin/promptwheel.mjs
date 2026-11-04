@@ -31,6 +31,12 @@ const median = (xs) => {
 };
 const spread = (xs) => { const a = xs.filter((x) => x != null); return a.length ? Math.max(...a) - Math.min(...a) : 0; };
 
+// every temp dir the engine creates (worktrees, source-only worktrees, temp indexes) carries a short
+// hash of the owning repo in its name, so self-heal in one repo never deletes a checkout another
+// repo is still measuring in (a long gate elsewhere must not lose its worktree mid-run)
+function tmpOwnerTag(repo) { let r = repo; try { r = realpathSync(repo); } catch { /* keep as given */ } return createHash('sha1').update(String(r)).digest('hex').slice(0, 8); }
+const tmpPrefix = (repo, kind) => `${kind}-${tmpOwnerTag(repo)}-`;
+
 // usage / config errors exit 64 (EX_USAGE), so they can never be confused with a verdict
 // (0 pass, 1 fail, 2 gamed, 3 inconclusive): in CI a config typo must not read as GAMED.
 const EX_USAGE = 64;
@@ -38,6 +44,18 @@ function die(msg) { console.error(msg); process.exit(EX_USAGE); }
 // a config or precondition error: thrown, so the library path (check()) surfaces it to the caller
 // instead of exiting the host process; the CLI catches it in main() and exits EX_USAGE.
 function bad(msg) { const e = new Error(msg); e.name = 'ConfigError'; e.exitCode = EX_USAGE; throw e; }
+
+// the repository root, or a ConfigError: a non-repo cwd must exit 64, never 1 (the FAIL verdict code)
+function repoRoot(cwd) {
+  try { return git(['rev-parse', '--show-toplevel'], cwd); }
+  catch { bad(`promptwheel: not inside a git repository (${cwd})`); }
+}
+// a ref the gate is about to check out must be in this clone; the usual miss is a shallow CI
+// checkout (actions/checkout defaults to fetch-depth 1) whose PR base was never fetched
+function ensureCommit(repo, ref, what) {
+  try { execFileSync('git', ['cat-file', '-e', `${ref}^{commit}`], { cwd: repo, stdio: 'ignore' }); }
+  catch { bad(`promptwheel: ${what} ref "${ref}" is not in this clone (a shallow checkout? fetch it, e.g. actions/checkout with fetch-depth: 0)`); }
+}
 
 function readConfigFile(p) {
   try { return JSON.parse(readFileSync(p, 'utf8')); }
@@ -99,7 +117,9 @@ function autoConfig(repo) {
 
 function resolveBase(repo, base) {
   if (base) return base;
-  const head = git(['rev-parse', 'HEAD'], repo);
+  let head = '';
+  try { head = git(['rev-parse', '--verify', '--quiet', 'HEAD'], repo); }
+  catch { bad('promptwheel: no commits yet, make an initial commit before gating'); }
   for (const b of ['origin/main', 'origin/master', 'main', 'master']) {
     let mb = '';
     try { mb = git(['merge-base', 'HEAD', b], repo); } catch { continue; }
@@ -107,7 +127,8 @@ function resolveBase(repo, base) {
     // trivial PASS that verified nothing, so fall through to the last commit instead.
     if (mb && mb !== head) return mb;
   }
-  return git(['rev-parse', 'HEAD~1'], repo);
+  try { return git(['rev-parse', '--verify', '--quiet', 'HEAD~1'], repo); }
+  catch { bad('promptwheel: no commit to compare against (one commit, or a shallow clone): pass --base, or --working'); }
 }
 
 function runMetric(cwd, m, env) {
@@ -167,7 +188,7 @@ function runSetup(wt, cfg, env) {
 
 // measure every metric `repeat` times at a ref, in a throwaway worktree (never touches your tree)
 function measureAt(repo, ref, cfg, repeat) {
-  const wt = mkdtempSync(join(tmpdir(), 'promptwheel-'));
+  const wt = mkdtempSync(join(tmpdir(), tmpPrefix(repo, 'promptwheel')));
   git(['worktree', 'add', '--quiet', '--detach', wt, ref], repo);
   try {
     const env = bridgeEnv(repo, wt, cfg);
@@ -243,7 +264,9 @@ const NON_SOURCE = [
   /_spec\.rb$/i,
   /[a-z0-9](Test|Tests)\.(java|kt|kts|scala)$/,
   /\.snap$/i, /(^|\/)golden[^/]*$/i, /\.golden$/i,
-  /(^|\/)(eval|grader|score)[^/]*\.[cm]?[jt]s$/i,
+  // a grader/eval/score FILE by name (eval.ts, grader-x.js, score.test.mjs, scoring.ts), never a prefix:
+  // evaluate.ts, evaluation.js, scoreboard.js are production source and must stay in the slice
+  /(^|\/)(eval|evals|grader|graders|score|scorer|scoring)([._-][^/]*)?\.[cm]?[jt]s$/i,
   // config files only, require a .config/.conf/.setup segment so PRODUCTION source that
   // happens to be named after a tool (e.g. src/installers/eslint.ts) is NOT swept out of
   // the source slice (a false sweep here can flag an honest win as GAMED).
@@ -332,26 +355,36 @@ function changedSourcePaths(repo, base, head, isEval = () => false) {
   return { source: all.filter((p) => !nonSrc(p)), nonSource: all.filter(nonSrc) };
 }
 
-// measure `metric` in a worktree at `base` with ONLY the source slice of base→head applied.
-function measureSourceOnly(repo, base, head, metric, cfg, repeat) {
+// measure the given metric defs in ONE worktree at `base` with ONLY the source slice of base→head
+// applied (checked out once, patched once, set up once), so re-proving three improved metrics costs
+// one checkout, not three. Returns { [name]: { samples, hadSourceChange, applyFailed? } }.
+function measureSourceOnlyAll(repo, base, head, defs, cfg, repeat) {
+  const out = {};
+  if (!defs.length) return out;
   const { source } = changedSourcePaths(repo, base, head, evaluatorMatcher(cfg));
-  if (!source.length) return { samples: [], hadSourceChange: false }; // a "win" with zero source edits = goalposts moved
-  const wt = mkdtempSync(join(tmpdir(), 'promptwheel-src-'));
+  if (!source.length) { for (const m of defs) out[m.name] = { samples: [], hadSourceChange: false }; return out; } // a "win" with zero source edits = goalposts moved
+  const wt = mkdtempSync(join(tmpdir(), tmpPrefix(repo, 'promptwheel-src')));
   git(['worktree', 'add', '--quiet', '--detach', wt, base], repo);
   try {
     const env = bridgeEnv(repo, wt, cfg);
-    const patch = git(['diff', base, head, '--', ...source], repo);
+    // --binary so a binary source file (an image, a model blob under src/) travels in the patch; without
+    // it git prints "Binary files differ", the apply fails, and a win the source never earned would
+    // read as unprovable. Untrimmed: a binary hunk ends in a blank line the apply needs.
+    const patch = execFileSync('git', ['diff', '--binary', base, head, '--', ...source], { cwd: repo, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
     if (patch.trim()) {
       // stdio stderr 'ignore': git apply --3way prints "Applied patch ... cleanly" to stderr; that
       // is noise on an otherwise-quiet run (and corrupts --json for callers that fold in stderr).
-      const tryApply = (extra) => { execFileSync('git', ['apply', '--whitespace=nowarn', ...extra], { cwd: wt, input: patch + '\n', encoding: 'utf8', stdio: ['pipe', 'ignore', 'ignore'] }); };
+      const tryApply = (extra) => { execFileSync('git', ['apply', '--whitespace=nowarn', ...extra], { cwd: wt, input: patch, encoding: 'utf8', stdio: ['pipe', 'ignore', 'ignore'] }); };
       try { tryApply(['--3way']); }
-      catch { try { tryApply([]); } catch { return { samples: [], hadSourceChange: true, applyFailed: true }; } }
+      catch { try { tryApply([]); } catch { for (const m of defs) out[m.name] = { samples: [], hadSourceChange: true, applyFailed: true }; return out; } }
     }
     runSetup(wt, cfg, env); // build the patched tree, so a build-gated metric measures the source edit
-    const samples = [];
-    for (let i = 0; i < repeat; i++) samples.push(runMetric(wt, metric, env));
-    return { samples, hadSourceChange: true };
+    for (const m of defs) {
+      const samples = [];
+      for (let i = 0; i < repeat; i++) samples.push(runMetric(wt, m, env));
+      out[m.name] = { samples, hadSourceChange: true };
+    }
+    return out;
   } finally {
     try { git(['worktree', 'remove', '--force', wt], repo); } catch { rmSync(wt, { recursive: true, force: true }); }
   }
@@ -371,7 +404,8 @@ function gain(m, before, val) {
 // rest came from editing the goalposts). Tune via `gamingThreshold` (config-level or per-metric).
 function judgeGaming(m, srcResult, threshold = 0.5) {
   if (!srcResult.hadSourceChange) return { gamed: true, sourceOnly: null, retained: 0, reason: 'the "win" changed zero production-source files, only test/config/grader/golden' };
-  if (srcResult.applyFailed) return { gamed: null, sourceOnly: null, retained: null, reason: 'source-only patch did not apply cleanly, inconclusive' };
+  // the win could not be re-proven at all: never a pass. gate() turns `unprovable` into INCONCLUSIVE.
+  if (srcResult.applyFailed) return { gamed: null, unprovable: true, sourceOnly: null, retained: null, reason: 'the source-only patch could not be applied, so the win cannot be re-proven from the source: inconclusive' };
   const sourceOnly = median(srcResult.samples);
   const full = gain(m, m.before, m.after);
   if (full == null || full <= 0) return { gamed: false, sourceOnly, retained: 1, reason: 'no real improvement to re-prove' };
@@ -389,7 +423,7 @@ function judgeGaming(m, srcResult, threshold = 0.5) {
 // touching the real index or files, so a gate/improve sees a file an agent just added.
 // Returns 'HEAD' when nothing changed.
 function workingSnapshot(repo) {
-  const idxDir = mkdtempSync(join(tmpdir(), 'pw-idx-'));
+  const idxDir = mkdtempSync(join(tmpdir(), tmpPrefix(repo, 'pw-idx')));
   const env = {
     ...process.env, GIT_INDEX_FILE: join(idxDir, 'index'),
     GIT_AUTHOR_NAME: 'promptwheel', GIT_AUTHOR_EMAIL: 'promptwheel@local',
@@ -422,12 +456,16 @@ function selfHeal(repo) {
       git(['worktree', 'list', '--porcelain'], repo)
         .split('\n').filter((l) => l.startsWith('worktree ')).map((l) => l.slice(9).trim()),
     );
-    const tmp = tmpdir(), cutoff = Date.now() - 3600_000;
+    const tmp = tmpdir(), now = Date.now(), mine = tmpOwnerTag(repo);
+    const TAGGED = /^(promptwheel-src|promptwheel|pw-idx)-([0-9a-f]{8})-/;
     for (const name of readdirSync(tmp)) {
       if (!name.startsWith('promptwheel-') && !name.startsWith('pw-idx-')) continue; // worktrees + temp-index dirs
+      const tag = (name.match(TAGGED) || [])[2] || null;
+      if (tag && tag !== mine) continue;              // another repo's checkout, maybe mid-measurement: never ours to remove
+      const maxAge = tag ? 3600_000 : 86_400_000;     // an untagged dir (an older engine's) only after a full day
       const p = join(tmp, name);
-      if (tracked.has(p)) continue;                 // a live/registered worktree, leave it
-      try { if (statSync(p).mtimeMs < cutoff) rmSync(p, { recursive: true, force: true }); } catch { /* */ }
+      if (tracked.has(p)) continue;                   // a live/registered worktree, leave it
+      try { if (statSync(p).mtimeMs < now - maxAge) rmSync(p, { recursive: true, force: true }); } catch { /* */ }
     }
   } catch { /* cleanup must never block the gate */ }
 }
@@ -589,12 +627,19 @@ function readAllowTrailer(repo, ref) {
 // gamingReason) and returns the report.gate record. An allow trailer can still clear a gamed
 // metric afterwards, in gate().
 function detectGamingPass(repo, base, head, cfg, metrics, repeat) {
+  const toProve = [];
   for (const m of metrics) {
     if (m.status !== 'improved') continue;
     const cm = cfg.metrics.find((c) => c.name === m.name);
     if (cm.gamingCheck === false) continue;   // tripwire / test-side guards aren't re-proven from source (their gain legitimately lives in test files)
-    const j = judgeGaming(m, measureSourceOnly(repo, base, head, cm, cfg, repeat), cm.gamingThreshold ?? cfg.gamingThreshold ?? 0.5);
+    toProve.push(cm);
+  }
+  const srcResults = measureSourceOnlyAll(repo, base, head, toProve, cfg, repeat);   // one patched checkout for all of them
+  for (const cm of toProve) {
+    const m = metrics.find((x) => x.name === cm.name);
+    const j = judgeGaming(m, srcResults[cm.name], cm.gamingThreshold ?? cfg.gamingThreshold ?? 0.5);
     m.gamed = j.gamed; m.sourceOnly = j.sourceOnly; m.retained = j.retained; m.gamingReason = j.reason;
+    if (j.unprovable) m.unprovable = true;
   }
   const evalChanged = changedEvaluatorPaths(repo, base, head, cfg);
   if (evalChanged.length) {
@@ -632,6 +677,23 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat) {
   return info;
 }
 
+// Section 1 verdict from the measured facts, pure, so the precedence can be checked in isolation:
+// a mandate hit or a guarded regression is FAIL; a win that did not survive the source-only re-run
+// (or a weakened gate) is GAMED; INCONCLUSIVE when nothing could be certified. A guard that never
+// runs (inert: a pass/fail metric stuck at 0 across both refs) verifies nothing, so a bare no-op
+// run is not laundered into a green PASS, BUT an inert guard must not bury a genuine, measured win
+// elsewhere (that would make `improve` revert good changes and misread them as a plateau). And a
+// win whose source-only re-run could not be applied (`unprovable`) is never a PASS either: a green
+// the engine could not re-prove is exactly the green it exists to doubt.
+export function deriveVerdict(metrics, gateInfo = null, mandated = false) {
+  const failed = metrics.some((m) => m.guard && !m.ok);
+  const gamed = metrics.some((m) => m.gamed === true) || !!(gateInfo && gateInfo.weakened && !gateInfo.allowed);
+  const inertNoWin = metrics.some((m) => m.inert) && !metrics.some((m) => m.status === 'improved');
+  const unprovable = metrics.some((m) => m.unprovable === true);
+  const inconclusive = !failed && !gamed && (inertNoWin || unprovable);
+  return (mandated || failed) ? 'fail' : gamed ? 'gamed' : inconclusive ? 'inconclusive' : 'pass';
+}
+
 function gate(repo, opts) {
   selfHeal(repo);
   const cfg = opts.config ?? loadConfig(repo);
@@ -649,6 +711,8 @@ function gate(repo, opts) {
   } else {
     base = resolveBase(repo, opts.base);
     head = opts.head || 'HEAD';
+    ensureCommit(repo, base, 'base');
+    ensureCommit(repo, head, 'head');
   }
 
   const before = measureAt(repo, base, cfg, repeat);
@@ -678,14 +742,7 @@ function gate(repo, opts) {
   const baseMandates = (gateInfo && gateInfo.baseMandates) || (!opts.detectGaming ? ((gateDefAtRef(repo, base) || {}).scalars || {}).mandates : null);
   const mandateViolations = checkMandates(repo, base, head, cfg, baseMandates);
   const mandated = mandateViolations.length > 0;
-  const failed = metrics.some((m) => m.guard && !m.ok);
-  const gamed = metrics.some((m) => m.gamed === true) || !!(gateInfo && gateInfo.weakened && !gateInfo.allowed);
-  // a guard that never runs (inert: a pass/fail metric stuck at 0 across both refs) verifies
-  // nothing, don't launder that into a green PASS. The honest verdict is "couldn't measure".
-  // BUT scope it to a bare no-op run: an inert guard must NOT bury a genuine, measured win
-  // elsewhere (that would make `improve` revert good changes and misread them as a plateau).
-  const inconclusive = !failed && !gamed && metrics.some((m) => m.inert) && !metrics.some((m) => m.status === 'improved');
-  const verdict = (mandated || failed) ? 'fail' : gamed ? 'gamed' : inconclusive ? 'inconclusive' : 'pass';
+  const verdict = deriveVerdict(metrics, gateInfo, mandated);
   const report = {
     base: short(repo, base), head: short(repo, head), repeat, mode: opts.working ? 'working' : 'refs',
     verdict, metrics,
@@ -707,7 +764,7 @@ function gate(repo, opts) {
 
 function run(argv) {
   const args = parseArgs(argv);
-  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
+  const repo = repoRoot(process.cwd());
   let config;
   if (!hasConfigFile(repo) && !args.noAuto) {
     config = autoConfig(repo);
@@ -733,7 +790,7 @@ function recordOutcome(repo, report) {
 function improve(argv) {
   const args = parseArgs(argv);
   if (!args.attempt) die('improve requires --attempt "<command that changes the repo>"');
-  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
+  const repo = repoRoot(process.cwd());
   const dirty = git(['status', '--porcelain'], repo).split('\n').filter((l) => l.trim() && !l.includes('.promptwheel'));
   if (dirty.length) die('working tree not clean, commit or stash first (improve needs a clean base to revert to)');
 
@@ -781,7 +838,7 @@ function revert(repo) {
 // The reader is tolerant of older records that carry extra fields (cohort, label, subsystems).
 function insights(argv) {
   const args = parseArgs(argv);
-  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
+  const repo = repoRoot(process.cwd());
   const f = join(repo, '.promptwheel', 'outcomes.jsonl');
   if (!existsSync(f)) die('no outcome record yet, run the gate a few times first (.promptwheel/outcomes.jsonl)');
   const runs = readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
@@ -914,7 +971,7 @@ function init(argv) {
     for (const [k, p] of Object.entries(PRESETS)) console.log(`  ${k.padEnd(13)} ${p.desc}`);
     return;
   }
-  const repo = (() => { try { return git(['rev-parse', '--show-toplevel'], process.cwd()); } catch { return process.cwd(); } })();
+  const repo = (() => { try { return repoRoot(process.cwd()); } catch { return process.cwd(); } })();
   const out = join(repo, 'promptwheel.config.json');
   if (existsSync(out) && !argv.includes('--force')) die('promptwheel.config.json already exists, pass --force to overwrite');
   const pi = argv.indexOf('--preset');
@@ -993,7 +1050,7 @@ function writeAgentBlock(repo) {
 // observability: list the EFFECTIVE guardrails (incl. inherited) + each one's flag record
 function guards(argv) {
   const args = parseArgs(argv);
-  const repo = git(['rev-parse', '--show-toplevel'], process.cwd());
+  const repo = repoRoot(process.cwd());
   const cfg = loadConfig(repo);
   const hist = {};
   const f = join(repo, '.promptwheel', 'outcomes.jsonl');
@@ -1136,12 +1193,11 @@ export function verdictExitCode(verdict) {
 //   allow         string   a declared override reason (same as --allow / a Promptwheel-Allow: trailer)
 //   record        boolean  append the run to .promptwheel/outcomes.jsonl (default: false)
 export function check(options = {}) {
-  let repo;
-  try {
-    repo = options.repo ? realpathSync(options.repo)
-                        : git(['rev-parse', '--show-toplevel'], process.cwd());
-    git(['rev-parse', '--show-toplevel'], repo);   // an existing path that is not a repository fails here
-  } catch { bad(`promptwheel check: not inside a git repository (${options.repo || process.cwd()})`); }
+  // `repo` may name a subdirectory: the gate runs at the toplevel (that is where the config lives
+  // and where .promptwheel/ is written), exactly as the CLI does from the same directory
+  let start = process.cwd();
+  if (options.repo) { try { start = realpathSync(options.repo); } catch { bad(`promptwheel: not inside a git repository (${options.repo})`); } }
+  const repo = repoRoot(start);
 
   let config = options.config;
   if (config !== undefined) {
@@ -1200,7 +1256,8 @@ export function conformsToContract(report) {
     if (m.delta !== undefined && !numOrNull(m.delta)) E(`${at}.delta must be a number or null`);
     if (m.noise !== undefined && !(isNum(m.noise) && m.noise >= 0)) E(`${at}.noise must be a number >= 0 (the measured jitter band; repeat count is the top-level report.repeat)`);
     if (m.confidence !== undefined && typeof m.confidence !== 'string') E(`${at}.confidence must be a string`);
-    if (m.gamed !== undefined && typeof m.gamed !== 'boolean') E(`${at}.gamed must be a boolean`);
+    if (m.gamed !== undefined && m.gamed !== null && typeof m.gamed !== 'boolean') E(`${at}.gamed must be a boolean, or null when the win could not be re-proven`);
+    if (m.unprovable !== undefined && m.unprovable !== true) E(`${at}.unprovable must be true when present`);
     if (m.allowed !== undefined && typeof m.allowed !== 'boolean') E(`${at}.allowed must be a boolean`);
     if (m.sourceOnly !== undefined && !numOrNull(m.sourceOnly)) E(`${at}.sourceOnly must be a number or null`);
     if (m.retained !== undefined && !numOrNull(m.retained)) E(`${at}.retained must be a number or null`);
@@ -1237,6 +1294,8 @@ export function conformsToContract(report) {
       E("verdict 'pass' but a guarded metric regressed (guard:true, ok:false)");
     if (report.verdict === 'pass' && report.metrics.some((m) => m.gamed === true))
       E("verdict 'pass' but a metric is gamed:true");
+    if (report.verdict === 'pass' && report.metrics.some((m) => m.unprovable === true))
+      E("verdict 'pass' but a metric is unprovable (its source-only re-run could not be applied)");
     if (report.verdict === 'pass' && gateWeakened)
       E("verdict 'pass' but report.gate.weakened is non-empty (the gate was weakened)");
     if (report.verdict === 'gamed' && !report.metrics.some((m) => m.gamed === true) && !gateWeakened)

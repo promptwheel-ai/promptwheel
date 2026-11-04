@@ -3,7 +3,7 @@
   "metrics": [
     {
       "name": "tests_passing",
-      "cmd": "node --test 2>&1 | grep -cE \"^ok \"",
+      "cmd": "node --test --test-reporter=tap 2>&1 | grep -cE \"^ok \"",
       "extract": "number",
       "direction": "up",
       "guard": true,

@@ -7,7 +7,9 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint,
-  check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION } from '../bin/promptwheel.mjs';
+  check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION, deriveVerdict } from '../bin/promptwheel.mjs';
+import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 
 const ENGINE = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'promptwheel.mjs');
 
@@ -203,6 +205,12 @@ test('isNonSource: tests/config/grader/golden are non-source', () => {
 test('isNonSource: real production source is NOT non-source', () => {
   for (const p of ['src/app.js', 'lib/handler.ts', 'index.mjs', 'latest.js', 'mytest.js', 'contest.py'])
     assert.equal(isNonSource(p), false, p);
+});
+test('isNonSource: a grader/eval/score FILE by name is non-source; a production name that merely starts with the token is source', () => {
+  for (const p of ['eval.mjs', 'grader.ts', 'score.test.ts', 'eval-set.js', 'grader_x.mjs', 'scoring.ts', 'evals.ts', 'scorer.js', 'lib/grader.cjs'])
+    assert.equal(isNonSource(p), true, p);
+  for (const p of ['evaluate.ts', 'evaluation.js', 'scoreboard.js', 'scores.ts', 'src/evaluator.mjs', 'graderboard.ts'])
+    assert.equal(isNonSource(p), false, p);   // an honest fix in src/evaluation.ts must never read GAMED
 });
 test('isNonSource: tool-named CONFIG is non-source; tool-named SOURCE is source', () => {
   for (const p of ['jest.config.ts', 'eslint.config.mjs', 'playwright.config.js', 'karma.conf.js', 'jest.setup.ts', 'tsconfig.base.json'])
@@ -652,17 +660,35 @@ test('suppressions tripwire counts //nolint (go) and #![allow] (rust) too', () =
 });
 
 // ---------------------------------------- self-heal: orphaned worktrees from a crashed run
+// mirrors the engine's owner tag: sha1 of the repo's real path, first 8 hex chars
+const ownerTag = (repo) => createHash('sha1').update(realpathSync(repo)).digest('hex').slice(0, 8);
 test('self-heal: a stale /tmp worktree from a crashed run is cleaned on the next run', () => {
-  const orphan = join(tmpdir(), 'promptwheel-ORPHANTEST');
-  rmSync(orphan, { recursive: true, force: true });
-  mkdirSync(orphan, { recursive: true });
-  const old = new Date(Date.now() - 7200_000);     // 2h old → safely an orphan, not a live run
-  utimesSync(orphan, old, old);
   const d = tmpRepo([TODOS]);
+  const mine = join(tmpdir(), `promptwheel-${ownerTag(d)}-ORPHANTEST`);
+  const legacy = join(tmpdir(), 'promptwheel-ORPHANTEST');          // an older engine's untagged dir
+  for (const p of [mine, legacy]) { rmSync(p, { recursive: true, force: true }); mkdirSync(p, { recursive: true }); }
+  const old = new Date(Date.now() - 7200_000);     // 2h old: safely an orphan of THIS repo, not a live run
+  utimesSync(mine, old, old);
+  const day = new Date(Date.now() - 90_000_000);   // 25h old: an untagged dir is only pruned after a full day
+  utimesSync(legacy, day, day);
   writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
   pw(d, ['run', '--working', '--no-record']);       // any gate triggers selfHeal first
-  assert.equal(existsSync(orphan), false);          // the abandoned checkout was removed
+  assert.equal(existsSync(mine), false);            // this repo's abandoned checkout was removed
+  assert.equal(existsSync(legacy), false);          // and the day-old untagged one
   rmSync(d, { recursive: true, force: true });
+});
+test('self-heal: another repo\'s checkout is never pruned, however old; an untagged dir survives under a day', () => {
+  const d = tmpRepo([TODOS]);
+  const other = join(tmpdir(), 'promptwheel-0badc0de-OTHERREPO');    // some other repo, mid-measurement for all we know
+  const young = join(tmpdir(), 'promptwheel-ORPHANYOUNG');          // untagged, 2h old: not yet
+  for (const p of [other, young]) { rmSync(p, { recursive: true, force: true }); mkdirSync(p, { recursive: true }); }
+  const old = new Date(Date.now() - 7200_000);
+  utimesSync(other, old, old); utimesSync(young, old, old);
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  pw(d, ['run', '--working', '--no-record']);
+  assert.equal(existsSync(other), true, 'a dir tagged for another repo must survive');
+  assert.equal(existsSync(young), true, 'an untagged dir younger than a day must survive');
+  for (const p of [other, young, d]) rmSync(p, { recursive: true, force: true });
 });
 
 // ---------------------------------------- guardrail inheritance + observability
@@ -1300,4 +1326,90 @@ test('init: detects a build step so a build-dependent gate measures instead of r
   delete cfg.setup; writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify(cfg));
   assert.equal(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']).code, 3);
   rmSync(d, { recursive: true, force: true });
+});
+
+// ------------------------------------------- review 4: a win the engine cannot re-prove is never a pass
+test('gaming: a test-only win plus a NEW BINARY file under src/ reads GAMED (the --binary patch applies; it used to read PASS)', () => {
+  const d = gamedRepo();                       // calc.mjs has the bug, the test was edited to expect it
+  mkdirSync(join(d, 'src'), { recursive: true });
+  writeFileSync(join(d, 'src', 'blob.bin'), Buffer.from([0, 1, 2, 255, 0, 7, 9, 0]));   // a NUL byte: git treats it as binary
+  commitAll(d, 'edit the test and add a blob');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'gamed', JSON.stringify(r.metrics));
+  assert.equal(r.metrics[0].gamed, true);
+  assert.equal(r.metrics[0].unprovable, undefined, 'the binary source patch applied, so the win was judged, not skipped');
+  assert.equal(conformsToContract(r).ok, true, conformsToContract(r).errors.join('; '));
+  rmSync(d, { recursive: true, force: true });
+});
+test('deriveVerdict: an improved metric whose source-only re-run could not be applied is INCONCLUSIVE, never pass', () => {
+  const j = judgeGaming({ direction: 'pass', before: 0, after: 1 }, { samples: [], hadSourceChange: true, applyFailed: true });
+  assert.equal(j.gamed, null); assert.equal(j.unprovable, true);
+  const improved = { name: 'tests_pass', guard: true, ok: true, status: 'improved' };
+  assert.equal(deriveVerdict([{ ...improved, gamed: null, unprovable: true }]), 'inconclusive');
+  assert.equal(verdictExitCode(deriveVerdict([{ ...improved, gamed: null, unprovable: true }])), 3);
+  assert.equal(deriveVerdict([{ ...improved, gamed: false, retained: 1 }]), 'pass');
+  assert.equal(deriveVerdict([{ ...improved, gamed: true }]), 'gamed');
+  assert.equal(deriveVerdict([{ ...improved, gamed: null, unprovable: true }, { name: 'x', guard: true, ok: false, status: 'regressed' }]), 'fail');   // fail still outranks
+  assert.equal(deriveVerdict([{ ...improved, gamed: null, unprovable: true }], null, true), 'fail');                                                  // so does a mandate
+  assert.equal(deriveVerdict([{ name: 'g', guard: true, ok: true, status: 'unchanged', inert: true }]), 'inconclusive');                               // the inert rule still holds
+  assert.equal(deriveVerdict([{ name: 'g', guard: true, ok: true, status: 'unchanged', inert: true }, { ...improved, gamed: false }]), 'pass');       // and still never buries a real win
+  // the contract check refuses a pass that carries an unprovable win
+  const rep = { base: 'a', head: 'b', repeat: 1, mode: 'refs', verdict: 'pass', metrics: [{ name: 'tests_pass', direction: 'pass', guard: true, before: 0, after: 1, delta: 1, status: 'improved', ok: true, confidence: 'high', noise: 0, gamed: null, unprovable: true }] };
+  assert.equal(conformsToContract(rep).ok, false);
+  assert.match(conformsToContract(rep).errors.join('; '), /unprovable/);
+  assert.equal(conformsToContract({ ...rep, verdict: 'inconclusive' }).ok, true, conformsToContract({ ...rep, verdict: 'inconclusive' }).errors.join('; '));
+});
+
+// --------------------------------------------- review 4: git preconditions are usage errors (64), never a verdict
+test('exit 64: a non-repo cwd, a base ref missing from this clone (shallow-checkout hint), a single commit with no --base', () => {
+  const nonRepo = mkdtempSync(join(tmpdir(), 'pw-norepo-'));
+  let r = pw(nonRepo, ['run', '--no-record']);
+  assert.equal(r.code, 64, r.out); assert.match(r.out, /not inside a git repository/);
+  assert.doesNotMatch(r.out, /at .*promptwheel\.mjs:\d+/, 'no stack trace');
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'only');
+  r = pw(d, ['run', '--base', '0000000000000000000000000000000000000000', '--head', 'HEAD', '--no-record']);
+  assert.equal(r.code, 64, r.out); assert.match(r.out, /base ref "0{40}" is not in this clone/); assert.match(r.out, /fetch-depth: 0/);
+  r = pw(d, ['run', '--no-record']);              // one commit, no trunk to merge-base against, no HEAD~1
+  assert.equal(r.code, 64, r.out); assert.match(r.out, /no commit to compare against/); assert.match(r.out, /--working/);
+  // the library throws the same ConfigError
+  for (const opts of [{ repo: d, base: '0000000000000000000000000000000000000000' }, { repo: d }, { repo: nonRepo }]) {
+    let err = null; try { check(opts); } catch (e) { err = e; }
+    assert.ok(err && err.name === 'ConfigError' && err.exitCode === 64, `${JSON.stringify(opts)} -> ${err && err.message}`);
+  }
+  rmSync(d, { recursive: true, force: true }); rmSync(nonRepo, { recursive: true, force: true });
+});
+
+// ------------------------------------------------------ review 4: check({ repo }) from a subdirectory
+test('check: a repo path that names a subdirectory gates at the repository root (root config, root record)', () => {
+  const d = tmpRepo([TODOS]);
+  mkdirSync(join(d, 'packages', 'api'), { recursive: true });
+  writeFileSync(join(d, 'packages', 'api', 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'packages', 'api', 'app.js'), 'a\n');
+  const r = check({ repo: join(d, 'packages', 'api'), working: true, record: true });
+  assert.equal(r.verdict, 'pass', JSON.stringify(r.metrics));
+  assert.equal(r.metrics[0].name, 'todos', 'the ROOT config was used, not an auto-config of the subdir');
+  assert.equal(existsSync(join(d, '.promptwheel', 'outcomes.jsonl')), true, 'the record is written at the root');
+  assert.equal(existsSync(join(d, 'packages', 'api', '.promptwheel')), false, 'nothing is written in the subdir');
+  rmSync(d, { recursive: true, force: true });
+});
+
+// -------------------------------------------- review 4: one patched worktree re-proves every improved metric
+test('gaming: two improved metrics are re-proven in ONE source-only checkout (setup runs 3 times, not 4)', () => {
+  const log = join(mkdtempSync(join(tmpdir(), 'pw-setups-')), 'setups.log');
+  const d = tmpRepo([
+    TODOS,
+    { name: 'fixme', cmd: 'grep -rn FIXME . --include=*.js 2>/dev/null | wc -l', extract: 'number', direction: 'down', guard: true },
+  ]);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  cfg.setup = `echo setup >> ${JSON.stringify(log)}`;
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify(cfg));
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // FIXME\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app.js'), 'a\nb\n'); commitAll(d, 'fix both');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'pass', JSON.stringify(r.metrics));
+  for (const m of r.metrics) { assert.equal(m.status, 'improved', m.name); assert.equal(m.gamed, false, m.name); assert.equal(m.retained, 1, m.name); }
+  const setups = readFileSync(log, 'utf8').split('\n').filter(Boolean).length;
+  assert.equal(setups, 3, `base + head + ONE source-only checkout, got ${setups}`);
+  rmSync(d, { recursive: true, force: true }); rmSync(dirname(log), { recursive: true, force: true });
 });

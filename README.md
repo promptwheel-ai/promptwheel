@@ -42,7 +42,7 @@ PromptWheel  a1b2c3d → e4f5g6h  (×5)
   VERDICT: PASS
 ```
 
-Exit `0` pass · `1` fail (a guarded metric regressed, or a mandate was violated) · `2` gamed · `3` inconclusive (a guard measured nothing) · `64` usage or config error (never a verdict). No build step, zero dependencies, Node 18+. The same verdict runs as a PR check in CI, as a per-turn signal inside a coding loop, or in process (`import { check } from 'promptwheel'`); it is the reference check for the [Verified-Outcome Contract](https://github.com/sawbuck-ai/sawbuck/blob/master/CONTRACT.md), and the integration paths are in [INTEGRATE.md](INTEGRATE.md).
+Exit `0` pass · `1` fail (a guarded metric regressed, or a mandate was violated) · `2` gamed · `3` inconclusive (a guard measured nothing, or a win whose source-only re-run could not be applied) · `64` usage or config error (never a verdict). No build step, zero dependencies, Node 18+. The same verdict runs as a PR check in CI, as a per-turn signal inside a coding loop, or in process (`import { check } from 'promptwheel'`); it is the reference check for the [Verified-Outcome Contract](https://github.com/sawbuck-ai/sawbuck/blob/master/CONTRACT.md), and the integration paths are in [INTEGRATE.md](INTEGRATE.md).
 
 ## Install and use
 

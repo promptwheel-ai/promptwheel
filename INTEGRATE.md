@@ -19,7 +19,8 @@ importing this package.
 
 - **Section 1, exit codes.** `0` pass, `1` fail (a guarded metric regressed beyond noise, or
   a mandate was violated), `2` gamed (a win that did not survive a source-only re-run), `3`
-  inconclusive (a guard measured nothing, so a pass cannot be certified). An agent reads the
+  inconclusive (a guard measured nothing, or a win whose source-only re-run could not be applied,
+  so a pass cannot be certified). An agent reads the
   code as a per-turn reward it cannot inflate; a merge gate reads the same code as a wall it
   cannot self-clear. A usage or config error (a malformed config, a missing `extends` target,
   a bad flag) exits `64` (`EX_USAGE`), which is not a verdict: a CI step must never read a
