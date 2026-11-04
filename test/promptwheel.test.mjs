@@ -1452,6 +1452,30 @@ test('Sawbuck-Allow (alias): covers an intentional test DELETE (not just an edit
   assert.ok(r.allowed, 'the delete was acknowledged');
   rmSync(d, { recursive: true, force: true });
 });
+test('allowTrailer: false and PROMPTWHEEL_NO_ALLOW_TRAILER stop a trailer clearing a gamed win; the flag still does', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-notrailer-'));
+  const g = (a) => execFileSync('git', a, { cwd: d, stdio: 'ignore' });
+  g(['init', '-q']); g(['config', 'user.email', 'a@b.c']); g(['config', 'user.name', 'a']);
+  const cfg = { repeat: 1, metrics: [{ name: 'ok', cmd: 'node check.test.mjs', extract: 'exit', direction: 'pass', guard: true }] };
+  writeFileSync(join(d, 'check.test.mjs'), 'process.exit(1);\n');
+  writeFileSync(join(d, 'src.js'), 'export const a = 1;\n');
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify(cfg));
+  commitAll(d, 'base');
+  writeFileSync(join(d, 'check.test.mjs'), 'process.exit(0);\n');
+  commitAll(d, 'the test now passes\n\nPromptwheel-Allow: an agent approving itself');
+  const run = (extra = [], env = {}) => { try { return { code: 0, out: execFileSync('node', [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', ...extra], { cwd: d, encoding: 'utf8', env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'ignore'] }) }; } catch (e) { return { code: e.status, out: String(e.stdout) }; } };
+  assert.equal(run().code, 0, 'the default keeps the documented trailer');
+  assert.equal(run([], { PROMPTWHEEL_NO_ALLOW_TRAILER: '1' }).code, 2, 'off by the caller: gamed');
+  assert.equal(run(['--allow', 'a person read it'], { PROMPTWHEEL_NO_ALLOW_TRAILER: '1' }).code, 0, 'the flag still counts');
+  // off by the contract at the base ref; a change that re-enables it in the same diff does not get the trailer
+  g(['reset', '-q', '--hard', 'HEAD~1']);
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...cfg, allowTrailer: false })); commitAll(d, 'contract: trailers off');
+  writeFileSync(join(d, 'check.test.mjs'), 'process.exit(0);\n');
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify(cfg));
+  commitAll(d, 'pass, and trailers back on\n\nPromptwheel-Allow: an agent approving itself');
+  assert.notEqual(run().code, 0, 'the committed contract holds');
+});
+
 test('Promptwheel-Allow: a trailer with no reason does NOT override (still gamed); the retired Allow-Gamed name is not honored', () => {
   const d = gamedRepo();
   commitAll(d, 'edit\n\nPromptwheel-Allow:   ');   // empty reason

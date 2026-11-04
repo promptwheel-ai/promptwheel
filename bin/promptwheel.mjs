@@ -83,13 +83,13 @@ function resolveConfig(p, repo, label, seen) {
       const base = resolveConfig(bp, repo, relOf(repo, bp), seen);
       for (const m of base.metrics) byName.set(m.name, m);
       for (const md of (base.mandates || [])) if (md && md.name) mandatesByName.set(md.name, md);
-      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths']) if (base[k] !== undefined) scalars[k] = base[k];
+      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer']) if (base[k] !== undefined) scalars[k] = base[k];
     }
     for (const m of (cfg.metrics || [])) {
       byName.set(m.name, { ...m, __src: label, __override: byName.has(m.name) });
     }
     for (const md of (cfg.mandates || [])) if (md && md.name) mandatesByName.set(md.name, { ...md, __src: label });
-    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
+    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
     return { ...scalars, metrics: [...byName.values()], mandates: [...mandatesByName.values()] };
   } finally {
     seen.delete(abs); // only ACTIVE ancestors are a cycle, a diamond (a base reached two ways) is fine
@@ -501,7 +501,7 @@ function warnEditableInstall(repo) {
 // guarded metric in the very diff it "passes". We resolve the gate as of BASE too and, if a
 // guard was dropped, re-measure it under its BASE definition; the pass only reads GAMED when
 // that guard WOULD HAVE FAILED at head (a real regression hidden by moving the goalposts).
-const GATE_SCALARS = ['gamingThreshold', 'evaluatorPaths'];
+const GATE_SCALARS = ['gamingThreshold', 'evaluatorPaths', 'allowTrailer'];
 
 // Resolve the gate definition as of `ref` (metrics + mandates + scalars), following `extends` by
 // reading every file from that ref via `git show`, mirroring resolveConfig (a parent's mandates
@@ -731,7 +731,12 @@ function gate(repo, opts) {
   // It covers an `unprovable` win too (the source-only re-run could not be applied): the declared
   // intent is exactly the uncertainty that verdict expresses, and without this a declared change
   // whose source slice will not re-apply had no override short of turning the check off.
-  const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300), by: 'flag' } : (opts.working ? null : readAllowTrailer(repo, head));
+  // A trailer is off when the committed contract says `allowTrailer: false` or the caller set
+  // PROMPTWHEEL_NO_ALLOW_TRAILER (Sawbuck does, for a commit an agent made): an agent can write a
+  // commit message, so where the threat is the agent itself only the --allow flag counts. The base
+  // ref's contract is read too, so an agent cannot turn trailers back on in the change it is making.
+  const trailersOff = () => !!process.env.PROMPTWHEEL_NO_ALLOW_TRAILER || cfg.allowTrailer === false || ((gateDefAtRef(repo, base) || {}).scalars || {}).allowTrailer === false;
+  const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300), by: 'flag' } : (opts.working || trailersOff() ? null : readAllowTrailer(repo, head));
   let allowed = null;
   if (opts.detectGaming && allow) {
     const gm = metrics.filter((m) => m.gamed === true);
@@ -931,7 +936,7 @@ const PRESETS = {
   // config). Paths and counts, checked deterministically: three guarded counts that must not rise
   // without a declared reason (`allowable`), plus mandates that freeze the paths. The contract itself is
   // an evaluatorPath, not a mandate, so a person can still retire a rule in a change that only edits it.
-  'supply-chain': { desc: 'gate: no new lifecycle scripts, dependencies, or non-registry lock sources without a recorded reason; the agent cannot touch workflows, registries, publish scripts, or the contract',
+  'supply-chain': { allowTrailer: false, desc: 'gate: no new lifecycle scripts, dependencies, or non-registry lock sources without a recorded reason; the agent cannot touch workflows, registries, publish scripts, or the contract',
     evaluatorPaths: ['promptwheel.config.json', 'sawbuck.config.json'],
     mandates: [
       { name: 'workflows-frozen', paths: ['.github/workflows/**'], reason: 'workflows run with the repository secrets; change them in a separate, reviewed change' },
@@ -1035,12 +1040,12 @@ function init(argv) {
   if (existsSync(out) && !argv.includes('--force')) die('promptwheel.config.json already exists, pass --force to overwrite');
   const pi = argv.indexOf('--preset');
   const presetName = pi >= 0 ? argv[pi + 1] : null;
-  let metrics, note, evaluatorPaths, mandates;
+  let allowTrailer, metrics, note, evaluatorPaths, mandates;
   if (presetName) {
     const p = PRESETS[presetName];
     if (!p) die(`unknown preset "${presetName}", try: promptwheel init --list`);
     evaluatorPaths = p.evaluatorPaths;   // a preset may ship a starter evaluator allowlist (e.g. security-antihack)
-    mandates = p.mandates;               // a preset may ship hard rules (supply-chain: workflows, registries, publish scripts, hooks)
+    mandates = p.mandates; allowTrailer = p.allowTrailer;               // a preset may ship hard rules (supply-chain: workflows, registries, publish scripts, hooks)
     metrics = p.metrics || [{ name: 'tests_pass', cmd: detectTestCmd(repo), extract: 'exit', direction: 'pass', guard: true }];
     metrics = metrics.map((m) => m.cmd === '__TESTCMD__' ? { ...m, cmd: detectTestCmd(repo) } : m); // fill the preset's target
     // pack-backed presets: the referenced scripts live in THIS package, not
@@ -1079,7 +1084,7 @@ function init(argv) {
   const setup = presetName ? undefined : detectSetup(repo);
   const envCfg = presetName ? {} : { ...detectEnv(repo), ...(setup ? { setup } : {}) };
   if (envCfg.linkDirs) note += ` · linking ${envCfg.linkDirs.join(', ')}`;
-  writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, ...(evaluatorPaths ? { evaluatorPaths } : {}), ...(mandates ? { mandates } : {}), metrics }, null, 2) + '\n');
+  writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, ...(evaluatorPaths ? { evaluatorPaths } : {}), ...(mandates ? { mandates } : {}), ...(allowTrailer === false ? { allowTrailer } : {}), metrics }, null, 2) + '\n');
   console.log(`✓ wrote promptwheel.config.json, ${note}`);
   const lockTool = join(repo, '.promptwheel', 'packs', 'supply-chain', 'lock.mjs');
   if (existsSync(lockTool)) console.log(`✓ ${execFileSync(process.execPath, [lockTool, 'write', repo], { encoding: 'utf8' }).trim()} (commit it with the config)`);
