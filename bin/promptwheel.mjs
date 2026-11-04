@@ -931,6 +931,8 @@ const PRESETS = {
       { name: 'lifecycle_scripts', cmd: 'node packs/supply-chain/scan.mjs lifecycle .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
       { name: 'dependency_entries', cmd: 'node packs/supply-chain/scan.mjs deps .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
       { name: 'lock_nonregistry_sources', cmd: 'node packs/supply-chain/scan.mjs lock-sources .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
+      { name: 'unpinned_execution', cmd: 'node packs/supply-chain/scan.mjs unpinned .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
+      { name: 'install_policy_gaps', cmd: 'node packs/supply-chain/scan.mjs policy .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
     ] },
 };
 

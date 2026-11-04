@@ -513,6 +513,20 @@ test('init --preset security: the pack is copied from the package into .promptwh
 const SC_SCAN = join(dirname(ENGINE), '..', 'packs', 'supply-chain', 'scan.mjs');
 const scan = (what, dir) => { try { return { out: execFileSync('node', [SC_SCAN, what, dir], { encoding: 'utf8' }).trim(), code: 0 }; } catch (e) { return { out: `${e.stdout || ''}${e.stderr || ''}`, code: e.status }; } };
 
+test('supply-chain pack: unpinned execution and install policy are counted, pinned references are not', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-sc-pin-'));
+  mkdirSync(join(d, '.github/workflows'), { recursive: true }); mkdirSync(join(d, 'scripts'));
+  const sha = 'a'.repeat(40);
+  writeFileSync(join(d, '.github/workflows/ci.yml'), ['jobs:', '  a:', '    steps:', '      - uses: actions/checkout@v4', `      - uses: actions/setup-node@${sha}`, '      - uses: ./local-action', '      # - uses: commented/out@v1', '      - run: npx -y sawbuck debt', '      - run: npx -y sawbuck@0.1.32 debt', '      - run: curl -s https://x.example/i.sh | bash', '      - run: npm install -g tool'].join('\n'));
+  writeFileSync(join(d, 'action.yml'), 'runs:\n  steps:\n    - run: pnpm dlx thing@latest\n');
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ devDependencies: { tsc: '1' }, scripts: { b: 'npx tsc', c: 'npx cowsay' } }));
+  writeFileSync(join(d, 'scripts/go.sh'), '#!/bin/sh\n# npx comment\nnpx --yes @scope/pkg@1.2.3\n');
+  assert.equal(scan('unpinned', d).out, '6', 'tag action, npx, curl pipe, global install, dlx latest, undeclared npx');
+  assert.equal(scan('policy', d).out, '2');
+  writeFileSync(join(d, '.npmrc'), 'ignore-scripts=true\nmin-release-age=3\n');
+  assert.equal(scan('policy', d).out, '0');
+});
+
 test('supply-chain pack: the three counters on fixtures (manifests; npm, pnpm, yarn classic and yarn berry locks)', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-sc-scan-'));
   mkdirSync(join(d, 'packages/a'), { recursive: true }); mkdirSync(join(d, 'node_modules/x'), { recursive: true }); mkdirSync(join(d, 'berry'));
@@ -547,7 +561,7 @@ test('init --preset supply-chain: three held counts, the mandates, the contract 
   assert.equal((r.out.match(/installed packs\/supply-chain/g) || []).length, 1, 'one pack, announced once, however many metrics run it');
   assert.match(pw(d, ['init', '--list']).out, /supply-chain\s+gate: no new lifecycle scripts/);
   const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
-  assert.deepEqual(cfg.metrics.map((m) => m.name), ['lifecycle_scripts', 'dependency_entries', 'lock_nonregistry_sources']);
+  assert.deepEqual(cfg.metrics.map((m) => m.name), ['lifecycle_scripts', 'dependency_entries', 'lock_nonregistry_sources', 'unpinned_execution', 'install_policy_gaps']);
   assert.ok(cfg.metrics.every((m) => m.guard === true && m.gamingCheck === false && m.allowable === true && m.cmd.startsWith('node .promptwheel/packs/supply-chain/scan.mjs ')), JSON.stringify(cfg.metrics));
   assert.deepEqual(cfg.mandates.map((m) => m.name), ['workflows-frozen', 'registry-config-frozen', 'build-images-frozen', 'publish-scripts-frozen', 'codeowners-frozen', 'hooks-frozen']);
   assert.ok(cfg.mandates.every((m) => Array.isArray(m.paths) && m.paths.length && m.reason));

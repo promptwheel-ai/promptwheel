@@ -30,6 +30,26 @@
       "guard": true,
       "gamingCheck": false,
       "allowable": true
+    },
+    {
+      "$comment": "code run from a floating reference: an action not pinned by SHA, npx or dlx with no exact version, a global install with no exact version, a remote script piped to a shell. Must not rise.",
+      "name": "unpinned_execution",
+      "cmd": "node packs/supply-chain/scan.mjs unpinned .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": true
+    },
+    {
+      "$comment": "install protections missing at the repo root: install scripts not disabled, no release-age cooldown. Must not rise.",
+      "name": "install_policy_gaps",
+      "cmd": "node packs/supply-chain/scan.mjs policy .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": true
     }
   ]
 }

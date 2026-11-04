@@ -149,9 +149,67 @@ function lockSources() {
   }
 }
 
-const COUNTERS = { lifecycle, deps, 'lock-sources': lockSources };
+// --- unpinned: code that runs from a floating reference ----------------------------------------
+// The step a worm needs is a reference that moves. Counted wherever a repo executes something it
+// did not pin: a GitHub Action not pinned to a full commit SHA, npx/dlx with no exact version, a
+// global install with no exact version, and a remote script piped into a shell. Local actions
+// (./path) are not counted, and in package.json scripts neither is a tool the manifest declares,
+// because the lockfile already pins that one.
+const EXACT = /@\d+\.\d+\.\d+([-+][\w.-]+)?$/;
+const pkgToken = (t) => t.replace(/^['"]|['"]$/g, '');
+function execLines(text, where, declared) {
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#') || line.startsWith('//')) continue;
+    const u = line.match(/^(?:-\s*)?uses:\s*['"]?([^'"\s#]+)/);
+    if (u) {
+      const ref = u[1];
+      if (ref.startsWith('./') || ref.startsWith('../')) continue;
+      if (ref.startsWith('docker://') ? !/@sha256:[0-9a-f]{64}$/.test(ref) : !/@[0-9a-f]{40}$/.test(ref)) hit(where, `action not pinned by SHA: ${ref}`);
+      continue;
+    }
+    for (const m of line.matchAll(/\b(?:npx|bunx|pnpx|pnpm\s+dlx|yarn\s+dlx)\s+((?:-{1,2}[\w-]+\s+)*)([^\s;&|)]+)/g)) {
+      const t = pkgToken(m[2]);
+      if (t.startsWith('-') || t.startsWith('$') || t.startsWith('.') || t.startsWith('/')) continue;
+      const name = t.replace(/@[^@/]*$/, '') || t;
+      if (declared && (declared.has(name) || declared.has(t))) continue;
+      if (!EXACT.test(t)) hit(where, `no exact version: ${m[0].trim()}`);
+    }
+    for (const m of line.matchAll(/\bnpm\s+(?:i|install)\s+(?:-g|--global)\s+((?:[^\s;&|)]+\s*)+)/g)) {
+      for (const t of m[1].trim().split(/\s+/).map(pkgToken)) if (t && !t.startsWith('-') && !t.startsWith('.') && !EXACT.test(t)) hit(where, `no exact version: npm install -g ${t}`);
+    }
+    if (/\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(ba|z|da)?sh\b/.test(line)) hit(where, `remote script piped to a shell: ${line.slice(0, 80)}`);
+  }
+}
+function unpinned() {
+  const yml = /\.ya?ml$/;
+  for (const dir of [join(ROOT, '.github', 'workflows')]) {
+    let names = []; try { names = readdirSync(dir); } catch { /* no workflows */ }
+    for (const n of names) if (yml.test(n)) execLines(readText(join(dir, n)), join(dir, n));
+  }
+  for (const f of walk(ROOT, new Set(['action.yml', 'action.yaml']))) execLines(readText(f), f);
+  for (const f of walk(ROOT, new Set(['package.json']))) {
+    const j = readJson(f); if (!isObj(j) || !isObj(j.scripts)) continue;
+    const declared = new Set(DEP_KEYS.flatMap((k) => (isObj(j[k]) ? Object.keys(j[k]) : [])));
+    for (const [k, v] of Object.entries(j.scripts)) if (typeof v === 'string') execLines(v, `${f} scripts.${k}`, declared);
+  }
+  for (const n of (() => { try { return readdirSync(join(ROOT, 'scripts')); } catch { return []; } })()) if (n.endsWith('.sh')) execLines(readText(join(ROOT, 'scripts', n)), join(ROOT, 'scripts', n));
+  for (const n of (() => { try { return readdirSync(ROOT); } catch { return []; } })()) if (/^Dockerfile/.test(n)) execLines(readText(join(ROOT, n)), join(ROOT, n));
+}
+
+// --- policy: install protections the repo declares ----------------------------------------------
+// Two gaps, counted at the repo root. Release age itself stays with the package manager: a registry
+// lookup here would make the verdict depend on the clock.
+function policy() {
+  if (!readJson(join(ROOT, 'package.json'))) return;
+  const text = ['.npmrc', 'pnpm-workspace.yaml', '.yarnrc.yml'].map((f) => readText(join(ROOT, f))).join('\n');
+  if (!/^\s*ignore-scripts\s*=\s*true/m.test(text) && !/^\s*(strictDepBuilds|enableScripts)\s*:\s*(true|false)/m.test(text)) hit('.npmrc', 'install scripts are not disabled (ignore-scripts=true)');
+  if (!/^\s*min-release-age\s*=\s*[1-9]/m.test(text) && !/^\s*minimumReleaseAge\s*:\s*[1-9]/m.test(text) && !/^\s*npmMinimalAgeGate\s*:\s*[1-9"']/m.test(text)) hit('.npmrc', 'no release-age cooldown (min-release-age)');
+}
+
+const COUNTERS = { lifecycle, deps, 'lock-sources': lockSources, unpinned, policy };
 if (!COUNTERS[WHAT]) {
-  process.stderr.write('usage: node scan.mjs <lifecycle|deps|lock-sources> [path] [--list]\n');
+  process.stderr.write('usage: node scan.mjs <lifecycle|deps|lock-sources|unpinned|policy> [path] [--list]\n');
   process.exit(64);   // a typo in the config must read as unmeasurable, never as a clean 0
 }
 COUNTERS[WHAT]();
