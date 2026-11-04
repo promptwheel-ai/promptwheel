@@ -158,6 +158,8 @@ export interface MetricResult extends Evaluation {
   retained?: number | null;
   gamingReason?: string;
   /** Set when a declared override cleared a `gamed` or an `unprovable` on this metric. */
+  /** `true`: a guard this change adds, unmeasurable at base because its scanner did not exist there. It starts counting from head. */
+  adopted?: true;
   allowed?: true;
   /** Present (`true`) only when this guarded metric regressed, no reason was declared, and `allowable: true` means a `--allow` / trailer reason would clear it. */
   allowable?: true;

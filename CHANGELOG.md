@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.12 (2026-11-04): adopting a contract no longer fails its own commit
+
+- A guard the change adds has no value at base, because its scanner did not exist there; it now starts counting from head (`adopted: true` on the metric) instead of failing as unmeasurable. A guard the base contract already had still fails when it cannot be measured, and removing one is still caught.
+- A mandate the change adds does not apply to that change, so signing a contract does not violate it. Deleting or narrowing a rule stays caught through the base contract.
+- The antihack tripwires skip `.promptwheel/`, so a pack's own source does not read as skipped tests.
+
 ## 0.7.11 (2026-11-04): the supply-chain preset and the architecture lock
 
 - **`promptwheel init --preset supply-chain`.** Seven guarded metrics, seven frozen paths, and a pack copied into `.promptwheel/packs/supply-chain/`. Guards: `lifecycle_scripts`, `dependency_entries`, `lock_nonregistry_sources`, `unpinned_execution` (actions not pinned by SHA, npx or global installs with no exact version, a remote script piped to a shell), `install_policy_gaps`, `lock_drift`, `pins_changed`. Frozen: workflows, registry config, build images, publish scripts, CODEOWNERS, the scanners, the hooks.

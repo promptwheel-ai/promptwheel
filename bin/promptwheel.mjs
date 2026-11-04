@@ -324,7 +324,10 @@ function checkMandates(repo, base, head, cfg, baseMandates) {
   const headKeys = new Set(headList.filter((m) => m && m.name).map(key));
   const kept = (Array.isArray(baseMandates) ? baseMandates : []).filter((m) => m && m.name && !headKeys.has(key(m)))
     .map((m) => (headNames.has(m.name) ? { ...m, __edited: true } : { ...m, __removed: true }));
-  const mandates = [...headList, ...kept];
+  // a rule this change adds does not apply to the change adding it: the commit that signs a contract adds the
+  // very files the contract protects. Deleting or narrowing a rule stays caught, through the base list above.
+  const baseNames = new Set((Array.isArray(baseMandates) ? baseMandates : []).map((m) => m && m.name));
+  const mandates = [...headList.filter((m) => m && baseNames.has(m.name)), ...kept];
   if (!mandates.length) return [];
   let changed = [];
   try { changed = git(['diff', '--name-only', base, head], repo).split('\n').filter(Boolean); } catch { return []; }
@@ -721,8 +724,14 @@ function gate(repo, opts) {
 
   const before = measureAt(repo, base, cfg, repeat);
   const after = measureAt(repo, head, cfg, repeat);
+  // a guard this change adds has no value at base, because its scanner did not exist there. That is adoption,
+  // not a failure: it starts counting from head. Removing a guard is still caught (gateWeakenings), and a guard the
+  // base contract already had still fails when it cannot be measured. A zero-config run has no contract to adopt.
+  const baseDefs = opts.config ? null : gateDefAtRef(repo, base);
+  const adopted = (name) => !opts.config && !(baseDefs && baseDefs.metrics.has(name));
   const metrics = cfg.metrics.map((m) => {
     const ev = evaluate(m, before[m.name], after[m.name], repeat);
+    if (ev.status === 'unmeasurable' && ev.before == null && ev.after != null && adopted(m.name)) { ev.ok = true; ev.adopted = true; }
     return { name: m.name, direction: m.direction || 'up', guard: !!m.guard, ...ev };
   });
   // Section 3 (gaming detection), on by default: mutates `metrics` and yields the gate record
@@ -924,9 +933,9 @@ const PRESETS = {
     metrics: [
       { name: 'tests_pass', cmd: '__TESTCMD__', extract: 'exit', direction: 'pass', guard: true },
       { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
-      { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|xit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
-      { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa|# ?nosec|//nolint|#!?\\[allow\\(" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
-      { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert|\\bt\\.(is|deepEqual|throws|truthy|falsy|not|ok) ?\\(" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
+      { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|xit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
+      { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa|# ?nosec|//nolint|#!?\\[allow\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
+      { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert|\\bt\\.(is|deepEqual|throws|truthy|falsy|not|ok) ?\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
     ] },
   'no-ai-tells': { desc: 'opt-in: fail the gate if the em-dash count rises (an AI writing tell); some projects use them on purpose, so it is not a default',
     metrics: [

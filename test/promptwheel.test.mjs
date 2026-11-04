@@ -584,6 +584,24 @@ test('lock: versions, script bodies, capabilities, binaries and IP hosts drift; 
   put('src/a.js', 'export const a = 1;\n'); put('src/x.node', 'ELF'); assert.equal(drift(), '1', 'a native addon');
 });
 
+test('adopting a contract passes its own commit; deleting a rule later does not', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-adopt-'));
+  const g = (a) => execFileSync('git', a, { cwd: d, stdio: 'ignore' });
+  g(['init', '-q']); g(['config', 'user.email', 'a@b.c']); g(['config', 'user.name', 'a']);
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'a' })); commitAll(d, 'base');
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0); commitAll(d, 'sign');
+  const run = () => pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto', '--json']);
+  let r = run(); assert.equal(r.code, 0, r.out);
+  assert.ok(JSON.parse(r.out).metrics.every((m) => m.adopted === true), 'every new guard starts at head');
+  const cfgPath = join(d, 'promptwheel.config.json'); const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+  writeFileSync(cfgPath, JSON.stringify({ ...cfg, mandates: cfg.mandates.filter((m) => m.name !== 'workflows-frozen') }, null, 2));
+  mkdirSync(join(d, '.github/workflows'), { recursive: true }); writeFileSync(join(d, '.github/workflows/x.yml'), 'name: x\n'); commitAll(d, 'drop the rule and break it');
+  r = run(); assert.equal(r.code, 1, 'the base contract still holds'); assert.ok(JSON.parse(r.out).mandates.some((m) => m.name === 'workflows-frozen' && m.removed));
+  g(['reset', '-q', '--hard', 'HEAD~1']);
+  rmSync(join(d, '.promptwheel/packs/supply-chain/lock.mjs')); commitAll(d, 'delete a scanner the contract already had');
+  assert.equal(run().code, 1, 'an existing guard that cannot be measured still fails');
+});
+
 test('pins: an approved update does not blind the next one', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-pins-'));
   const g = (a) => execFileSync('git', a, { cwd: d, stdio: 'ignore' });
