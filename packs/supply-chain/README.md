@@ -10,12 +10,12 @@ writes the mandates that freeze the paths.
 promptwheel init --preset supply-chain
 ```
 
-`init` copies the pack into `.promptwheel/packs/supply-chain/`, writes six guarded metrics that run
+`init` copies the pack into `.promptwheel/packs/supply-chain/`, writes seven guarded metrics that run
 it from there, and writes the mandates below. Commit the pack with the config: the gate measures in
 clean git worktrees, so a pack that is not in git is absent at both refs and the metrics read
 `unmeasurable` (init warns when `.promptwheel/` is gitignored).
 
-## The six counts
+## The seven counts
 
 - **lifecycle_scripts**: install-time script entries (`preinstall`, `install`, `postinstall`,
   `prepare`, `prepublish`, `prepublishOnly`, `postpack`) across every `package.json` in the repo.
@@ -27,7 +27,10 @@ clean git worktrees, so a pack that is not in git is absent at both refs and the
   count. A private registry mirror makes this baseline large, not failing.
 - **unpinned_execution**: code run from a reference that can move. A GitHub Action not pinned to a full commit SHA (a local `./action` does not count), `npx`, `bunx` or `dlx` with no exact version, `npm install -g` with no exact version, and a remote script piped into a shell. Read from workflows, `action.yml`, package.json scripts, `scripts/*.sh` and Dockerfiles. In package.json scripts, a tool the manifest declares does not count: the lockfile already pins it.
 - **install_policy_gaps**: 0, 1 or 2. Are install scripts disabled, and is a release-age cooldown set (`ignore-scripts=true` and `min-release-age` in `.npmrc`, or the pnpm or yarn equivalents)? The cooldown is enforced by the package manager, not by this pack: a registry lookup here would make the verdict depend on the clock.
-- **lock_drift**: structural items the tree has that `promptwheel.lock.json` does not. `promptwheel lock` reads the repo once and writes its shape: dependencies, install scripts, workflows, modules, import edges between modules, routes, public entry points, and the network hosts the source names. Ordinary edits never touch it. A new route is reported but not held by default, because adding a page is ordinary feature work; add `--routes` to the metric command to hold routes too. On 1,402 commits across eight repositories the guard would have stopped 4.4% of them, about one in 23, and 6.9% with routes held. JS and TS only for edges, routes and hosts today.
+- **lock_drift**: structural items the tree has that `promptwheel.lock.json` does not. `promptwheel lock` reads the repo once and writes its shape: dependencies, install scripts, workflows, modules, import edges between modules, routes, public entry points, and the network hosts the source names. It also records each script's body, native binaries, and what a module can do (network, process spawning, eval), so a new capability shows even when the host is built at runtime. Ordinary edits never touch it. A new route is reported but not held by default; add `--routes` to hold it. On 1,403 commits across eight repositories this guard would have stopped 5.1%, about one in 20. JS and TS only for edges, routes, hosts and capabilities today.
+- **pins_changed**: lockfiles whose resolved tree differs from the lock, which is how a worm arrives: a new version under an old name. The hash covers every package, version, source and integrity, not the file's bytes, so a release of your own project does not count. On the same commits this stopped 8.7%, all of them real dependency changes. A dependency update is a deliberate change with its own review path: pass `--allow` from the CI step that a bot or a person's review controls, where an agent cannot reach it, then re-run `promptwheel lock`.
+
+**What this does not catch.** A new destination reached through a module that already uses the network, when the address is assembled at runtime, reads as nothing new. The lock holds structure; it cannot follow a value.
 
 A reason clears these guards only through the `--allow` flag, never through a commit trailer: an agent can write a trailer, so a guard meant to stop a compromised agent cannot be cleared by one. The lock file itself is a mandate that a person's `--allow` can clear, so an agent cannot launder a change by updating the lock in the same diff.
 
@@ -42,13 +45,13 @@ Sometimes adding a dependency is exactly what was asked. Say so, and the gate re
 promptwheel run --working --allow "needed for the CSV export (papaparse)"
 ```
 
-or a `Promptwheel-Allow: <reason>` trailer on the commit. The six metrics carry `allowable: true`,
+or a `Promptwheel-Allow: <reason>` trailer on the commit. The seven metrics carry `allowable: true`,
 which means a declared reason clears their guarded regression for that one run, with the reason
 written into `report.allowed` and the outcome record. Nothing is loosened in the config, and a rise
 without a reason still fails. That is the point: every added package, script, or non-registry
 source leaves an audit line a reviewer can read.
 
-`gamingCheck` is `false` on all six because these numbers legitimately live in config files
+`gamingCheck` is `false` on all seven because these numbers legitimately live in config files
 (`package.json`, lockfiles), which the source-only re-run reverts; re-proving them from source would
 flag every honest dependency bump.
 

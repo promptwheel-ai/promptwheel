@@ -60,6 +60,16 @@
       "guard": true,
       "gamingCheck": false,
       "allowable": "flag"
+    },
+    {
+      "$comment": "lockfiles whose resolved tree differs from promptwheel.lock.json: a new version under an old name is how a worm arrives. Must not rise.",
+      "name": "pins_changed",
+      "cmd": "node packs/supply-chain/lock.mjs drift . --pins",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
     }
   ]
 }
