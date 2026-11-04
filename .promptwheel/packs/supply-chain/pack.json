@@ -1,0 +1,76 @@
+{
+  "$comment": "PromptWheel supply-chain guard-pack. Use via { \"extends\": [\"packs/supply-chain/pack.json\"] } in your promptwheel.config.json, or install it with `promptwheel init --preset supply-chain` (which also writes the mandates). Three counts the gate holds: a rise fails the gate unless the change carries a declared reason (`--allow \"<reason>\"` or a `Promptwheel-Allow:` trailer), which is recorded in the outcome record. gamingCheck is false because these numbers legitimately live in config files (package.json, lockfiles), which the source-only re-run reverts.",
+  "metrics": [
+    {
+      "$comment": "install-time script entries (preinstall, install, postinstall, prepare, prepublish, prepublishOnly, postpack) across every package.json: the step a supply-chain attack needs inside your repo",
+      "name": "lifecycle_scripts",
+      "cmd": "node packs/supply-chain/scan.mjs lifecycle .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "$comment": "dependency entries across every package.json: a new package needs a recorded reason, so every addition leaves an audit line",
+      "name": "dependency_entries",
+      "cmd": "node packs/supply-chain/scan.mjs deps .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "$comment": "lockfile entries resolved from outside the npm registry (git, ssh, http, another host's tarball, file:) plus registry entries with no integrity hash: where a package really comes from",
+      "name": "lock_nonregistry_sources",
+      "cmd": "node packs/supply-chain/scan.mjs lock-sources .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "$comment": "code run from a floating reference: an action not pinned by SHA, npx or dlx with no exact version, a global install with no exact version, a remote script piped to a shell. Must not rise.",
+      "name": "unpinned_execution",
+      "cmd": "node packs/supply-chain/scan.mjs unpinned .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "$comment": "install protections missing at the repo root: install scripts not disabled, no release-age cooldown. Must not rise.",
+      "name": "install_policy_gaps",
+      "cmd": "node packs/supply-chain/scan.mjs policy .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "$comment": "structural items the tree has that promptwheel.lock.json does not. Must not rise.",
+      "name": "lock_drift",
+      "cmd": "node packs/supply-chain/lock.mjs drift .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "$comment": "a fingerprint of the resolved dependency tree, compared base to head: a new version under an old name is how a worm arrives. Any change needs a reason.",
+      "name": "pins_changed",
+      "cmd": "node packs/supply-chain/lock.mjs pins .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag",
+      "exact": true
+    }
+  ]
+}

@@ -25,11 +25,145 @@
     },
     {
       "name": "em_dashes",
-      "cmd": "grep -rIoe \"\u2014\" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d \" \"",
+      "cmd": "grep -rIoe \"—\" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d \" \"",
       "extract": "number",
       "direction": "down",
       "guard": true,
       "gamingCheck": false
+    },
+    {
+      "name": "lifecycle_scripts",
+      "cmd": "node .promptwheel/packs/supply-chain/scan.mjs lifecycle .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "name": "dependency_entries",
+      "cmd": "node .promptwheel/packs/supply-chain/scan.mjs deps .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "name": "lock_nonregistry_sources",
+      "cmd": "node .promptwheel/packs/supply-chain/scan.mjs lock-sources .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "name": "unpinned_execution",
+      "cmd": "node .promptwheel/packs/supply-chain/scan.mjs unpinned .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "name": "install_policy_gaps",
+      "cmd": "node .promptwheel/packs/supply-chain/scan.mjs policy .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "name": "lock_drift",
+      "cmd": "node .promptwheel/packs/supply-chain/lock.mjs drift .",
+      "extract": "number",
+      "direction": "down",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
+    },
+    {
+      "name": "pins_changed",
+      "cmd": "node .promptwheel/packs/supply-chain/lock.mjs pins .",
+      "extract": "number",
+      "direction": "down",
+      "exact": true,
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
     }
-  ]
+  ],
+  "mandates": [
+    {
+      "name": "workflows-frozen",
+      "paths": [
+        ".github/workflows/**"
+      ],
+      "reason": "workflows run with the repository secrets; change them in a separate, reviewed change"
+    },
+    {
+      "name": "registry-config-frozen",
+      "paths": [
+        ".npmrc",
+        ".yarnrc",
+        ".yarnrc.yml"
+      ],
+      "reason": "registry and token configuration decides where packages come from and where credentials go"
+    },
+    {
+      "name": "build-images-frozen",
+      "paths": [
+        "Dockerfile*",
+        "docker-compose*"
+      ],
+      "reason": "what runs at build and deploy time is not an agent decision"
+    },
+    {
+      "name": "publish-scripts-frozen",
+      "paths": [
+        "scripts/release*",
+        "scripts/publish*"
+      ],
+      "reason": "the publish path is how a compromise spreads"
+    },
+    {
+      "name": "codeowners-frozen",
+      "paths": [
+        "CODEOWNERS"
+      ],
+      "reason": "review ownership is set by people"
+    },
+    {
+      "name": "scanner-frozen",
+      "paths": [
+        ".promptwheel/packs/**"
+      ],
+      "reason": "the scanners that read the contract are not edited by the change they read"
+    },
+    {
+      "name": "lock-frozen",
+      "paths": [
+        "promptwheel.lock.json"
+      ],
+      "allowable": "flag",
+      "reason": "the architecture lock changes with a reason from a person (--allow), never as a side effect of a change"
+    },
+    {
+      "name": "hooks-frozen",
+      "paths": [
+        ".claude/settings.json",
+        ".claude/settings.local.json",
+        ".sawbuck/**"
+      ],
+      "reason": "the hooks that enforce the contract are wired by a person, not detached by the agent"
+    }
+  ],
+  "evaluatorPaths": [
+    "promptwheel.config.json",
+    "sawbuck.config.json"
+  ],
+  "allowTrailer": false
 }

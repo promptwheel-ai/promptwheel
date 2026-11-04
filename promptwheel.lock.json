@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "items": [
+    "cap:bin:exec",
+    "cap:demo:exec",
+    "cap:packs:exec",
+    "entry:bin:promptwheel",
+    "entry:export:.",
+    "entry:export:./bin/promptwheel.mjs",
+    "entry:export:./package.json",
+    "module:bin",
+    "module:demo",
+    "module:packs",
+    "scripthash:package.json:gate:2cd5759bfbce173e",
+    "scripthash:package.json:test:f90321a3f3beab5b",
+    "workflow:.github/workflows/ci.yml"
+  ]
+}

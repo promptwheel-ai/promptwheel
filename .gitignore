@@ -1,4 +1,5 @@
 node_modules/
-.promptwheel/
+.promptwheel/*
+!.promptwheel/packs/
 .sawbuck/
 events.jsonl
