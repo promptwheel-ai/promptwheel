@@ -28,7 +28,17 @@ clean git worktrees, so a pack that is not in git is absent at both refs and the
 - **unpinned_execution**: code run from a reference that can move. A GitHub Action not pinned to a full commit SHA (a local `./action` does not count), `npx`, `bunx` or `dlx` with no exact version, `npm install -g` with no exact version, and a remote script piped into a shell. Read from workflows, `action.yml`, package.json scripts, `scripts/*.sh` and Dockerfiles. In package.json scripts, a tool the manifest declares does not count: the lockfile already pins it.
 - **install_policy_gaps**: 0, 1 or 2. Are install scripts disabled, and is a release-age cooldown set (`ignore-scripts=true` and `min-release-age` in `.npmrc`, or the pnpm or yarn equivalents)? The cooldown is enforced by the package manager, not by this pack: a registry lookup here would make the verdict depend on the clock.
 - **lock_drift**: structural items the tree has that `promptwheel.lock.json` does not. `promptwheel lock` reads the repo once and writes its shape: dependencies, install scripts, workflows, modules, import edges between modules, routes, public entry points, and the network hosts the source names. It also records each script's body, native binaries, and what a module can do (network, process spawning, eval), so a new capability shows even when the host is built at runtime. Ordinary edits never touch it. A new route is reported but not held by default; add `--routes` to hold it. On 1,403 commits across eight repositories this guard would have stopped 5.1%, about one in 20. JS and TS only for edges, routes, hosts and capabilities today.
-- **pins_changed**: lockfiles whose resolved tree differs from the lock, which is how a worm arrives: a new version under an old name. The hash covers every package, version, source and integrity, not the file's bytes, so a release of your own project does not count. On the same commits this stopped 8.7%, all of them real dependency changes. A dependency update is a deliberate change with its own review path: pass `--allow` from the CI step that a bot or a person's review controls, where an agent cannot reach it, then re-run `promptwheel lock`.
+- **pins_changed**: a fingerprint of the resolved dependency tree, compared base to head, because a new version under an old name is how a worm arrives. It covers every package, version, source and integrity, not the file's bytes, so a release of your own project does not count. Any change needs a reason. Nothing is stored, so the lock does not change across updates and an approved update does not blind the next check. On the same commits this stopped 8.7%, all real dependency changes; use the CI path below for those.
+
+**Dependency updates in CI.** Give the reason from a step the agent cannot reach. Workflows are a frozen path, so an agent cannot edit this:
+
+```yaml
+- uses: promptwheel-ai/promptwheel@<full commit sha>
+  with:
+    allow: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'dependabot update, reviewed in this PR' || '' }}
+```
+
+Check the PR author, not `github.actor`, which is whoever last triggered the run. Everything else still fails without a person's reason.
 
 **What this does not catch.** A new destination reached through a module that already uses the network, when the address is assembled at runtime, reads as nothing new. The lock holds structure; it cannot follow a value.
 

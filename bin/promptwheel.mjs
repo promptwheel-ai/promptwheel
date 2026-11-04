@@ -228,6 +228,7 @@ function evaluate(m, beforeS, afterS, repeat) {
   if (dir === 'up') { improved = delta > 0; regressed = delta < 0; }
   else if (dir === 'down') { improved = delta < 0; regressed = delta > 0; }
   else if (dir === 'pass') { improved = after === 1 && before !== 1; regressed = after < before; }
+  if (m.exact === true) { improved = false; regressed = delta !== 0; }   // a fingerprint: any change at all needs a reason
 
   let status;
   if (withinNoise && delta !== 0) { status = 'inconclusive'; improved = regressed = false; } // within measured noise → don't call it
@@ -955,7 +956,7 @@ const PRESETS = {
       { name: 'unpinned_execution', cmd: 'node packs/supply-chain/scan.mjs unpinned .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
       { name: 'install_policy_gaps', cmd: 'node packs/supply-chain/scan.mjs policy .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
       { name: 'lock_drift', cmd: 'node packs/supply-chain/lock.mjs drift .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
-      { name: 'pins_changed', cmd: 'node packs/supply-chain/lock.mjs drift . --pins', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'pins_changed', cmd: 'node packs/supply-chain/lock.mjs pins .', extract: 'number', direction: 'down', exact: true, guard: true, gamingCheck: false, allowable: 'flag' },
     ] },
 };
 

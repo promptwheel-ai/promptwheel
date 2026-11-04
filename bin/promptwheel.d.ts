@@ -40,6 +40,8 @@ export interface MetricConfig {
   extract?: ExtractMode;
   /** Default `'up'`. */
   direction?: Direction;
+  /** `true`: the value is a fingerprint, so any change at all regresses, whichever way the number moves. */
+  exact?: boolean;
   /** A guarded metric fails the gate on a trusted regression; an unguarded one is tracked only. */
   guard?: boolean;
   /** Read a value even when `cmd` exits nonzero (never needed for `extract: 'exit'`). */

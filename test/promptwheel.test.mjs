@@ -569,9 +569,11 @@ test('lock: versions, script bodies, capabilities, binaries and IP hosts drift; 
   const tool = join(dirname(ENGINE), '..', 'packs', 'supply-chain', 'lock.mjs');
   execFileSync('node', [tool, 'write', d]);
   const drift = () => execFileSync('node', [tool, 'drift', d], { encoding: 'utf8' }).trim();
-  const pins = () => execFileSync('node', [tool, 'drift', d, '--pins'], { encoding: 'utf8' }).trim();
-  put('package-lock.json', lock('1.0.1')); assert.equal(pins(), '0', 'our own release is not a dependency change');
-  put('package-lock.json', lock('1.0.0', '1.3.1')); assert.equal(pins(), '1', 'a new version under an old name'); assert.equal(drift(), '0', 'pins are their own guard');
+  const pins = () => execFileSync('node', [tool, 'pins', d], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['add', '-A'], { cwd: d });
+  const p0 = pins();
+  put('package-lock.json', lock('1.0.1')); assert.equal(pins(), p0, 'our own release is not a dependency change');
+  put('package-lock.json', lock('1.0.0', '1.3.1')); assert.notEqual(pins(), p0, 'a new version under an old name'); assert.equal(drift(), '0', 'an update does not touch the lock');
   put('package-lock.json', lock());
   put('package.json', { ...pkg, scripts: { test: 'node t.js; curl x' } }); assert.equal(drift(), '1', 'a script body');
   put('package.json', pkg);
@@ -580,6 +582,23 @@ test('lock: versions, script bodies, capabilities, binaries and IP hosts drift; 
   put('src/a.js', "import { exec } from 'node:child_process';\nexport const a = 1;\n"); assert.equal(drift(), '1');
   put('src/a.js', "eval(s);\n"); assert.equal(drift(), '1');
   put('src/a.js', 'export const a = 1;\n'); put('src/x.node', 'ELF'); assert.equal(drift(), '1', 'a native addon');
+});
+
+test('pins: an approved update does not blind the next one', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-pins-'));
+  const g = (a) => execFileSync('git', a, { cwd: d, stdio: 'ignore' });
+  g(['init', '-q']); g(['config', 'user.email', 'a@b.c']); g(['config', 'user.name', 'a']);
+  const lock = (v) => JSON.stringify({ name: 'a', lockfileVersion: 3, packages: { '': { name: 'a' }, 'node_modules/left': { version: v, resolved: `https://registry.npmjs.org/left/-/left-${v}.tgz`, integrity: 'sha512-' + v } } });
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'a', dependencies: { left: '^1.0.0' } })); writeFileSync(join(d, 'package-lock.json'), lock('1.0.0'));
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0); commitAll(d, 'base');
+  const lockBefore = readFileSync(join(d, 'promptwheel.lock.json'), 'utf8');
+  writeFileSync(join(d, 'package-lock.json'), lock('1.0.1')); commitAll(d, 'update');
+  const run = (...e) => pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', ...e]).code;
+  assert.equal(run(), 1, 'an update needs a reason');
+  assert.equal(run('--allow', 'reviewed update'), 0);
+  assert.equal(readFileSync(join(d, 'promptwheel.lock.json'), 'utf8'), lockBefore, 'and the lock did not change');
+  writeFileSync(join(d, 'package-lock.json'), lock('1.0.2')); commitAll(d, 'a malicious update after the approved one');
+  assert.equal(run(), 1, 'the next change is still caught');
 });
 
 test('lock: an agent cannot launder a change by updating the lock; a person can, with --allow; a trailer cannot', () => {

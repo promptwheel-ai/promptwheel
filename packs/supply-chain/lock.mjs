@@ -5,7 +5,7 @@
 // shape: anything the lock has not seen is drift.
 //   node lock.mjs write [path]            write or refresh promptwheel.lock.json
 //   node lock.mjs drift [path] [--list] [--routes]   print how many structural items the tree has that the lock does not
-//   node lock.mjs drift [path] --pins     the same for the resolved dependency tree: lockfiles, held by hash
+//   node lock.mjs pins [path]             print a fingerprint of the resolved dependency tree (the gate compares base to head)
 //                                         (routes are locked and listed, and counted only with --routes)
 // The lock lists structure, not content, so ordinary edits never touch it. There is no timestamp in it:
 // the same tree always writes the same bytes. JS and TS only for edges, routes and hosts today.
@@ -25,7 +25,7 @@ const IMPORT = /(?:\bfrom\s+|\brequire\(\s*|\bimport\s*\(\s*|^\s*import\s+)['"](
 const ROUTE_CALL = /\b(?:app|router|server|fastify)\.(get|post|put|patch|delete|all)\(\s*['"`](\/[^'"`]*)['"`]/g;
 const HOST = /\bhttps?:\/\/([a-z0-9][a-z0-9.-]*\.[a-z]{2,}|\d{1,3}(?:\.\d{1,3}){3})(?=[:/'"`\s)]|$)/gi;
 const NOT_A_HOST = /(^|\.)(example\.(com|org|net)|localhost|w3\.org|schema\.org|json-schema\.org|npmjs\.(com|org)|github\.com)$|^(127\.|0\.0\.0\.0)/i;
-// lockfiles and binaries are held by hash: any change to the resolved tree needs a reason, whatever the name
+// lockfiles are fingerprinted, binaries hashed: any change to either needs a reason, whatever the name
 const LOCKFILE = /(^|\/)(package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lock)$/;
 const BINARY = /\.(node|wasm)$/;
 const sha = (t) => createHash('sha256').update(t).digest('hex').slice(0, 16);
@@ -68,7 +68,6 @@ export function itemsOf(path, text) {
   const out = new Set();
   if (SKIP.test(path)) return out;
   if (path.startsWith('.github/workflows/')) { out.add(`workflow:${path}`); return out; }
-  if (LOCKFILE.test(path)) { out.add(`lockfile:${path}:${sha(resolvedTree(path, text))}`); return out; }
   if (BINARY.test(path)) { out.add(`binary:${path}:${sha(text)}`); return out; }
   if (path === 'package.json' || path.endsWith('/package.json')) {
     let j; try { j = JSON.parse(text); } catch { return out; }
@@ -122,6 +121,15 @@ export function writeLock(root) {
   writeFileSync(join(root, LOCK_FILE), JSON.stringify({ version: 1, items }, null, 2) + '\n');
   return items.length;
 }
+// a number that changes whenever the resolved dependency tree does. Compared base to head by the gate, so it
+// needs no stored value: the lock stays the same across updates, and an approved update never blinds the next check.
+export function pinsOf(root) {
+  const rows = [];
+  for (const f of tracked(root).filter((p) => LOCKFILE.test(p) && !SKIP.test(p)).sort()) {
+    try { rows.push(f + '\n' + resolvedTree(f, readFileSync(join(root, f), 'utf8'))); } catch { /* deleted but still in the index */ }
+  }
+  return rows.length ? parseInt(sha(rows.join('\n')).slice(0, 12), 16) : 0;
+}
 export function driftOf(root) {
   const p = join(root, LOCK_FILE);
   if (!existsSync(p)) return null;
@@ -137,12 +145,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   else if (args[0] === 'drift') {
     const all = driftOf(root);
     // a new route is ordinary feature work, so by default it is reported, not held; --routes holds it too
-    // pins are their own guard: an update is a deliberate change with its own review path, unlike a change of shape
-    const pins = process.argv.includes('--pins');
-    const held = (i) => (pins ? i.startsWith('lockfile:') : !i.startsWith('lockfile:') && (process.argv.includes('--routes') || !i.startsWith('route:')));
-    const d = all && all.filter(held);
+    const d = all && all.filter((i) => process.argv.includes('--routes') || !i.startsWith('route:'));
     if (d === null) { process.stderr.write(`no readable ${LOCK_FILE}: run promptwheel lock\n`); process.exit(1); }   // unmeasurable, never a clean 0
     if (process.argv.includes('--list')) for (const i of all) process.stderr.write(`  ${i}\n`);
-    process.stdout.write(`${d.length}\n`);
-  } else { process.stderr.write('usage: node lock.mjs <write|drift> [path] [--list]\n'); process.exit(64); }
+    process.stdout.write(process.argv.includes('--json') ? JSON.stringify(d) + '\n' : `${d.length}\n`);
+  } else if (args[0] === 'pins') { process.stdout.write(`${pinsOf(root)}\n`);
+  } else { process.stderr.write('usage: node lock.mjs <write|drift|pins> [path] [--list] [--json]\n'); process.exit(64); }
 }
