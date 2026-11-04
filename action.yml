@@ -13,6 +13,10 @@ inputs:
     description: 'Samples per metric to establish a noise band (use >1 for noisy metrics)'
     required: false
     default: '1'
+  allow:
+    description: 'A declared reason that clears allowable guards (the only path for the supply-chain preset). Set it from a step an agent cannot reach, such as a dependency-bot PR check. See packs/supply-chain/README.md.'
+    required: false
+    default: ''
   comment:
     description: 'Post the verdict as a PR comment'
     required: false
@@ -28,10 +32,12 @@ runs:
     # Runs straight from this action's own checkout: no npm install, no build.
     - id: gate
       shell: bash
+      env:
+        ALLOW: ${{ inputs.allow }}
       run: |
         set +e
         node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" run \
-          --base "${{ inputs.base }}" --head HEAD --repeat "${{ inputs.repeat }}" --markdown \
+          --base "${{ inputs.base }}" --head HEAD --repeat "${{ inputs.repeat }}" --markdown ${ALLOW:+--allow "$ALLOW"} \
           > "$RUNNER_TEMP/promptwheel.md"
         echo "exit=$?" >> "$GITHUB_OUTPUT"
         cat "$RUNNER_TEMP/promptwheel.md" >> "$GITHUB_STEP_SUMMARY"

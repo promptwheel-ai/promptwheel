@@ -83,13 +83,13 @@ function resolveConfig(p, repo, label, seen) {
       const base = resolveConfig(bp, repo, relOf(repo, bp), seen);
       for (const m of base.metrics) byName.set(m.name, m);
       for (const md of (base.mandates || [])) if (md && md.name) mandatesByName.set(md.name, md);
-      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths']) if (base[k] !== undefined) scalars[k] = base[k];
+      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer']) if (base[k] !== undefined) scalars[k] = base[k];
     }
     for (const m of (cfg.metrics || [])) {
       byName.set(m.name, { ...m, __src: label, __override: byName.has(m.name) });
     }
     for (const md of (cfg.mandates || [])) if (md && md.name) mandatesByName.set(md.name, { ...md, __src: label });
-    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
+    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'record', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
     return { ...scalars, metrics: [...byName.values()], mandates: [...mandatesByName.values()] };
   } finally {
     seen.delete(abs); // only ACTIVE ancestors are a cycle, a diamond (a base reached two ways) is fine
@@ -228,6 +228,7 @@ function evaluate(m, beforeS, afterS, repeat) {
   if (dir === 'up') { improved = delta > 0; regressed = delta < 0; }
   else if (dir === 'down') { improved = delta < 0; regressed = delta > 0; }
   else if (dir === 'pass') { improved = after === 1 && before !== 1; regressed = after < before; }
+  if (m.exact === true) { improved = false; regressed = delta !== 0; }   // a fingerprint: any change at all needs a reason
 
   let status;
   if (withinNoise && delta !== 0) { status = 'inconclusive'; improved = regressed = false; } // within measured noise → don't call it
@@ -333,7 +334,7 @@ function checkMandates(repo, base, head, cfg, baseMandates) {
     if (!pats.length) continue;
     const res = pats.map(globToRe);
     const hit = changed.filter((f) => res.some((re) => re.test(f)));
-    if (hit.length) out.push({ name: String(m.name || 'mandate'), reason: m.reason ? String(m.reason).slice(0, 300) : '', files: hit.slice(0, 20), ...(m.__removed ? { removed: true } : {}), ...(m.__edited ? { edited: true } : {}) });
+    if (hit.length) out.push({ name: String(m.name || 'mandate'), reason: m.reason ? String(m.reason).slice(0, 300) : '', files: hit.slice(0, 20), ...(m.allowable ? { allowable: m.allowable } : {}), ...(m.__removed ? { removed: true } : {}), ...(m.__edited ? { edited: true } : {}) });
   }
   // one entry per name: the head version and the edited base version of a rule merge (files unioned)
   const merged = [];
@@ -501,7 +502,7 @@ function warnEditableInstall(repo) {
 // guarded metric in the very diff it "passes". We resolve the gate as of BASE too and, if a
 // guard was dropped, re-measure it under its BASE definition; the pass only reads GAMED when
 // that guard WOULD HAVE FAILED at head (a real regression hidden by moving the goalposts).
-const GATE_SCALARS = ['gamingThreshold', 'evaluatorPaths'];
+const GATE_SCALARS = ['gamingThreshold', 'evaluatorPaths', 'allowTrailer'];
 
 // Resolve the gate definition as of `ref` (metrics + mandates + scalars), following `extends` by
 // reading every file from that ref via `git show`, mirroring resolveConfig (a parent's mandates
@@ -731,7 +732,12 @@ function gate(repo, opts) {
   // It covers an `unprovable` win too (the source-only re-run could not be applied): the declared
   // intent is exactly the uncertainty that verdict expresses, and without this a declared change
   // whose source slice will not re-apply had no override short of turning the check off.
-  const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300) } : (opts.working ? null : readAllowTrailer(repo, head));
+  // A trailer is off when the committed contract says `allowTrailer: false` or the caller set
+  // PROMPTWHEEL_NO_ALLOW_TRAILER (Sawbuck does, for a commit an agent made): an agent can write a
+  // commit message, so where the threat is the agent itself only the --allow flag counts. The base
+  // ref's contract is read too, so an agent cannot turn trailers back on in the change it is making.
+  const trailersOff = () => !!process.env.PROMPTWHEEL_NO_ALLOW_TRAILER || cfg.allowTrailer === false || ((gateDefAtRef(repo, base) || {}).scalars || {}).allowTrailer === false;
+  const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300), by: 'flag' } : (opts.working || trailersOff() ? null : readAllowTrailer(repo, head));
   let allowed = null;
   if (opts.detectGaming && allow) {
     const gm = metrics.filter((m) => m.gamed === true);
@@ -745,11 +751,37 @@ function gate(repo, opts) {
       if (gw) gateInfo.allowed = true;
     }
   }
+  // `allowable: true` on a guarded metric (the supply-chain counters: a new dependency or lifecycle
+  // script is sometimes the job) lets the same declared reason clear THAT metric's regression, so the
+  // change passes with the reason on the record instead of the guard being loosened to let it through.
+  // Never implicit: without a reason an allowable guard fails like any other, and the reason is recorded.
+  {
+    // `allowable: 'flag'` takes the reason from the --allow flag only, never from a commit trailer: an
+    // agent can write a trailer, so a guard meant to stop a compromised agent cannot be cleared by one.
+    const mode = new Map((cfg.metrics || []).filter((c) => c && c.allowable && c.name).map((c) => [c.name, c.allowable]));
+    const ga = metrics.filter((m) => m.guard && !m.ok && mode.has(m.name) && (mode.get(m.name) === true || !allow || allow.by === 'flag'));
+    const held = metrics.filter((m) => m.guard && !m.ok && mode.has(m.name) && !ga.includes(m));
+    for (const m of held) m.allowable = true;
+    if (ga.length && allow) {
+      allowed = allowed || { reason: allow.reason, cleared: [] };
+      for (const m of ga) { m.ok = true; m.allowed = true; allowed.cleared.push(m.name); }
+    } else for (const m of ga) m.allowable = true;   // failed, and a declared reason would clear it: say so in the report
+  }
   // mandates run first: a protected-path hard rule fails the gate no matter what the metrics say.
   // The base ref's mandates count too (resolved through `extends` by gateDefAtRef), so a change
   // cannot clear a mandate by deleting it in the same diff that violates it.
   const baseMandates = (gateInfo && gateInfo.baseMandates) || (!opts.detectGaming ? ((gateDefAtRef(repo, base) || {}).scalars || {}).mandates : null);
-  const mandateViolations = checkMandates(repo, base, head, cfg, baseMandates);
+  let mandateViolations = checkMandates(repo, base, head, cfg, baseMandates);
+  // an allowable mandate (the lock file) changes only with a reason from the --allow flag, recorded
+  // like any other override; a commit trailer never clears one.
+  if (allow && allow.by === 'flag') {
+    const clear = mandateViolations.filter((v) => v.allowable);
+    if (clear.length) {
+      allowed = allowed || { reason: allow.reason, cleared: [] };
+      for (const v of clear) allowed.cleared.push(`mandate:${v.name}`);
+      mandateViolations = mandateViolations.filter((v) => !v.allowable);
+    }
+  }
   const mandated = mandateViolations.length > 0;
   const verdict = deriveVerdict(metrics, gateInfo, mandated);
   const report = {
@@ -900,6 +932,32 @@ const PRESETS = {
     metrics: [
       { name: 'em_dashes', cmd: 'grep -rIoe "—" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
     ] },
+  // supply-chain: the step every npm supply-chain attack needs inside a target repo is a supply-chain
+  // edit (a lifecycle script, a new dependency, a non-registry lock source, a workflow or publish
+  // config). Paths and counts, checked deterministically: three guarded counts that must not rise
+  // without a declared reason (`allowable`), plus mandates that freeze the paths. The contract itself is
+  // an evaluatorPath, not a mandate, so a person can still retire a rule in a change that only edits it.
+  'supply-chain': { allowTrailer: false, desc: 'gate: no new lifecycle scripts, dependencies, or non-registry lock sources without a recorded reason; the agent cannot touch workflows, registries, publish scripts, or the contract',
+    evaluatorPaths: ['promptwheel.config.json', 'sawbuck.config.json'],
+    mandates: [
+      { name: 'workflows-frozen', paths: ['.github/workflows/**'], reason: 'workflows run with the repository secrets; change them in a separate, reviewed change' },
+      { name: 'registry-config-frozen', paths: ['.npmrc', '.yarnrc', '.yarnrc.yml'], reason: 'registry and token configuration decides where packages come from and where credentials go' },
+      { name: 'build-images-frozen', paths: ['Dockerfile*', 'docker-compose*'], reason: 'what runs at build and deploy time is not an agent decision' },
+      { name: 'publish-scripts-frozen', paths: ['scripts/release*', 'scripts/publish*'], reason: 'the publish path is how a compromise spreads' },
+      { name: 'codeowners-frozen', paths: ['CODEOWNERS'], reason: 'review ownership is set by people' },
+      { name: 'scanner-frozen', paths: ['.promptwheel/packs/**'], reason: 'the scanners that read the contract are not edited by the change they read' },
+      { name: 'lock-frozen', paths: ['promptwheel.lock.json'], allowable: 'flag', reason: 'the architecture lock changes with a reason from a person (--allow), never as a side effect of a change' },
+      { name: 'hooks-frozen', paths: ['.claude/settings.json', '.claude/settings.local.json', '.sawbuck/**'], reason: 'the hooks that enforce the contract are wired by a person, not detached by the agent' },
+    ],
+    metrics: [
+      { name: 'lifecycle_scripts', cmd: 'node packs/supply-chain/scan.mjs lifecycle .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'dependency_entries', cmd: 'node packs/supply-chain/scan.mjs deps .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'lock_nonregistry_sources', cmd: 'node packs/supply-chain/scan.mjs lock-sources .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'unpinned_execution', cmd: 'node packs/supply-chain/scan.mjs unpinned .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'install_policy_gaps', cmd: 'node packs/supply-chain/scan.mjs policy .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'lock_drift', cmd: 'node packs/supply-chain/lock.mjs drift .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'pins_changed', cmd: 'node packs/supply-chain/lock.mjs pins .', extract: 'number', direction: 'down', exact: true, guard: true, gamingCheck: false, allowable: 'flag' },
+    ] },
 };
 
 // security-antihack = the security-invariant findings gate + the SAME antihack tripwires
@@ -985,19 +1043,23 @@ function init(argv) {
   if (existsSync(out) && !argv.includes('--force')) die('promptwheel.config.json already exists, pass --force to overwrite');
   const pi = argv.indexOf('--preset');
   const presetName = pi >= 0 ? argv[pi + 1] : null;
-  let metrics, note, evaluatorPaths;
+  let allowTrailer, metrics, note, evaluatorPaths, mandates;
   if (presetName) {
     const p = PRESETS[presetName];
     if (!p) die(`unknown preset "${presetName}", try: promptwheel init --list`);
     evaluatorPaths = p.evaluatorPaths;   // a preset may ship a starter evaluator allowlist (e.g. security-antihack)
+    mandates = p.mandates; allowTrailer = p.allowTrailer;               // a preset may ship hard rules (supply-chain: workflows, registries, publish scripts, hooks)
     metrics = p.metrics || [{ name: 'tests_pass', cmd: detectTestCmd(repo), extract: 'exit', direction: 'pass', guard: true }];
     metrics = metrics.map((m) => m.cmd === '__TESTCMD__' ? { ...m, cmd: detectTestCmd(repo) } : m); // fill the preset's target
     // pack-backed presets: the referenced scripts live in THIS package, not
     // the user's repo, copy them in so the generated config is
     // self-contained and committable (a bare reference silently 404'd)
+    const installed = new Set();   // a pack several metrics run (supply-chain) is copied and announced once
     metrics = metrics.map((m) => {
       const pk = /(^|\s)(packs\/[\w-]+)\//.exec(m.cmd);
       if (!pk) return m;
+      if (installed.has(pk[2])) return { ...m, cmd: m.cmd.replaceAll(pk[2] + '/', `.promptwheel/${pk[2]}/`) };
+      installed.add(pk[2]);
       const src = fileURLToPath(new URL(`../${pk[2]}/`, import.meta.url));
       const dst = join(repo, '.promptwheel', pk[2]);
       mkdirSync(dst, { recursive: true });
@@ -1025,8 +1087,10 @@ function init(argv) {
   const setup = presetName ? undefined : detectSetup(repo);
   const envCfg = presetName ? {} : { ...detectEnv(repo), ...(setup ? { setup } : {}) };
   if (envCfg.linkDirs) note += ` · linking ${envCfg.linkDirs.join(', ')}`;
-  writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, ...(evaluatorPaths ? { evaluatorPaths } : {}), metrics }, null, 2) + '\n');
+  writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, ...(evaluatorPaths ? { evaluatorPaths } : {}), ...(mandates ? { mandates } : {}), ...(allowTrailer === false ? { allowTrailer } : {}), metrics }, null, 2) + '\n');
   console.log(`✓ wrote promptwheel.config.json, ${note}`);
+  const lockTool = join(repo, '.promptwheel', 'packs', 'supply-chain', 'lock.mjs');
+  if (existsSync(lockTool)) console.log(`✓ ${execFileSync(process.execPath, [lockTool, 'write', repo], { encoding: 'utf8' }).trim()} (commit it with the config)`);
   warnEditableInstall(repo);   // one-time advice at setup, never on the per-turn path
   if (!argv.includes('--no-agent-block')) {
     const wrote = writeAgentBlock(repo);
@@ -1102,6 +1166,7 @@ function printHuman(r) {
   const failReason = r.mandates ? ', a mandate was violated (a protected path changed)' : ', a guarded metric regressed (beyond noise)';
   console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? failReason : r.verdict === 'gamed' ? ', a metric "improved" by editing the goalposts, not the source' : r.verdict === 'inconclusive' ? ', a guard is inert (measured nothing); a pass cannot be certified' : ''}`);
   if (r.verdict === 'fail' && r.mandates) console.log('  a mandate is a hard rule; if the change is truly intended, edit the mandate in promptwheel.config.json (a tracked, tamper-evident change), do not work around it');
+  else if (r.verdict === 'fail' && r.metrics.some((m) => m.allowable)) console.log(`  intentional? this guard accepts a person's declared reason: promptwheel run --allow "<reason>" passes with the reason on the record (${r.metrics.filter((m) => m.allowable).map((m) => m.name).join(', ')})`);
   else if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name), `promptwheel guards` shows the effective set');
   if (r.allowed) console.log(`  ✓ allowed: ${r.allowed.cleared.join(', ')} acknowledged as an intentional change, recorded (Promptwheel-Allow: ${r.allowed.reason})`);
   console.log('');
@@ -1368,7 +1433,7 @@ function conformance(argv) {
 const GATE_FLAGS = ['--base', '--head', '--repeat', '--working', '--no-record', '--no-auto', '--allow', '--detect-gaming', '--no-detect-gaming', '--json', '--markdown'];
 const COMMAND_FLAGS = {
   run: GATE_FLAGS, improve: [...GATE_FLAGS, '--attempt'], insights: ['--json'], guards: ['--json'],
-  init: ['--preset', '--list', '--force', '--no-agent-block'], conformance: ['--cmd'],
+  init: ['--preset', '--list', '--force', '--no-agent-block'], conformance: ['--cmd'], lock: [],
 };
 const VALUED_FLAGS = new Set(['--base', '--head', '--repeat', '--allow', '--attempt', '--preset', '--cmd']);
 function checkFlags(cmd, argv) {
@@ -1379,6 +1444,14 @@ function checkFlags(cmd, argv) {
     if (!known.has(a)) bad(`promptwheel ${cmd}: unknown flag ${a} (see promptwheel --help)`);
     if (VALUED_FLAGS.has(a)) i++;
   }
+}
+
+// write or refresh the architecture lock from the tree as it stands. A person runs this: the lock file is
+// a mandate, so the refreshed file passes the gate only with --allow "<reason>".
+async function lock() {
+  const repo = repoRoot(process.cwd());
+  const { writeLock, LOCK_FILE } = await import(new URL('../packs/supply-chain/lock.mjs', import.meta.url));
+  console.log(`✓ ${writeLock(repo)} items locked in ${LOCK_FILE} (commit it; a later change to it needs promptwheel run --allow "<reason>")`);
 }
 
 function dispatch() {
@@ -1392,6 +1465,7 @@ function dispatch() {
   else if (cmd === 'init') init(rest);
   else if (cmd === 'guards') guards(rest);
   else if (cmd === 'conformance') conformance(rest);
+  else if (cmd === 'lock') lock(rest);
   else {
     const help = !cmd || cmd === '--help' || cmd === '-h' || cmd === 'help';
     if (!help) console.error(`unknown command: ${cmd}`);
@@ -1400,6 +1474,7 @@ function dispatch() {
       '',
       '  promptwheel --version | -v                   print the version',
       '  promptwheel --help | -h                      this banner',
+      '  promptwheel lock                             write promptwheel.lock.json, the shape of this repo (dependencies, install scripts, workflows, modules, import edges, routes, entry points, hosts); the supply-chain preset holds it',
       '  promptwheel init [--preset <name> | --list] [--no-agent-block]  write a starter config + an AGENTS.md guide so your agent runs the gate (OPTIONAL: run works zero-config, auto-detecting your test command)',
       '  promptwheel run [--base R] [--head R] [--repeat N] [--json|--markdown]',
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',

@@ -40,6 +40,8 @@ export interface MetricConfig {
   extract?: ExtractMode;
   /** Default `'up'`. */
   direction?: Direction;
+  /** `true`: the value is a fingerprint, so any change at all regresses, whichever way the number moves. */
+  exact?: boolean;
   /** A guarded metric fails the gate on a trusted regression; an unguarded one is tracked only. */
   guard?: boolean;
   /** Read a value even when `cmd` exits nonzero (never needed for `extract: 'exit'`). */
@@ -50,6 +52,14 @@ export interface MetricConfig {
   gamingCheck?: boolean;
   /** Per-metric override of `Config.gamingThreshold`. */
   gamingThreshold?: number;
+  /**
+   * `true` lets a declared reason (`--allow`, a `Promptwheel-Allow:` trailer, `check({ allow })`) clear
+   * THIS metric's guarded regression for that run, recorded in `report.allowed` and on the metric as
+   * `allowed: true`. The supply-chain preset's counters use it: a new dependency is sometimes the job,
+   * so it passes with the reason on the record instead of the guard being loosened. Without a reason
+   * the guard fails as usual.
+   */
+  allowable?: boolean;
 }
 
 /** A named hard rule: any change touching one of `paths` fails the gate before any metric is read. */
@@ -149,6 +159,8 @@ export interface MetricResult extends Evaluation {
   gamingReason?: string;
   /** Set when a declared override cleared a `gamed` or an `unprovable` on this metric. */
   allowed?: true;
+  /** Present (`true`) only when this guarded metric regressed, no reason was declared, and `allowable: true` means a `--allow` / trailer reason would clear it. */
+  allowable?: true;
 }
 
 export interface MandateViolation {

