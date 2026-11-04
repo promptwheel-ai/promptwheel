@@ -54,7 +54,7 @@ npx promptwheel run --working             # gate UNCOMMITTED changes (incl. newl
 npx promptwheel run --repeat 5 --json     # measure 5× to establish a noise band, emit JSON
 
 npx promptwheel init                      # optional: write promptwheel.config.json (guarded tests + antihack tripwires, + lint if eslint is set up)
-npx promptwheel init --list               # presets: tests-pass · lint · bundle-size · security · llm-eval · antihack · no-ai-tells · security-antihack
+npx promptwheel init --list               # presets: tests-pass · lint · bundle-size · security · llm-eval · antihack · no-ai-tells · security-antihack · supply-chain
 
 # the loop: run any agent/script, keep the change ONLY if a metric improved, else revert
 npx promptwheel improve --attempt "claude -p 'reduce lint errors'"
@@ -99,6 +99,8 @@ Gaming detection is on by default in `run` and `improve`; `--no-detect-gaming` g
 - **gamingThreshold**, the fraction of a win that must survive the source-only re-run to count as earned (default `0.5`). Config-level scalar, overridable per metric; inherited through `extends` like `repeat`.
 - **evaluatorPaths**, globs for files that *define* your gate (a threshold file, a budget, a CI limit). Editing one in the same diff that improves a metric is `GAMED` by declaration, deterministically. Opt-in, because only you know which files are the goalposts.
 
+- **allowable**, `true` lets a declared reason (`--allow "<reason>"`, a `Promptwheel-Allow:` commit trailer, `check({ allow })`) clear *this* metric's guarded regression for that run, recorded in `report.allowed` and on the metric as `allowed: true`. For counts where a rise is sometimes the job (the `supply-chain` preset: a new dependency), so the change passes with the reason on the record instead of the guard being loosened. Without a reason the guard fails as usual.
+
 Dependency and environment keys (config-level; `init` writes stack defaults):
 
 - **linkDirs**, dirs to symlink from your checkout into each measuring worktree, for deps that live outside git. Default `["node_modules"]`; `init` writes `[".venv"]` for Python and `[]` for Rust (`cargo test` writes to `target/`, so it is built fresh in the worktree rather than shared across refs). `"linkNodeModules": false` still works as shorthand for "link nothing".
@@ -132,6 +134,16 @@ Some rules are not a metric at all, they are a hard line: *never touch `src/auth
 ```
 
 A mandate is deterministic (a path match on the diff, zero-LLM), rides at the top of the report, and **inherits through `extends`** so a parent scope's hard rule holds for every repo beneath it. It is folded into the gate fingerprint at both refs, so quietly deleting a mandate changes the fingerprint: the report records `gate.changed: true` and prints a "gate definition changed" line, a tracked, tamper-evident change. And deleting it does not clear it: the mandates in force are the union of the base ref's and the head's, so a change that removes a mandate and touches its path in the same diff still fails (reported with `removed: true`). Retire a mandate in its own change, with the protected path untouched. (Before 0.7.5 the base-ref fingerprint did not include mandates, so this was recorded backwards: an unchanged mandate read as a changed gate and a deleted one did not, and the deletion cleared the rule.) This is the line between a contract and a request: `AGENTS.md` can *ask* an agent not to touch auth; a mandate will not let the change past the gate.
+
+### Supply chain (preset `supply-chain`)
+
+The step every npm supply-chain attack needs inside a target repo is a supply-chain edit: a lifecycle script, a new dependency, a lockfile entry that resolves somewhere other than the registry, a workflow or publish config. Those are paths and counts, so the gate can hold them deterministically, whatever steered the agent into the edit.
+
+```bash
+npx promptwheel init --preset supply-chain
+```
+
+writes three guarded counts that must not rise (`lifecycle_scripts`, `dependency_entries`, `lock_nonregistry_sources`, measured by a zero-dep pack copied into `.promptwheel/packs/supply-chain/`), mandates that freeze `.github/workflows/**`, `.npmrc` and the yarn rc files, `Dockerfile*` and `docker-compose*`, `scripts/release*` and `scripts/publish*`, `CODEOWNERS`, and the Claude Code hook files, and lists the contract itself (`promptwheel.config.json`, `sawbuck.config.json`) under `evaluatorPaths`, so a change that edits it alongside a win is gamed by declaration while a change that only edits the contract still passes. When the rise is the job, say so and it is recorded: `promptwheel run --allow "needed for the CSV export (papaparse)"`. It is not a dependency firewall and not an injection detector: it does nothing about a package already compromised on the registry, and it does not decide where an instruction came from. Details in [packs/supply-chain/README.md](packs/supply-chain/README.md).
 
 ## In CI and in Claude Code
 

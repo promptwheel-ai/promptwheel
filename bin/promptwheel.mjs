@@ -745,6 +745,18 @@ function gate(repo, opts) {
       if (gw) gateInfo.allowed = true;
     }
   }
+  // `allowable: true` on a guarded metric (the supply-chain counters: a new dependency or lifecycle
+  // script is sometimes the job) lets the same declared reason clear THAT metric's regression, so the
+  // change passes with the reason on the record instead of the guard being loosened to let it through.
+  // Never implicit: without a reason an allowable guard fails like any other, and the reason is recorded.
+  {
+    const allowable = new Set((cfg.metrics || []).filter((c) => c && c.allowable === true && c.name).map((c) => c.name));
+    const ga = metrics.filter((m) => m.guard && !m.ok && allowable.has(m.name));
+    if (ga.length && allow) {
+      allowed = allowed || { reason: allow.reason, cleared: [] };
+      for (const m of ga) { m.ok = true; m.allowed = true; allowed.cleared.push(m.name); }
+    } else for (const m of ga) m.allowable = true;   // failed, and a declared reason would clear it: say so in the report
+  }
   // mandates run first: a protected-path hard rule fails the gate no matter what the metrics say.
   // The base ref's mandates count too (resolved through `extends` by gateDefAtRef), so a change
   // cannot clear a mandate by deleting it in the same diff that violates it.
@@ -900,6 +912,26 @@ const PRESETS = {
     metrics: [
       { name: 'em_dashes', cmd: 'grep -rIoe "—" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
     ] },
+  // supply-chain: the step every npm supply-chain attack needs inside a target repo is a supply-chain
+  // edit (a lifecycle script, a new dependency, a non-registry lock source, a workflow or publish
+  // config). Paths and counts, checked deterministically: three guarded counts that must not rise
+  // without a declared reason (`allowable`), plus mandates that freeze the paths. The contract itself is
+  // an evaluatorPath, not a mandate, so a person can still retire a rule in a change that only edits it.
+  'supply-chain': { desc: 'gate: no new lifecycle scripts, dependencies, or non-registry lock sources without a recorded reason; the agent cannot touch workflows, registries, publish scripts, or the contract',
+    evaluatorPaths: ['promptwheel.config.json', 'sawbuck.config.json'],
+    mandates: [
+      { name: 'workflows-frozen', paths: ['.github/workflows/**'], reason: 'workflows run with the repository secrets; change them in a separate, reviewed change' },
+      { name: 'registry-config-frozen', paths: ['.npmrc', '.yarnrc', '.yarnrc.yml'], reason: 'registry and token configuration decides where packages come from and where credentials go' },
+      { name: 'build-images-frozen', paths: ['Dockerfile*', 'docker-compose*'], reason: 'what runs at build and deploy time is not an agent decision' },
+      { name: 'publish-scripts-frozen', paths: ['scripts/release*', 'scripts/publish*'], reason: 'the publish path is how a compromise spreads' },
+      { name: 'codeowners-frozen', paths: ['CODEOWNERS'], reason: 'review ownership is set by people' },
+      { name: 'hooks-frozen', paths: ['.claude/settings.json', '.claude/settings.local.json', '.sawbuck/**'], reason: 'the hooks that enforce the contract are wired by a person, not detached by the agent' },
+    ],
+    metrics: [
+      { name: 'lifecycle_scripts', cmd: 'node packs/supply-chain/scan.mjs lifecycle .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
+      { name: 'dependency_entries', cmd: 'node packs/supply-chain/scan.mjs deps .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
+      { name: 'lock_nonregistry_sources', cmd: 'node packs/supply-chain/scan.mjs lock-sources .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
+    ] },
 };
 
 // security-antihack = the security-invariant findings gate + the SAME antihack tripwires
@@ -985,19 +1017,23 @@ function init(argv) {
   if (existsSync(out) && !argv.includes('--force')) die('promptwheel.config.json already exists, pass --force to overwrite');
   const pi = argv.indexOf('--preset');
   const presetName = pi >= 0 ? argv[pi + 1] : null;
-  let metrics, note, evaluatorPaths;
+  let metrics, note, evaluatorPaths, mandates;
   if (presetName) {
     const p = PRESETS[presetName];
     if (!p) die(`unknown preset "${presetName}", try: promptwheel init --list`);
     evaluatorPaths = p.evaluatorPaths;   // a preset may ship a starter evaluator allowlist (e.g. security-antihack)
+    mandates = p.mandates;               // a preset may ship hard rules (supply-chain: workflows, registries, publish scripts, hooks)
     metrics = p.metrics || [{ name: 'tests_pass', cmd: detectTestCmd(repo), extract: 'exit', direction: 'pass', guard: true }];
     metrics = metrics.map((m) => m.cmd === '__TESTCMD__' ? { ...m, cmd: detectTestCmd(repo) } : m); // fill the preset's target
     // pack-backed presets: the referenced scripts live in THIS package, not
     // the user's repo, copy them in so the generated config is
     // self-contained and committable (a bare reference silently 404'd)
+    const installed = new Set();   // a pack several metrics run (supply-chain) is copied and announced once
     metrics = metrics.map((m) => {
       const pk = /(^|\s)(packs\/[\w-]+)\//.exec(m.cmd);
       if (!pk) return m;
+      if (installed.has(pk[2])) return { ...m, cmd: m.cmd.replaceAll(pk[2] + '/', `.promptwheel/${pk[2]}/`) };
+      installed.add(pk[2]);
       const src = fileURLToPath(new URL(`../${pk[2]}/`, import.meta.url));
       const dst = join(repo, '.promptwheel', pk[2]);
       mkdirSync(dst, { recursive: true });
@@ -1025,7 +1061,7 @@ function init(argv) {
   const setup = presetName ? undefined : detectSetup(repo);
   const envCfg = presetName ? {} : { ...detectEnv(repo), ...(setup ? { setup } : {}) };
   if (envCfg.linkDirs) note += ` · linking ${envCfg.linkDirs.join(', ')}`;
-  writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, ...(evaluatorPaths ? { evaluatorPaths } : {}), metrics }, null, 2) + '\n');
+  writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, ...(evaluatorPaths ? { evaluatorPaths } : {}), ...(mandates ? { mandates } : {}), metrics }, null, 2) + '\n');
   console.log(`✓ wrote promptwheel.config.json, ${note}`);
   warnEditableInstall(repo);   // one-time advice at setup, never on the per-turn path
   if (!argv.includes('--no-agent-block')) {
@@ -1102,6 +1138,7 @@ function printHuman(r) {
   const failReason = r.mandates ? ', a mandate was violated (a protected path changed)' : ', a guarded metric regressed (beyond noise)';
   console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? failReason : r.verdict === 'gamed' ? ', a metric "improved" by editing the goalposts, not the source' : r.verdict === 'inconclusive' ? ', a guard is inert (measured nothing); a pass cannot be certified' : ''}`);
   if (r.verdict === 'fail' && r.mandates) console.log('  a mandate is a hard rule; if the change is truly intended, edit the mandate in promptwheel.config.json (a tracked, tamper-evident change), do not work around it');
+  else if (r.verdict === 'fail' && r.metrics.some((m) => m.allowable)) console.log(`  intentional? this guard accepts a declared reason: promptwheel run --allow "<reason>" (or a Promptwheel-Allow: <reason> commit trailer) passes with the reason on the record (${r.metrics.filter((m) => m.allowable).map((m) => m.name).join(', ')})`);
   else if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name), `promptwheel guards` shows the effective set');
   if (r.allowed) console.log(`  ✓ allowed: ${r.allowed.cleared.join(', ')} acknowledged as an intentional change, recorded (Promptwheel-Allow: ${r.allowed.reason})`);
   console.log('');

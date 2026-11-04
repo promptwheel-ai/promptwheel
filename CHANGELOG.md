@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased: the supply-chain preset
+
+- **`promptwheel init --preset supply-chain`.** Three guarded counts that must not rise, measured by a
+  zero-dep pack copied into `.promptwheel/packs/supply-chain/`: `lifecycle_scripts` (install-time
+  script entries across every package.json), `dependency_entries` (dependency entries across every
+  package.json), `lock_nonregistry_sources` (lockfile entries resolved from outside the npm registry,
+  plus registry entries with no integrity hash; npm, pnpm, yarn classic and yarn berry locks). Plus
+  mandates that freeze workflows, registry config, Docker files, publish scripts, CODEOWNERS and the
+  Claude Code hook files, and the contract itself under `evaluatorPaths`.
+- **`allowable: true` on a metric.** A declared reason (`--allow`, a `Promptwheel-Allow:` trailer,
+  `check({ allow })`) clears that metric's guarded regression for the run, recorded in `report.allowed`
+  and on the metric as `allowed: true`; a failed allowable guard without a reason carries
+  `allowable: true` in the report and the human hint names `--allow`. A preset may now carry
+  `mandates`, which `init` writes into the config. A pack that several metrics run is installed and
+  announced once.
+
 ## 0.7.10 (2026-11-03): a declared override covers an unprovable win; self-heal bounds every orphan
 
 - **`--allow` (and a `Promptwheel-Allow:` trailer) now clears an `unprovable` win too.** 0.7.9 made a
