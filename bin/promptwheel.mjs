@@ -333,7 +333,7 @@ function checkMandates(repo, base, head, cfg, baseMandates) {
     if (!pats.length) continue;
     const res = pats.map(globToRe);
     const hit = changed.filter((f) => res.some((re) => re.test(f)));
-    if (hit.length) out.push({ name: String(m.name || 'mandate'), reason: m.reason ? String(m.reason).slice(0, 300) : '', files: hit.slice(0, 20), ...(m.__removed ? { removed: true } : {}), ...(m.__edited ? { edited: true } : {}) });
+    if (hit.length) out.push({ name: String(m.name || 'mandate'), reason: m.reason ? String(m.reason).slice(0, 300) : '', files: hit.slice(0, 20), ...(m.allowable ? { allowable: m.allowable } : {}), ...(m.__removed ? { removed: true } : {}), ...(m.__edited ? { edited: true } : {}) });
   }
   // one entry per name: the head version and the edited base version of a rule merge (files unioned)
   const merged = [];
@@ -731,7 +731,7 @@ function gate(repo, opts) {
   // It covers an `unprovable` win too (the source-only re-run could not be applied): the declared
   // intent is exactly the uncertainty that verdict expresses, and without this a declared change
   // whose source slice will not re-apply had no override short of turning the check off.
-  const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300) } : (opts.working ? null : readAllowTrailer(repo, head));
+  const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300), by: 'flag' } : (opts.working ? null : readAllowTrailer(repo, head));
   let allowed = null;
   if (opts.detectGaming && allow) {
     const gm = metrics.filter((m) => m.gamed === true);
@@ -750,8 +750,12 @@ function gate(repo, opts) {
   // change passes with the reason on the record instead of the guard being loosened to let it through.
   // Never implicit: without a reason an allowable guard fails like any other, and the reason is recorded.
   {
-    const allowable = new Set((cfg.metrics || []).filter((c) => c && c.allowable === true && c.name).map((c) => c.name));
-    const ga = metrics.filter((m) => m.guard && !m.ok && allowable.has(m.name));
+    // `allowable: 'flag'` takes the reason from the --allow flag only, never from a commit trailer: an
+    // agent can write a trailer, so a guard meant to stop a compromised agent cannot be cleared by one.
+    const mode = new Map((cfg.metrics || []).filter((c) => c && c.allowable && c.name).map((c) => [c.name, c.allowable]));
+    const ga = metrics.filter((m) => m.guard && !m.ok && mode.has(m.name) && (mode.get(m.name) === true || !allow || allow.by === 'flag'));
+    const held = metrics.filter((m) => m.guard && !m.ok && mode.has(m.name) && !ga.includes(m));
+    for (const m of held) m.allowable = true;
     if (ga.length && allow) {
       allowed = allowed || { reason: allow.reason, cleared: [] };
       for (const m of ga) { m.ok = true; m.allowed = true; allowed.cleared.push(m.name); }
@@ -761,7 +765,17 @@ function gate(repo, opts) {
   // The base ref's mandates count too (resolved through `extends` by gateDefAtRef), so a change
   // cannot clear a mandate by deleting it in the same diff that violates it.
   const baseMandates = (gateInfo && gateInfo.baseMandates) || (!opts.detectGaming ? ((gateDefAtRef(repo, base) || {}).scalars || {}).mandates : null);
-  const mandateViolations = checkMandates(repo, base, head, cfg, baseMandates);
+  let mandateViolations = checkMandates(repo, base, head, cfg, baseMandates);
+  // an allowable mandate (the lock file) changes only with a reason from the --allow flag, recorded
+  // like any other override; a commit trailer never clears one.
+  if (allow && allow.by === 'flag') {
+    const clear = mandateViolations.filter((v) => v.allowable);
+    if (clear.length) {
+      allowed = allowed || { reason: allow.reason, cleared: [] };
+      for (const v of clear) allowed.cleared.push(`mandate:${v.name}`);
+      mandateViolations = mandateViolations.filter((v) => !v.allowable);
+    }
+  }
   const mandated = mandateViolations.length > 0;
   const verdict = deriveVerdict(metrics, gateInfo, mandated);
   const report = {
@@ -925,14 +939,16 @@ const PRESETS = {
       { name: 'build-images-frozen', paths: ['Dockerfile*', 'docker-compose*'], reason: 'what runs at build and deploy time is not an agent decision' },
       { name: 'publish-scripts-frozen', paths: ['scripts/release*', 'scripts/publish*'], reason: 'the publish path is how a compromise spreads' },
       { name: 'codeowners-frozen', paths: ['CODEOWNERS'], reason: 'review ownership is set by people' },
+      { name: 'lock-frozen', paths: ['promptwheel.lock.json'], allowable: 'flag', reason: 'the architecture lock changes with a reason from a person (--allow), never as a side effect of a change' },
       { name: 'hooks-frozen', paths: ['.claude/settings.json', '.claude/settings.local.json', '.sawbuck/**'], reason: 'the hooks that enforce the contract are wired by a person, not detached by the agent' },
     ],
     metrics: [
-      { name: 'lifecycle_scripts', cmd: 'node packs/supply-chain/scan.mjs lifecycle .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
-      { name: 'dependency_entries', cmd: 'node packs/supply-chain/scan.mjs deps .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
-      { name: 'lock_nonregistry_sources', cmd: 'node packs/supply-chain/scan.mjs lock-sources .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
-      { name: 'unpinned_execution', cmd: 'node packs/supply-chain/scan.mjs unpinned .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
-      { name: 'install_policy_gaps', cmd: 'node packs/supply-chain/scan.mjs policy .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: true },
+      { name: 'lifecycle_scripts', cmd: 'node packs/supply-chain/scan.mjs lifecycle .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'dependency_entries', cmd: 'node packs/supply-chain/scan.mjs deps .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'lock_nonregistry_sources', cmd: 'node packs/supply-chain/scan.mjs lock-sources .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'unpinned_execution', cmd: 'node packs/supply-chain/scan.mjs unpinned .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'install_policy_gaps', cmd: 'node packs/supply-chain/scan.mjs policy .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'lock_drift', cmd: 'node packs/supply-chain/lock.mjs drift .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
     ] },
 };
 
@@ -1065,6 +1081,8 @@ function init(argv) {
   if (envCfg.linkDirs) note += ` · linking ${envCfg.linkDirs.join(', ')}`;
   writeFileSync(out, JSON.stringify({ repeat: 1, ...envCfg, ...(evaluatorPaths ? { evaluatorPaths } : {}), ...(mandates ? { mandates } : {}), metrics }, null, 2) + '\n');
   console.log(`✓ wrote promptwheel.config.json, ${note}`);
+  const lockTool = join(repo, '.promptwheel', 'packs', 'supply-chain', 'lock.mjs');
+  if (existsSync(lockTool)) console.log(`✓ ${execFileSync(process.execPath, [lockTool, 'write', repo], { encoding: 'utf8' }).trim()} (commit it with the config)`);
   warnEditableInstall(repo);   // one-time advice at setup, never on the per-turn path
   if (!argv.includes('--no-agent-block')) {
     const wrote = writeAgentBlock(repo);
@@ -1407,7 +1425,7 @@ function conformance(argv) {
 const GATE_FLAGS = ['--base', '--head', '--repeat', '--working', '--no-record', '--no-auto', '--allow', '--detect-gaming', '--no-detect-gaming', '--json', '--markdown'];
 const COMMAND_FLAGS = {
   run: GATE_FLAGS, improve: [...GATE_FLAGS, '--attempt'], insights: ['--json'], guards: ['--json'],
-  init: ['--preset', '--list', '--force', '--no-agent-block'], conformance: ['--cmd'],
+  init: ['--preset', '--list', '--force', '--no-agent-block'], conformance: ['--cmd'], lock: [],
 };
 const VALUED_FLAGS = new Set(['--base', '--head', '--repeat', '--allow', '--attempt', '--preset', '--cmd']);
 function checkFlags(cmd, argv) {
@@ -1418,6 +1436,14 @@ function checkFlags(cmd, argv) {
     if (!known.has(a)) bad(`promptwheel ${cmd}: unknown flag ${a} (see promptwheel --help)`);
     if (VALUED_FLAGS.has(a)) i++;
   }
+}
+
+// write or refresh the architecture lock from the tree as it stands. A person runs this: the lock file is
+// a mandate, so the refreshed file passes the gate only with --allow "<reason>".
+async function lock() {
+  const repo = repoRoot(process.cwd());
+  const { writeLock, LOCK_FILE } = await import(new URL('../packs/supply-chain/lock.mjs', import.meta.url));
+  console.log(`✓ ${writeLock(repo)} items locked in ${LOCK_FILE} (commit it; a later change to it needs promptwheel run --allow "<reason>")`);
 }
 
 function dispatch() {
@@ -1431,6 +1457,7 @@ function dispatch() {
   else if (cmd === 'init') init(rest);
   else if (cmd === 'guards') guards(rest);
   else if (cmd === 'conformance') conformance(rest);
+  else if (cmd === 'lock') lock(rest);
   else {
     const help = !cmd || cmd === '--help' || cmd === '-h' || cmd === 'help';
     if (!help) console.error(`unknown command: ${cmd}`);
@@ -1439,6 +1466,7 @@ function dispatch() {
       '',
       '  promptwheel --version | -v                   print the version',
       '  promptwheel --help | -h                      this banner',
+      '  promptwheel lock                             write promptwheel.lock.json, the shape of this repo (dependencies, install scripts, workflows, modules, import edges, routes, entry points, hosts); the supply-chain preset holds it',
       '  promptwheel init [--preset <name> | --list] [--no-agent-block]  write a starter config + an AGENTS.md guide so your agent runs the gate (OPTIONAL: run works zero-config, auto-detecting your test command)',
       '  promptwheel run [--base R] [--head R] [--repeat N] [--json|--markdown]',
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',

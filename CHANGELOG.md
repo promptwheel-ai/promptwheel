@@ -5,7 +5,7 @@
 - **`promptwheel init --preset supply-chain`.** Three guarded counts that must not rise, measured by a
   zero-dep pack copied into `.promptwheel/packs/supply-chain/`: `lifecycle_scripts` (install-time
   script entries across every package.json), `dependency_entries` (dependency entries across every
-  package.json), `unpinned_execution` (actions not pinned by SHA, npx or global installs with no exact version, a remote script piped to a shell), `install_policy_gaps` (install scripts not disabled, no release-age cooldown), `lock_nonregistry_sources` (lockfile entries resolved from outside the npm registry,
+  package.json), `lock_drift` (structure the architecture lock has not seen; `promptwheel lock` writes it, and the lock file changes only with a person's --allow), `unpinned_execution` (actions not pinned by SHA, npx or global installs with no exact version, a remote script piped to a shell), `install_policy_gaps` (install scripts not disabled, no release-age cooldown), `lock_nonregistry_sources` (lockfile entries resolved from outside the npm registry,
   plus registry entries with no integrity hash; npm, pnpm, yarn classic and yarn berry locks). Plus
   mandates that freeze workflows, registry config, Docker files, publish scripts, CODEOWNERS and the
   Claude Code hook files, and the contract itself under `evaluatorPaths`.

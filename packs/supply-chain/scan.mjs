@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PromptWheel supply-chain guard-pack scanner, zero-dep. Three counters over the repo's package
+// PromptWheel supply-chain guard-pack scanner, zero-dep. Counters over the repo's package
 // manifests and lockfiles; each is a number the gate holds (it must not rise):
 //   lifecycle     install-time script entries across every package.json
 //                 (preinstall, install, postinstall, prepare, prepublish, prepublishOnly, postpack)
