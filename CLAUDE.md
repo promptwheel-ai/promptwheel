@@ -15,7 +15,7 @@
 
 ## Layout
 
-- `bin/promptwheel.mjs` - the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict + the source-only re-run, evaluatorPaths auto-fail and gate integrity; commands run/init/lock/pr-allow). ~1400 LOC. `bin/promptwheel.d.ts` is its hand-written type declaration (no build step; a test keeps it in step with the export list).
+- `bin/promptwheel.mjs` - the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict + the source-only re-run, evaluatorPaths auto-fail and gate integrity; commands run/init/lock/pr-allow). ~1500 LOC. `bin/promptwheel.d.ts` is its hand-written type declaration (no build step; a test keeps it in step with the export list).
 - `promptwheel.config.json` - example metrics config.
 - `docs/ARCHITECTURE.md` - how the engine works, schemas, the trust model.
 - `docs/history/` - the original pivot rationale (`VISION.md`) and the phased plan (`ROADMAP.md`); historical, not maintained.
@@ -24,7 +24,7 @@
 
 ```bash
 node bin/promptwheel.mjs run --base <ref> --head <ref> [--repeat N] [--json]
-npm test          # 136 dep-free node:test tests (unit + integration)
+npm test          # 150 dep-free node:test tests (unit + integration)
 ```
 
 Tests live in `test/promptwheel.test.mjs` - keep them **dep-free** (`node:test`): import the pure helpers for unit tests, shell out to the CLI for integration. `bin/promptwheel.mjs` is the single source of behavior; **add/adjust a test with every behavior change**. The engine is importable (pure helpers exported; the CLI runs only when invoked directly) - don't break that, the tests rely on it.

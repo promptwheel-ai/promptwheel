@@ -48,7 +48,7 @@ export interface MetricConfig {
   allowNonzero?: boolean;
   /** Per-command timeout, default 300. */
   timeoutSec?: number;
-  /** `false` skips the source-only re-proof for this metric (tripwires whose gain legitimately lives in test files). */
+  /** `false` skips the source-only re-proof for this metric (tripwires whose gain legitimately lives in test files). Set on a metric that had the re-proof on, it applies from the next change, not the one that sets it. */
   gamingCheck?: boolean;
   /** Per-metric override of `Config.gamingThreshold`. */
   gamingThreshold?: number;
@@ -85,7 +85,7 @@ export interface Config {
   env?: Record<string, string>;
   /** A per-ref build or install, run in the worktree before measuring (a failed setup leaves the metric inert, never a false green). */
   setup?: string;
-  /** Fraction of a gain that must survive the source-only re-run; below it the win is `gamed`. Default 0.5. */
+  /** Fraction of a gain that must survive the source-only re-run; below it the win is `gamed`. Default 0.5. A change that lowers it is still judged by the value before it. */
   gamingThreshold?: number;
   /** Extra files that define the gate (a threshold, a budget); a change to one alongside a win is gamed by declaration. Same glob rules as `Mandate.paths`. */
   evaluatorPaths?: string[];
@@ -144,6 +144,8 @@ export interface MetricResult extends Evaluation {
   name: string;
   direction: Direction;
   guard: boolean;
+  /** With `inert`: where the command ran and failed (`both` refs, or only `base` or `head`). Absent when it ran at neither: exit 126 or 127, a timeout, or the placeholder command `init` writes. */
+  ran?: 'both' | 'base' | 'head';
   /** `true` when the win did not survive the source-only re-run; `null` when the source-only patch could not be applied (then `unprovable` is set and the verdict is `inconclusive`, never `pass`). Absent without gaming detection or when the metric did not improve. */
   gamed?: boolean | null;
   /** `true`: the source-only patch could not be applied, so this win could not be re-proven and the verdict is `inconclusive`. `false` only after a declared override cleared it (then `allowed` is `true`). */
@@ -174,9 +176,12 @@ export interface MandateViolation {
 
 export interface GateWeakening {
   name: string;
-  /** `guard-edited`: the guard is still on but measured another way (a new `cmd`, `extract`, `direction`, `exact` or `report`). */
-  change: 'guard-removed' | 'guard-disabled' | 'guard-edited';
-  /** What the dropped guard would have read at head under its base definition; `failed` when an edited guard still fails there. */
+  /**
+   * `guard-edited`: the guard is still on but measured another way (a new `cmd`, `extract`, `direction`, `exact` or `report`).
+   * `measurement-edited`: the config's `setup`, `env` or linked dirs changed, and measured with the ones before the change the guard fails at head while the new ones read it fine.
+   */
+  change: 'guard-removed' | 'guard-disabled' | 'guard-edited' | 'measurement-edited';
+  /** What the guard would have read at head under its base definition (and the base `setup`, `env` and linked dirs); `failed` when it still fails there. */
   status: MetricStatus | 'failed';
 }
 
@@ -189,11 +194,11 @@ export interface EvaluatorChange {
 
 /** The gate-integrity record, present when gaming detection ran. */
 export interface GateRecord {
-  /** Truncated SHA-256 of the gate definition (metrics, guards, evaluatorPaths, gamingThreshold, mandates) at each ref; `base` is `null` when there was no config at base. */
+  /** Truncated SHA-256 of the gate definition (metrics, guards, evaluatorPaths, gamingThreshold, mandates, setup, env, linked dirs) at each ref; `base` is `null` when there was no config at base. */
   fingerprint: { base: string | null; head: string };
   /** The gate definition differs between base and head. */
   changed?: true;
-  /** Guards the change dropped that would have failed at head; non-empty forces `gamed` unless allowed. */
+  /** Guards the change dropped, edited or measures another way that would have failed at head; non-empty forces `gamed` unless allowed. A change that adds the first config is compared with the zero-config gate (the detected test command). */
   weakened?: GateWeakening[];
   /** Declared `evaluatorPaths` files whose content changed in this diff. */
   evaluatorChanged?: EvaluatorChange[];
@@ -261,7 +266,7 @@ export declare function deriveVerdict(metrics: ReadonlyArray<Partial<MetricResul
  * a missing `extends` target, no commits yet, a base or head ref that is not in this clone, no
  * commit to compare against) throws an Error whose `name` is `'ConfigError'` and whose `exitCode`
  * is 64, the code the CLI exits with for the same condition. A `repo` that names a subdirectory
- * is resolved to the repository root, where the config lives and the record is written.
+ * is resolved to the repository root, where the config lives. A run writes nothing to the repo.
  */
 export declare function check(options?: CheckOptions): Report;
 

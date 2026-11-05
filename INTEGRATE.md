@@ -50,7 +50,7 @@ importing this package.
       "gamed": true,
       "sourceOnly": null,
       "retained": 0.0,
-      "gamingReason": "the win changed zero production-source files, only test/config/grader/golden"
+      "gamingReason": "the \"win\" changed zero production-source files, only test/config/grader/golden"
     }
   ]
 }
@@ -68,11 +68,13 @@ metric's gain that survived the source-only re-run (Section 3). `confidence`
 (`none | unverified | low | medium | high`, `none` for an unmeasurable metric) and `sourceOnly` are informational fields this
 implementation adds; a minimal conforming report may omit them. `gate` (optional) records a
 truncated SHA-256 fingerprint of the gate definition (metrics, guards, `evaluatorPaths`,
-`gamingThreshold`, `mandates`; each metric with its `cmd` and how it is read) at base and head,
-sets `gate.changed: true` when they differ, and lists in `gate.weakened` any guard the change
-removed, disabled, or measured another way (`change: guard-edited`, such as `cmd: "true"`) to
-hide a regression; a non-empty `gate.weakened` forces `gamed`, so an agent cannot pass by
-disabling the guard it is judged by. `allowed` (optional) is `{ reason, cleared }` when a declared
+`gamingThreshold`, `mandates`, `setup`, `env`, linked dirs; each metric with its `cmd` and how it
+is read) at base and head, sets `gate.changed: true` when they differ, and lists in
+`gate.weakened` any guard the change removed, disabled, or measured another way
+(`change: guard-edited`, such as `cmd: "true"`; `change: measurement-edited`, a new `setup`, `env`
+or `linkDirs`) to hide a regression; a non-empty `gate.weakened` forces `gamed`, so an agent
+cannot pass by disabling the guard it is judged by. A change that adds the first config is
+compared with the zero-config gate (the detected test command). `allowed` (optional) is `{ reason, cleared }` when a declared
 reason turned a would-be `gamed`, `fail` or `inconclusive` into `pass`: `cleared` names each metric,
 `gate`, or `mandate:<name>` it cleared, and each cleared metric carries `allowed: true` and keeps its
 `gamingReason`, so a consumer can say what was allowed and why it would have failed.

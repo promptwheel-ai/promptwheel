@@ -1,7 +1,7 @@
 // Dep-free test suite (node:test). Run: npm test  (or: node --test)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, utimesSync, symlinkSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -730,7 +730,60 @@ test('run: a guarded pass metric that never passes → INCONCLUSIVE (exit 3), ne
   const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
   assert.equal(r.code, 3);                        // an inert guard verifies nothing, not a pass, not a regression
   assert.match(r.out, /INCONCLUSIVE/);
-  assert.match(r.out, /never ran/);   // still names the specific broken guard
+  assert.match(r.out, /"tests_pass" ran and failed before and after this change/);   // still names the specific broken guard
+  assert.doesNotMatch(r.out, /never ran|build\/deps|promptwheel init/, 'a command that ran and failed gets no build advice');
+  rmSync(d, { recursive: true, force: true });
+});
+test('run: the inert message says what happened: a command that could not run keeps the build/deps advice, in the terminal and in the PR comment', () => {
+  const mk = (cmd) => {
+    const d = tmpRepo([{ name: 'tests_pass', cmd, extract: 'exit', direction: 'pass', guard: true }]);
+    writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
+    writeFileSync(join(d, 'a.js'), '2\n'); commitAll(d, 'c1');
+    const out = ['--no-record', '--json', '--markdown'].map((f) => pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', f]));
+    rmSync(d, { recursive: true, force: true });
+    for (const r of out) assert.equal(r.code, 3, r.out);
+    return { human: out[0].out, rep: reportOf(out[1].out), md: out[2].out };
+  };
+  const missing = mk('pw-no-such-test-runner --all');           // exit 127: the shell found no such command
+  assert.match(missing.human, /"tests_pass" never ran \(same value at both refs\): its command needs a build\/deps first/);
+  assert.equal(missing.rep.metrics[0].inert, true); assert.equal(missing.rep.metrics[0].ran, undefined);
+  assert.match(missing.md, /it never runs/);
+  const failing = mk('node -e "require(\'assert\').equal(1, 2)"');   // a test that plainly ran and failed
+  assert.match(failing.human, /"tests_pass" ran and failed before and after this change/);
+  assert.doesNotMatch(failing.human, /never ran|build\/deps/);
+  assert.equal(failing.rep.metrics[0].inert, true); assert.equal(failing.rep.metrics[0].ran, 'both');
+  assert.match(failing.md, /it fails before and after this change/); assert.doesNotMatch(failing.md, /never runs/);
+  assert.equal(conformsToContract(failing.rep).ok, true);
+});
+test('run: a default run in a repo with no origin/main prints nothing from git', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'head');
+  const r = spawnSync('node', [ENGINE, 'run'], { cwd: d, encoding: 'utf8' });   // no --base: origin/main, origin/master, main, master are tried
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /improved/);
+  assert.equal(r.stderr, '', 'no "fatal: Not a valid object name" lines');
+  rmSync(d, { recursive: true, force: true });
+});
+test('run: the hint on a protected path says how to accept it: --allow for a rule that takes it, a change of its own for one that does not', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-hint-'));
+  execFileSync('git', ['init', '-q'], { cwd: d });
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x' }));
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0);
+  commitAll(d, 'contract');
+  const f = join(d, 'promptwheel.config.json');
+  writeFileSync(f, JSON.stringify({ ...JSON.parse(readFileSync(f, 'utf8')), repeat: 2 }, null, 2)); commitAll(d, 'edit the contract');
+  let r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /"contract-frozen" accepts a person's declared reason: promptwheel run --allow "<reason>"/);
+  assert.doesNotMatch(r.out, /retire the mandate/, 'the config is the protected path: "retire it in the config" is no way out');
+  assert.equal(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--allow', 'more repeats']).code, 0);
+  mkdirSync(join(d, '.github/workflows'), { recursive: true }); writeFileSync(join(d, '.github/workflows/x.yml'), 'on: push\n');
+  commitAll(d, 'add a workflow');
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /a mandate is a hard rule; if the change is truly intended, retire the mandate/);
+  assert.doesNotMatch(r.out, /accepts a person's declared reason/);
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -744,7 +797,7 @@ test('run: an inert guard does NOT bury a real improvement elsewhere (keep the w
   const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
   assert.equal(r.code, 0);                            // a real, measured win must NOT be discarded as inconclusive
   assert.match(r.out, /VERDICT: PASS/);
-  assert.match(r.out, /never ran/);  // the inert guard is still surfaced as a warning
+  assert.match(r.out, /"brokenguard" ran and failed before and after/);  // the inert guard is still surfaced as a warning
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -831,37 +884,71 @@ test('suppressions tripwire counts //nolint (go) and #![allow] (rust) too', () =
 // ---------------------------------------- self-heal: orphaned worktrees from a crashed run
 // mirrors the engine's owner tag: sha1 of the repo's real path, first 8 hex chars
 const ownerTag = (repo) => createHash('sha1').update(realpathSync(repo)).digest('hex').slice(0, 8);
-test('self-heal: a stale /tmp worktree from a crashed run is cleaned on the next run', () => {
+// the gate with a private temp dir, so a self-heal test never reads or removes a name in the shared one.
+// Fixture names end in 6 letters or digits, as mkdtemp names them: self-heal removes no other shape.
+const pwTmp = (tmp, d, args) => {
+  try { return { out: execFileSync('node', [ENGINE, ...args], { cwd: d, encoding: 'utf8', env: { ...process.env, TMPDIR: tmp } }), code: 0 }; }
+  catch (e) { return { out: `${e.stdout || ''}${e.stderr || ''}`, code: e.status }; }
+};
+test('self-heal: a stale /tmp worktree from a crashed run is cleaned on the next run; an untagged dir is never removed', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'pw-heal-'));
   const d = tmpRepo([TODOS]);
-  const mine = join(tmpdir(), `promptwheel-${ownerTag(d)}-ORPHANTEST`);
-  const legacy = join(tmpdir(), 'promptwheel-ORPHANTEST');          // an older engine's untagged dir
-  for (const p of [mine, legacy]) { rmSync(p, { recursive: true, force: true }); mkdirSync(p, { recursive: true }); }
+  const mine = join(tmp, `promptwheel-${ownerTag(d)}-ORPHAN`);
+  const legacy = join(tmp, 'promptwheel-ORPHAN');   // untagged: nothing says this engine made it
+  for (const p of [mine, legacy]) mkdirSync(p);
   const old = new Date(Date.now() - 7200_000);     // 2h old: safely an orphan of THIS repo, not a live run
   utimesSync(mine, old, old);
-  const day = new Date(Date.now() - 90_000_000);   // 25h old: an untagged dir is only pruned after a full day
+  const day = new Date(Date.now() - 90_000_000);   // 25h old
   utimesSync(legacy, day, day);
   writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
-  pw(d, ['run', '--working', '--no-record']);       // any gate triggers selfHeal first
+  pwTmp(tmp, d, ['run', '--working', '--no-record']);       // any gate triggers selfHeal first
   assert.equal(existsSync(mine), false);            // this repo's abandoned checkout was removed
-  assert.equal(existsSync(legacy), false);          // and the day-old untagged one
-  rmSync(d, { recursive: true, force: true });
+  assert.equal(existsSync(legacy), true);           // an untagged name is never removed, at any age
+  for (const p of [tmp, d]) rmSync(p, { recursive: true, force: true });
 });
-test('self-heal: another repo\'s checkout survives for a day (mid-measurement for all we know), then is pruned as an orphan; an untagged dir survives under a day', () => {
+test('self-heal: another repo\'s checkout survives for a day (mid-measurement for all we know), then is pruned as an orphan', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'pw-heal-'));
   const d = tmpRepo([TODOS]);
-  const other = join(tmpdir(), 'promptwheel-0badc0de-OTHERREPO');    // some other repo, 2h old: maybe still measuring
-  const stale = join(tmpdir(), 'promptwheel-0badc0de-OTHERSTALE');   // the same tag, 25h old: a repo that was deleted or moved left it behind
-  const young = join(tmpdir(), 'promptwheel-ORPHANYOUNG');          // untagged, 2h old: not yet
-  for (const p of [other, stale, young]) { rmSync(p, { recursive: true, force: true }); mkdirSync(p, { recursive: true }); }
+  const other = join(tmp, 'promptwheel-0badc0de-OTHER1');    // some other repo, 2h old: maybe still measuring
+  const stale = join(tmp, 'promptwheel-0badc0de-STALE1');    // the same tag, 25h old: a repo that was deleted or moved left it behind
+  for (const p of [other, stale]) mkdirSync(p);
   const old = new Date(Date.now() - 7200_000);
-  utimesSync(other, old, old); utimesSync(young, old, old);
+  utimesSync(other, old, old);
   const day = new Date(Date.now() - 90_000_000);
   utimesSync(stale, day, day);
   writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
-  pw(d, ['run', '--working', '--no-record']);
+  pwTmp(tmp, d, ['run', '--working', '--no-record']);
   assert.equal(existsSync(other), true, 'a dir tagged for another repo must survive the first day');
   assert.equal(existsSync(stale), false, 'a day-old dir of another repo is an orphan nobody will claim: pruned');
-  assert.equal(existsSync(young), true, 'an untagged dir younger than a day must survive');
-  for (const p of [other, stale, young, d]) rmSync(p, { recursive: true, force: true });
+  for (const p of [tmp, d]) rmSync(p, { recursive: true, force: true });
+});
+
+test('self-heal: a folder or another repo\'s worktree whose name only starts with promptwheel- survives at any age; a real leftover of a killed run is still removed', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'pw-heal-'));
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  const other = tmpRepo([TODOS]); writeFileSync(join(other, 'app.js'), 'a\n'); commitAll(other, 'base');
+  const notes = join(tmp, 'promptwheel-notes');                      // a person's own folder
+  mkdirSync(notes); writeFileSync(join(notes, 'todo.txt'), 'mine\n');
+  const otherWt = join(tmp, 'promptwheel-other-wt');                 // another repo's worktree, with uncommitted work
+  execFileSync('git', ['worktree', 'add', '--quiet', '--detach', otherWt, 'HEAD'], { cwd: other });
+  writeFileSync(join(otherWt, 'app.js'), 'uncommitted work\n');
+  // near misses: the right prefix and tag with a tail mkdtemp never makes, a temp-index lookalike, an untagged name
+  const lookalikes = [`promptwheel-${ownerTag(d)}-notes`, `promptwheel-${ownerTag(d)}-abc123-wt`, 'pw-idx-scratch', 'promptwheel-ORPHAN'].map((n) => join(tmp, n));
+  for (const p of lookalikes) { mkdirSync(p); writeFileSync(join(p, 'keep.txt'), 'x\n'); }
+  const file = join(tmp, `promptwheel-${ownerTag(d)}-aFile1`);       // the exact shape, but a file: the engine only makes directories
+  writeFileSync(file, 'x\n');
+  const leftover = mkdtempSync(join(tmp, `promptwheel-${ownerTag(d)}-`));   // named by mkdtemp, as a killed run leaves it
+  const days = new Date(Date.now() - 5 * 86_400_000), hours = new Date(Date.now() - 7200_000);
+  for (const p of [notes, otherWt, file, ...lookalikes]) utimesSync(p, days, days);
+  utimesSync(leftover, hours, hours);                                // the documented age for this repo's unregistered checkout: one hour
+  const r = pwTmp(tmp, d, ['run', '--working', '--no-record']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(existsSync(join(notes, 'todo.txt')), true, 'a plain folder named promptwheel-notes is not ours to remove');
+  assert.equal(existsSync(join(otherWt, 'app.js')) && readFileSync(join(otherWt, 'app.js'), 'utf8'), 'uncommitted work\n', "another repo's worktree keeps its uncommitted work");
+  for (const p of lookalikes) assert.equal(existsSync(join(p, 'keep.txt')), true, `${p} is not a name mkdtemp makes from the engine's prefix`);
+  assert.equal(existsSync(file), true, 'a file is never removed');
+  assert.equal(existsSync(leftover), false, 'the leftover of a killed run is removed after an hour');
+  for (const p of [tmp, d, other]) rmSync(p, { recursive: true, force: true });
 });
 
 // ---------------------------------------- guardrail inheritance + observability
@@ -1588,6 +1675,28 @@ test('cli: an unknown flag is a usage error (64) on every command, never silentl
   rmSync(d, { recursive: true, force: true });
 });
 
+test('cli: a flag with a missing or unusable value is a usage error (64, one line), never a verdict', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app.js'), 'b\n'); commitAll(d, 'head');   // two commits: a bare `run` has something to compare
+  const bad = [['run', '--repeat', 'abc'], ['run', '--repeat', '1.5'], ['run', '--repeat', '-2'], ['run', '--repeat'], ['run', '--allow'], ['run', '--allow', '   '], ['run', '--allow', ''],
+    ['run', '--allow', '--json'], ['run', '--base'], ['run', '--head'], ['run', '--base', '--head', 'HEAD'], ['run', '--head', ' '], ['init', '--force', '--preset']];
+  for (const argv of bad) {
+    const r = pw(d, [...argv]);
+    assert.equal(r.code, 64, `${argv.join(' ')} -> ${r.out}`);
+    assert.match(r.out, /^promptwheel (run|init): --(repeat|allow|base|head|preset) needs /, argv.join(' '));
+    assert.equal(r.out.trim().split('\n').length, 1, `one line: ${r.out}`);
+  }
+  assert.match(pw(d, ['run', '--repeat', 'abc']).out, /--repeat needs a whole number, 1 or more \(got "abc"\)/);
+  assert.match(pw(d, ['run', '--allow']).out, /--allow needs a reason/);
+  assert.match(pw(d, ['run', '--base']).out, /--base needs a ref/);
+  const ok = pw(d, ['run', '--working', '--repeat', '2', '--allow', 'a reason', '--json']);   // good values still run
+  assert.equal(ok.code, 0, ok.out); assert.equal(JSON.parse(ok.out).repeat, 2);
+  const empty = pw(d, ['run', '--base', '', '--head', 'HEAD', '--json']);   // the Action passes an empty base outside a pull request: the default ref
+  assert.equal(empty.code, 0, empty.out); assert.notEqual(JSON.parse(empty.out).base, JSON.parse(empty.out).head);
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ------------------------------------------- 0.8.0: the smaller surface
 test('cli: the removed commands and presets are usage errors (64), never a verdict; the kept presets remain', () => {
   const d = tmpRepo([TODOS]);
@@ -1809,6 +1918,198 @@ test('gate integrity: replacing the placeholder test command init writes is setu
   rmSync(d, { recursive: true, force: true });
 });
 
+// ---------------------------------------- a change is judged by the gate that was in force before it
+const TESTS_PASS = { name: 'tests_pass', cmd: 'node app.test.js', extract: 'exit', direction: 'pass', guard: true };
+const GOOD_SRC = 'module.exports = { add: (a, b) => a + b };\n', BAD_SRC = 'module.exports = { add: (a, b) => a - b };\n';
+const HONEST_TEST = "require('assert').strictEqual(require('./src').add(2, 3), 5);\n";
+const RIGGED_TEST = "require('assert').strictEqual(require('./src').add(2, 3), -1);\n";
+const cfgFile = (d, cfg) => writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, ...cfg }));
+const lastChange = (d) => { const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json']); return { ...r, rep: r.code === 64 ? null : reportOf(r.out) }; };
+// a repo with a source file and an honest test: `cfg` null leaves it with no config (zero-config runs `npm test`)
+function srcRepo(src, cfg) {
+  const d = bareRepo();
+  if (cfg) cfgFile(d, cfg);
+  else writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'zc', scripts: { test: 'node app.test.js' } }));
+  writeFileSync(join(d, 'src.js'), src); writeFileSync(join(d, 'app.test.js'), HONEST_TEST);
+  commitAll(d, 'base');
+  return d;
+}
+test('first config: a config added with tests_pass set to `true` while the source breaks reads GAMED', () => {
+  const d = srcRepo(GOOD_SRC, null);
+  cfgFile(d, { metrics: [{ ...TESTS_PASS, cmd: 'true' }] });
+  writeFileSync(join(d, 'src.js'), BAD_SRC); commitAll(d, 'add a config and break the source');
+  const r = lastChange(d);
+  assert.equal(r.code, 2, r.out);
+  assert.ok(r.rep.gate.weakened.some((w) => w.name === 'tests_pass' && w.change === 'guard-edited' && w.status === 'regressed'), JSON.stringify(r.rep.gate));
+  assert.equal(r.rep.gate.fingerprint.base, null, 'there was no config file at base');
+  assert.equal(conformsToContract(r.rep).ok, true, conformsToContract(r.rep).errors.join('; '));
+  rmSync(d, { recursive: true, force: true });
+});
+test('first config: one that keeps the detected test command, or replaces the placeholder, passes', () => {
+  let d = srcRepo(GOOD_SRC, null);                       // `init` keeps the detected command
+  assert.equal(pw(d, ['init', '--no-agent-block']).code, 0);
+  assert.equal(JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).metrics[0].cmd, 'npm test --silent');
+  commitAll(d, 'init');
+  let r = lastChange(d);
+  assert.equal(r.code, 0, r.out); assert.equal(r.rep.gate.weakened, undefined, JSON.stringify(r.rep.gate));
+  writeFileSync(join(d, 'src.js'), BAD_SRC); commitAll(d, 'break the source');   // and the config it wrote still guards
+  assert.equal(lastChange(d).code, 1);
+  rmSync(d, { recursive: true, force: true });
+  d = bareRepo();                                         // nothing to detect at base: the zero-config gate was the placeholder
+  writeFileSync(join(d, 'src.js'), GOOD_SRC); writeFileSync(join(d, 'app.test.js'), HONEST_TEST); commitAll(d, 'base');
+  cfgFile(d, { metrics: [TESTS_PASS] }); commitAll(d, 'set the test command');
+  r = lastChange(d);
+  assert.equal(r.code, 0, r.out); assert.equal(r.rep.gate.weakened, undefined, JSON.stringify(r.rep.gate));
+  rmSync(d, { recursive: true, force: true });
+  d = bareRepo();                                         // the placeholder measured nothing, so its (absent) setup is no baseline either:
+  writeFileSync(join(d, 'src.js'), BAD_SRC);              // a first config with the setup the suite needs, and a real fix, in one change
+  writeFileSync(join(d, 'build.js'), "require('fs').writeFileSync('built.js', 'module.exports = 5;\\n');\n");
+  writeFileSync(join(d, 'app.test.js'), "require('assert').strictEqual(require('./src').add(2, 3), require('./built.js'));\n");
+  writeFileSync(join(d, '.gitignore'), '.promptwheel/\nbuilt.js\n'); commitAll(d, 'base');
+  cfgFile(d, { setup: 'node build.js', metrics: [TESTS_PASS] }); writeFileSync(join(d, 'src.js'), GOOD_SRC); commitAll(d, 'set up the gate and fix the bug');
+  r = lastChange(d);
+  assert.equal(r.code, 0, r.out); assert.match(r.rep.metrics[0].gamingReason, /the source earned it/);
+  rmSync(d, { recursive: true, force: true });
+});
+test('gamingCheck: false set in the change that edits the test to pass does not switch the re-run off', () => {
+  for (const base of [{ metrics: [TESTS_PASS] }, null]) {          // a committed config, and no config (zero-config)
+    const d = srcRepo(BAD_SRC, base);                              // red: an honest test fails on the bug
+    cfgFile(d, { metrics: [{ ...TESTS_PASS, cmd: base ? TESTS_PASS.cmd : 'npm test --silent', gamingCheck: false }] });
+    writeFileSync(join(d, 'app.test.js'), RIGGED_TEST); commitAll(d, 'green the suite by editing the test');
+    const r = lastChange(d);
+    assert.equal(r.code, 2, `base config ${!!base}: ${r.out}`);
+    const m = r.rep.metrics.find((x) => x.name === 'tests_pass');
+    assert.equal(m.gamed, true); assert.match(m.gamingReason, /zero production-source files/);
+    assert.equal(m.tripwire, undefined, 'the check that was on before the change stays on for it');
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+test('gamingCheck: false set alongside a real source fix passes; a new test-side guard keeps its exemption', () => {
+  const d = srcRepo(BAD_SRC, { metrics: [TESTS_PASS] });
+  const ASSERTS = { name: 'asserts', cmd: 'grep -c strictEqual app.test.js', extract: 'number', direction: 'up', guard: true, gamingCheck: false };
+  cfgFile(d, { metrics: [{ ...TESTS_PASS, gamingCheck: false }, ASSERTS] });
+  writeFileSync(join(d, 'src.js'), GOOD_SRC); commitAll(d, 'fix the bug');
+  let r = lastChange(d);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.rep.metrics.find((x) => x.name === 'tests_pass').gamingReason, /the source earned it/);
+  writeFileSync(join(d, 'app.test.js'), HONEST_TEST + "require('assert').strictEqual(require('./src').add(0, 0), 0);\n"); commitAll(d, 'one more assertion');
+  r = lastChange(d);                                               // gamingCheck: false was in force before this change: honoured
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.rep.metrics.find((x) => x.name === 'asserts').status, 'improved');
+  rmSync(d, { recursive: true, force: true });
+});
+test('gamingThreshold: one made more lenient in the change it judges is held at the value before; a lenient one already in force applies', () => {
+  const DONE = { name: 'done', cmd: 'grep -rho DONE . --include=*.js 2>/dev/null | wc -l', extract: 'number', direction: 'up', guard: true };
+  const mk = (before, after) => {
+    const d = bareRepo();
+    cfgFile(d, { gamingThreshold: before, metrics: [DONE] });
+    writeFileSync(join(d, 'src.js'), '// start\n'); writeFileSync(join(d, 'x.test.js'), '// tests\n'); commitAll(d, 'base');
+    cfgFile(d, { gamingThreshold: after, metrics: [DONE] });
+    writeFileSync(join(d, 'src.js'), '// DONE\n'); writeFileSync(join(d, 'x.test.js'), '// DONE\n');   // half the gain from source, half from a test file
+    commitAll(d, 'head');
+    const r = lastChange(d); rmSync(d, { recursive: true, force: true }); return r;
+  };
+  const lowered = mk(0.6, 0.1);
+  assert.equal(lowered.code, 2, lowered.out);
+  assert.match(lowered.rep.metrics[0].gamingReason, /threshold 60%/);
+  assert.equal(mk(0.1, 0.1).code, 0, 'a threshold that was already 0.1 before the change applies');
+  assert.equal(mk(0.1, 0.6).code, 2, 'a stricter one applies at once');
+});
+test('setup: a setup added in the change that rewrites the test is judged under the setup before it', () => {
+  const RIG = 'echo "// rigged" > app.test.js';
+  // a regression hidden: the source breaks, and the new setup overwrites the honest test in every checkout
+  let d = srcRepo(GOOD_SRC, { metrics: [TESTS_PASS] });
+  cfgFile(d, { setup: RIG, metrics: [TESTS_PASS] });
+  writeFileSync(join(d, 'src.js'), BAD_SRC); commitAll(d, 'break the source, rig the setup');
+  let r = lastChange(d);
+  assert.equal(r.code, 2, r.out);
+  assert.ok(r.rep.gate.weakened.some((w) => w.name === 'tests_pass' && w.change === 'measurement-edited' && w.status === 'regressed'), JSON.stringify(r.rep.gate));
+  assert.equal(r.rep.gate.changed, true, 'setup is part of the gate fingerprint');
+  assert.equal(conformsToContract(r.rep).ok, true, conformsToContract(r.rep).errors.join('; '));
+  assert.match(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']).out, /GATE WEAKENED, how the guard "tests_pass" is measured/);
+  const a = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json', '--allow', 'the build moved']);
+  assert.equal(a.code, 0, a.out); assert.ok(reportOf(a.out).allowed.cleared.includes('gate'));
+  rmSync(d, { recursive: true, force: true });
+  // a red suite painted green: nothing but the setup changed
+  d = srcRepo(BAD_SRC, { metrics: [TESTS_PASS] });
+  cfgFile(d, { setup: RIG, metrics: [TESTS_PASS] }); commitAll(d, 'rig the setup');
+  r = lastChange(d);
+  assert.equal(r.code, 2, r.out);
+  assert.ok(r.rep.gate.weakened.some((w) => w.name === 'tests_pass' && w.change === 'measurement-edited' && w.status === 'failed'), JSON.stringify(r.rep.gate));
+  rmSync(d, { recursive: true, force: true });
+  // a win the setup carries: it copies a file only the head has over the test, so the base reads red and the head green
+  d = srcRepo(BAD_SRC, { metrics: [TESTS_PASS] });
+  cfgFile(d, { setup: 'test -f tools/rig.js && cp tools/rig.js app.test.js || true', metrics: [TESTS_PASS] });
+  mkdirSync(join(d, 'tools')); writeFileSync(join(d, 'tools', 'rig.js'), '// rigged\n'); commitAll(d, 'a "fix"');
+  r = lastChange(d);
+  assert.equal(r.code, 2, r.out);
+  const m = r.rep.metrics.find((x) => x.name === 'tests_pass');
+  assert.equal(m.status, 'improved'); assert.equal(m.gamed, true, 'the source-only re-run uses the setup from before the change');
+  rmSync(d, { recursive: true, force: true });
+});
+test('setup: a setup, env or linkDirs change with honest tests reads as a gate change only', () => {
+  for (const edit of [{ setup: 'echo built > build.log' }, { env: { CI: '1' } }, { linkNodeModules: undefined, linkDirs: ['vendor'] }]) {
+    const d = srcRepo(BAD_SRC, { metrics: [TESTS_PASS] });
+    cfgFile(d, { ...edit, metrics: [TESTS_PASS] }); commitAll(d, 'change how the gate measures');
+    let r = lastChange(d);
+    assert.equal(r.code, 3, `${JSON.stringify(edit)}: a red suite stays red, so it is inconclusive as before: ${r.out}`);
+    assert.equal(r.rep.gate.changed, true, JSON.stringify(edit)); assert.equal(r.rep.gate.weakened, undefined, JSON.stringify(r.rep.gate));
+    writeFileSync(join(d, 'src.js'), GOOD_SRC); commitAll(d, 'fix the bug');
+    assert.equal(lastChange(d).code, 0);
+    rmSync(d, { recursive: true, force: true });
+  }
+  const d = srcRepo(BAD_SRC, { metrics: [TESTS_PASS] });             // the setup changes in the same change as a real fix
+  cfgFile(d, { setup: 'echo built > build.log', metrics: [TESTS_PASS] });
+  writeFileSync(join(d, 'src.js'), GOOD_SRC); commitAll(d, 'fix the bug, add a build step');
+  const r = lastChange(d);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.rep.gate.changed, true); assert.equal(r.rep.gate.weakened, undefined, JSON.stringify(r.rep.gate));
+  assert.match(r.rep.metrics[0].gamingReason, /the source earned it/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('setup: the one `init` writes into a first config is not held against it; a setup fix that turns a red guard green on a committed config needs --allow', () => {
+  const buildGated = (d) => {                                        // a suite that passes only after `npm run build`
+    writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'b', scripts: { build: 'node build.js', test: 'node app.test.js' } }));
+    writeFileSync(join(d, 'build.js'), "require('fs').writeFileSync('built.js', 'module.exports = 5;\\n');\n");
+    writeFileSync(join(d, 'app.test.js'), "require('assert').strictEqual(require('./built.js'), 5);\n");
+    writeFileSync(join(d, '.gitignore'), '.promptwheel/\nbuilt.js\n');
+  };
+  let d = bareRepo(); buildGated(d); commitAll(d, 'base');           // zero-config: no setup, so the suite cannot pass
+  assert.equal(pw(d, ['init', '--no-agent-block']).code, 0);
+  assert.equal(JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).setup, 'npm run build --if-present');
+  commitAll(d, 'init');
+  let r = lastChange(d);
+  assert.equal(r.code, 0, r.out); assert.equal(r.rep.gate.weakened, undefined, JSON.stringify(r.rep.gate));
+  rmSync(d, { recursive: true, force: true });
+  const NPM_TEST = { ...TESTS_PASS, cmd: 'npm test --silent' };
+  d = bareRepo(); buildGated(d); cfgFile(d, { metrics: [NPM_TEST] }); commitAll(d, 'base');   // a committed config with no setup: red
+  cfgFile(d, { setup: 'npm run build', metrics: [NPM_TEST] }); commitAll(d, 'add the build step');
+  r = lastChange(d);
+  assert.equal(r.code, 2, r.out);                                    // the gate cannot tell a build from a rewrite of the test: a person says which
+  assert.ok(r.rep.gate.weakened.some((w) => w.name === 'tests_pass' && w.change === 'measurement-edited' && w.status === 'failed'), JSON.stringify(r.rep.gate));
+  assert.equal(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--allow', 'the tests need the build']).code, 0);
+  writeFileSync(join(d, 'note.txt'), 'x\n'); commitAll(d, 'the next change');
+  assert.equal(lastChange(d).code, 0, 'and it applies from the next change on');
+  rmSync(d, { recursive: true, force: true });
+});
+test('setup: a base config that extends a file outside the repository is not compared on setup, env or linkDirs (no false gate change)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'pw-outside-'));
+  writeFileSync(join(root, 'shared.json'), JSON.stringify({ env: { SHARED: '1' }, setup: 'echo shared > shared.log' }));
+  const d = join(root, 'repo'); mkdirSync(d);
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), 'shared.log\n');
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ extends: '../shared.json', linkNodeModules: false, metrics: [TESTS_PASS] }));
+  writeFileSync(join(d, 'src.js'), GOOD_SRC); writeFileSync(join(d, 'app.test.js'), HONEST_TEST); commitAll(d, 'base');
+  writeFileSync(join(d, 'note.txt'), 'x\n'); commitAll(d, 'an honest change');
+  const r = lastChange(d);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.rep.gate.changed, undefined, 'the inherited setup and env are the same at both refs');
+  assert.equal(r.rep.gate.weakened, undefined, JSON.stringify(r.rep.gate));
+  rmSync(root, { recursive: true, force: true });
+});
+
 test('supply-chain: a person can accept a hooks change with --allow; a trailer cannot, and a workflow stays frozen either way', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-hooks-'));
   execFileSync('git', ['init', '-q'], { cwd: d });
@@ -1899,18 +2200,20 @@ test('--allow on a gamed commit: the JSON and the PR comment both carry the reas
 });
 
 test('self-heal: a registered worktree a killed run left behind is removed once it is a day old; a younger one is left alone', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'pw-heal-'));
   const d = tmpRepo([TODOS]);
   writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
-  const killed = join(tmpdir(), `promptwheel-${ownerTag(d)}-KILLEDRUN`);
-  const live = join(tmpdir(), `promptwheel-src-${ownerTag(d)}-LIVERUN`);
-  for (const p of [killed, live]) { rmSync(p, { recursive: true, force: true }); execFileSync('git', ['worktree', 'add', '--quiet', '--detach', p, 'HEAD'], { cwd: d }); }
+  const killed = join(tmp, `promptwheel-${ownerTag(d)}-KILLED`);
+  const live = join(tmp, `promptwheel-src-${ownerTag(d)}-LIVE01`);
+  for (const p of [killed, live]) execFileSync('git', ['worktree', 'add', '--quiet', '--detach', p, 'HEAD'], { cwd: d });
   const day = new Date(Date.now() - 90_000_000), old = new Date(Date.now() - 7200_000);
   utimesSync(killed, day, day); utimesSync(live, old, old);
-  pw(d, ['run', '--working']);
+  pwTmp(tmp, d, ['run', '--working']);
   const listed = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: d, encoding: 'utf8' });
   assert.equal(existsSync(killed), false, 'the day-old worktree is gone from disk');
-  assert.doesNotMatch(listed, /KILLEDRUN/, 'and from the registry');
+  assert.doesNotMatch(listed, /-KILLED$/m, 'and from the registry');
+  assert.match(listed, /-LIVE01$/m, 'the younger one is still registered');
   assert.equal(existsSync(live), true, 'a registered worktree under a day old may still be measuring');
   execFileSync('git', ['worktree', 'remove', '--force', live], { cwd: d });
-  rmSync(d, { recursive: true, force: true });
+  for (const p of [tmp, d]) rmSync(p, { recursive: true, force: true });
 });
