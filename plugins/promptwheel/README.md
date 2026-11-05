@@ -19,6 +19,8 @@ npm install -g promptwheel
 
 ## Skills
 
+Most people want the Sawbuck plugin instead: `/plugin marketplace add sawbuck-ai/reins`, which runs this engine for you. This plugin is for wiring the engine by hand.
+
 Four skills ship in `skills/`:
 
 | skill | wraps | what it does |
