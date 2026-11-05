@@ -17,6 +17,10 @@ inputs:
     description: 'A declared reason that clears allowable guards (the only path for the supply-chain preset). Set it from a step an agent cannot reach, such as a dependency-bot PR check. See packs/supply-chain/README.md.'
     required: false
     default: ''
+  inconclusive:
+    description: 'What an inconclusive verdict does to the job: fail, or pass with the comment still posted. Use pass where tests may not run in CI. A failed or gamed verdict always fails.'
+    required: false
+    default: 'fail'
   comment:
     description: 'Post the verdict as a PR comment'
     required: false
@@ -64,4 +68,12 @@ runs:
     # was violated), 2 gamed, 3 inconclusive, 64 usage/config error (a broken config fails the
     # job too, but it is never reported as a verdict).
     - shell: bash
-      run: exit ${{ steps.gate.outputs.exit }}
+      env:
+        GATE_EXIT: ${{ steps.gate.outputs.exit }}
+        INCONCLUSIVE: ${{ inputs.inconclusive }}
+      run: |
+        if [ "$GATE_EXIT" = 3 ] && [ "$INCONCLUSIVE" = pass ]; then
+          echo "::warning::Sawbuck could not measure your tests here, so nothing was proved. Protected paths were still checked."
+          exit 0
+        fi
+        exit "$GATE_EXIT"
