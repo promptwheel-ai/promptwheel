@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint,
-  check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION, deriveVerdict } from '../bin/promptwheel.mjs';
+  allowFromComments, check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION, deriveVerdict } from '../bin/promptwheel.mjs';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 
@@ -1834,3 +1834,29 @@ test('deriveVerdict: a tripwire moving is not a win over a test that never ran',
   assert.equal(deriveVerdict([{ name: 't', guard: true, ok: true, status: 'unchanged', inert: true }, { name: 'c', guard: true, ok: true, status: 'improved', tripwire: true }]), 'inconclusive');
 });
 
+test('a report guard tells you and does not fail; a plain message says what changed', () => {
+  const d = repoWith({ 'package.json': JSON.stringify({ name: 'a' }) });
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0); commitAll(d, 'sign');
+  const f = join(d, 'promptwheel.config.json'); const c = JSON.parse(readFileSync(f, 'utf8'));
+  writeFileSync(f, JSON.stringify({ ...c, mandates: c.mandates.filter((m) => m.name !== 'contract-frozen'), metrics: c.metrics.map((m) => (m.name === 'dependency_entries' ? { ...m, report: true } : m)) }, null, 2)); commitAll(d, 'report mode');
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'a', dependencies: { ms: '2.1.3' } })); commitAll(d, 'dep');
+  const r = gateRun(d);
+  const dep = r.rep.metrics.find((m) => m.name === 'dependency_entries');
+  assert.equal(dep.noted, true); assert.equal(dep.status, 'regressed');
+  assert.ok(r.rep.explained.some((x) => x.what === 'a new dependency' && x.noted));
+});
+test('a report flag does not soften a guard that is not marked', () => {
+  const d = repoWith({ 'package.json': JSON.stringify({ name: 'a' }) });
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0); commitAll(d, 'sign');
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'a', scripts: { postinstall: 'x' } })); commitAll(d, 'script');
+  const r = gateRun(d); assert.equal(r.code, 1); assert.ok(r.rep.explained.some((x) => x.what === 'a new install script'));
+});
+test('approval on a PR: the newest comment from someone with write access; never a bot or a drive-by', () => {
+  const c = (body, assoc = 'OWNER', type = 'User', login = 'pat') => ({ body, author_association: assoc, user: { type, login } });
+  assert.equal(allowFromComments([]), '');
+  assert.equal(allowFromComments([c('looks fine')]), '');
+  assert.equal(allowFromComments([c('sawbuck-allow: x', 'NONE')]), '', 'a stranger');
+  assert.equal(allowFromComments([c('sawbuck-allow: x', 'OWNER', 'Bot')]), '', 'a bot');
+  assert.equal(allowFromComments([c('sawbuck-allow:   ')]), '', 'no reason');
+  assert.equal(allowFromComments([c('sawbuck-allow: old'), c('nice\nsawbuck-allow: added ms for parsing')]), 'added ms for parsing (approved by pat)');
+});

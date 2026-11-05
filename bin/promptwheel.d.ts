@@ -336,3 +336,6 @@ export declare function judgeGaming(
 
 /** Truncated SHA-256 of the verdict content (everything but `provenance`), the reproducible half of the receipt. */
 export declare function verdictFingerprint(report: Pick<Report, 'verdict'> & Partial<Pick<Report, 'metrics' | 'gate'>>): string;
+
+/** The newest `sawbuck-allow: <reason>` comment from someone with write access, or ''. */
+export declare function allowFromComments(comments: unknown[]): string;

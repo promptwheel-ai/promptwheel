@@ -774,6 +774,8 @@ function gate(repo, opts) {
   const metrics = cfg.metrics.map((m) => {
     const ev = evaluate(m, before[m.name], after[m.name], repeat);
     if (ev.status === 'unmeasurable' && ev.before == null && ev.after != null && adopted(m.name)) { ev.ok = true; ev.adopted = true; }
+    // a `report` guard tells you and does not fail: a contract can start by watching and tighten later
+    if (m.report && !ev.ok && ev.status === 'regressed') { ev.ok = true; ev.noted = true; }
     return { name: m.name, direction: m.direction || 'up', guard: !!m.guard, ...(m.gamingCheck === false ? { tripwire: true } : {}), ...ev };
   });
   // Section 3 (gaming detection), on by default: mutates `metrics` and yields the gate record
@@ -835,7 +837,9 @@ function gate(repo, opts) {
   }
   const mandated = mandateViolations.length > 0;
   const verdict = deriveVerdict(metrics, gateInfo, mandated);
+  const explained = explainMetrics(repo, metrics);
   const report = {
+    ...(explained ? { explained } : {}),
     base: short(repo, base), head: short(repo, head), repeat, mode: opts.working ? 'working' : 'refs',
     verdict, metrics,
     ...(mandateViolations.length ? { mandates: mandateViolations } : {}),
@@ -1226,6 +1230,34 @@ function printHuman(r) {
 }
 
 // PR-comment markdown (rendering lives in the tool so the GitHub Action stays thin)
+// What a person needs when a check speaks: what changed, in words, and how to accept it.
+const PLAIN = {
+  lifecycle_scripts: 'a new install script', dependency_entries: 'a new dependency', lock_nonregistry_sources: 'a dependency from outside the registry',
+  unpinned_execution: 'something that runs without a pinned version', install_policy_gaps: 'a weaker install policy', lock_drift: 'the shape of the repo changed',
+  pins_changed: 'resolved dependency versions changed', tests_pass: 'tests stopped passing', test_count: 'fewer tests', skipped_tests: 'more skipped tests',
+  suppressions: 'more silenced checks', assertions: 'fewer assertions',
+};
+function explainMetrics(repo, metrics) {
+  const hit = metrics.filter((m) => m.noted || (m.guard && !m.ok));
+  if (!hit.length) return null;
+  let items = [];
+  if (hit.some((m) => m.name === 'lock_drift')) {
+    try { items = JSON.parse(execFileSync(process.execPath, ['.promptwheel/packs/supply-chain/lock.mjs', 'drift', '.', '--json'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).slice(0, 8); } catch { /* words without the list */ }
+  }
+  return hit.map((m) => ({ metric: m.name, noted: !!m.noted, what: PLAIN[m.name] || m.name, ...(m.name === 'lock_drift' && items.length ? { items } : {}), ...(m.allowable ? { allowable: true } : {}) }));
+}
+// A reason a person left on a pull request. The newest `sawbuck-allow: <reason>` comment from someone with write
+// access wins. A bot never counts. An agent signed in as that person can still post one: the record shows it.
+export function allowFromComments(comments) {
+  const trusted = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+  for (const c of [...(comments || [])].reverse()) {
+    if (!c || !c.user || c.user.type !== 'User' || !trusted.has(c.author_association)) continue;
+    const m = String(c.body || '').match(/^\s*sawbuck-allow:[ \t]*(\S.*?)[ \t]*$/m);
+    if (m) return `${m[1].slice(0, 280)} (approved by ${String(c.user.login).slice(0, 39)})`;
+  }
+  return '';
+}
+
 function renderMarkdown(r) {
   const icon = r.verdict === 'pass' ? '✅' : r.verdict === 'gamed' ? '🚩' : r.verdict === 'inconclusive' ? '🟡' : '❌';
   const sIcon = { improved: '🟢', regressed: '🔴', unchanged: '⚪', inconclusive: '🟡', unmeasurable: '⚫' };
@@ -1240,6 +1272,7 @@ function renderMarkdown(r) {
     `\`${r.base} → ${r.head}\` · ${r.mode} mode${r.repeat > 1 ? ` · ×${r.repeat}` : ''}`,
     '',
     ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Mandate violated:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : md.edited ? ' (edited in this same change; the version before the change stays in force for the change that edits it)' : ''}`).join('\n'), ''] : []),
+    ...(r.explained ? [...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...(r.explained.some((x) => !x.noted && x.allowable) ? ['>', '> To accept this, comment `sawbuck-allow: <your reason>` on this PR and re-run the check.'] : []), ''] : []),
     '| metric | before | after | Δ | status | confidence |',
     '|---|--:|--:|--:|---|---|',
     rows,
@@ -1514,6 +1547,7 @@ function dispatch() {
   if (cmd in COMMAND_FLAGS) checkFlags(cmd, rest);
   if (cmd === 'run') run(rest);
   else if (cmd === 'improve') improve(rest);
+  else if (cmd === 'pr-allow') { let c = []; try { c = JSON.parse(readFileSync(0, 'utf8') || '[]'); } catch { /* no comments, no approval */ } process.stdout.write(allowFromComments(c)); }
   else if (cmd === 'insights') insights(rest);
   else if (cmd === 'init') init(rest);
   else if (cmd === 'guards') guards(rest);

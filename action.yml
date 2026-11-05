@@ -30,10 +30,22 @@ runs:
         node-version: '20'
 
     # Runs straight from this action's own checkout: no npm install, no build.
+    # a person's approval on the PR: the newest `sawbuck-allow: <reason>` comment from someone with write access
+    - id: approval
+      if: ${{ inputs.allow == '' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+      run: |
+        reason=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" 2>/dev/null | node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" pr-allow 2>/dev/null || true)
+        { echo 'allow<<SAWBUCK_ALLOW_END'; printf '%s\n' "$reason"; echo 'SAWBUCK_ALLOW_END'; } >> "$GITHUB_OUTPUT"
+
     - id: gate
       shell: bash
       env:
-        ALLOW: ${{ inputs.allow }}
+        ALLOW: ${{ inputs.allow || steps.approval.outputs.allow }}
       run: |
         set +e
         node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" run \
