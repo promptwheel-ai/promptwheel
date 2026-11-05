@@ -329,49 +329,17 @@ test('run --detect-gaming: evaluatorPaths opts a generic gate file into the non-
   rmSync(d, { recursive: true, force: true });
 });
 
-// ------------------------------------------ integration: --working + reward stream
-test('run --working: measures uncommitted change, leaves tree untouched, records outcome', () => {
+// ----------------------------------------------------------- integration: --working
+test('run --working: measures uncommitted change, leaves tree untouched, writes nothing to the repo', () => {
   const d = tmpRepo([TODOS]);
   writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
   writeFileSync(join(d, 'app.js'), 'a\nb\n'); // uncommitted improvement
   const r = pw(d, ['run', '--working']);
   assert.equal(r.code, 0);
   assert.equal(readFileSync(join(d, 'app.js'), 'utf8').includes('TODO'), false); // tree still has the change
-  assert.ok(existsSync(join(d, '.promptwheel', 'outcomes.jsonl')));               // reward stream written
+  assert.ok(!existsSync(join(d, '.promptwheel')));                                // no record, no directory
   rmSync(d, { recursive: true, force: true });
 });
-
-// -------------------------------------------- integration: improve keep / revert
-test('improve: keeps on improvement (commits), reverts on regression (no new commit)', () => {
-  const d = tmpRepo([TODOS]);
-  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
-  const base = rev(d);
-  let r = pw(d, ['improve', '--attempt', "sed -i 's| // TODO||' app.js"]);
-  assert.equal(r.code, 0); // exit 0 = kept (the ✓ decision line now goes to stderr)
-  const kept = rev(d);
-  assert.notEqual(base, kept); // a commit was made
-  r = pw(d, ['improve', '--attempt', "echo 'x // TODO' >> app.js"]); // regression
-  assert.equal(r.code, 1);
-  assert.equal(rev(d), kept); // reverted, HEAD unchanged
-  rmSync(d, { recursive: true, force: true });
-});
-
-// ------------------------------------------------------ integration: insights
-test('insights: aggregates the reward stream into per-metric stats', () => {
-  const d = tmpRepo([TODOS]);
-  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\nc // TODO\n'); commitAll(d, 'base');
-  writeFileSync(join(d, 'app.js'), 'a\nb // TODO\n'); commitAll(d, 'c1');
-  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']); // records an improvement
-  const r = pw(d, ['insights', '--json']);
-  assert.equal(r.code, 0);
-  const data = JSON.parse(r.out);
-  assert.equal(data.runs, 1);
-  assert.equal(data.metrics[0].name, 'todos');
-  assert.equal(data.metrics[0].improved, 1);
-  rmSync(d, { recursive: true, force: true });
-});
-
-const jsonOf = (out) => JSON.parse(out.slice(0, out.lastIndexOf('}') + 1)); // strip trailing stderr note
 
 // -------------------------------------- R2: --working sees newly added (untracked) files
 test('run --working: SEES newly added untracked files (the dominant agent action)', () => {
@@ -381,41 +349,6 @@ test('run --working: SEES newly added untracked files (the dominant agent action
   const r = pw(d, ['run', '--working', '--no-record']);
   assert.equal(r.code, 1);                       // todos 0->1 guarded regression, only visible if untracked is snapshotted
   assert.ok(existsSync(join(d, 'new.js')));       // working tree untouched
-  rmSync(d, { recursive: true, force: true });
-});
-
-test('improve: KEEPS a turn that adds a new file (used to delete it via clean -fd)', () => {
-  const DONE = { name: 'done', cmd: 'grep -rho DONE . --include=*.js 2>/dev/null | wc -l', extract: 'number', direction: 'up', guard: true };
-  const d = tmpRepo([DONE]);
-  writeFileSync(join(d, 'app.js'), '// start\n'); commitAll(d, 'base');
-  const r = pw(d, ['improve', '--attempt', 'printf "DONE\\n" > done.js']);
-  assert.equal(r.code, 0);                          // exit 0 = kept
-  assert.ok(existsSync(join(d, 'done.js')));       // the new file survived (the bug deleted it)
-  rmSync(d, { recursive: true, force: true });
-});
-
-// ------------------------- R3: improve exit codes express loop progress + --json result
-test('improve: exit 0=kept / 1=regression / 3=plateau, with --json result field', () => {
-  const d = tmpRepo([TODOS]);
-  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
-  let r = pw(d, ['improve', '--json', '--attempt', "sed -i 's| // TODO||' app.js"]); // improves
-  assert.equal(r.code, 0); assert.equal(jsonOf(r.out).result, 'kept');
-  r = pw(d, ['improve', '--json', '--attempt', 'true']);                              // no-op
-  assert.equal(r.code, 3); assert.equal(jsonOf(r.out).result, 'plateau');
-  r = pw(d, ['improve', '--json', '--attempt', "echo 'z // TODO' >> app.js"]);        // regresses
-  assert.equal(r.code, 1); assert.equal(jsonOf(r.out).result, 'regression');
-  rmSync(d, { recursive: true, force: true });
-});
-
-test('improve: a gamed attempt (test edited to pass, source untouched) exits 2 and is reverted', () => {
-  const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
-  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');   // BUG
-  writeFileSync(join(d, 'calc.test.mjs'), "import { test } from 'node:test'; import assert from 'node:assert'; import { sub } from './calc.mjs'; test('s', () => assert.strictEqual(sub(5, 3), 2));\n");
-  commitAll(d, 'base: red'); const base = rev(d);
-  const r = pw(d, ['improve', '--json', '--attempt', "sed -i 's|, 2))|, 8))|' calc.test.mjs"]); // green by editing the TEST
-  assert.equal(r.code, 2, r.out); assert.equal(jsonOf(r.out).result, 'gamed');
-  assert.equal(rev(d), base);                                                     // reverted, no commit
-  assert.match(readFileSync(join(d, 'calc.test.mjs'), 'utf8'), /, 2\)\)/);         // the test edit is gone
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -431,6 +364,7 @@ test('init: writes a starter config for the stack, refuses overwrite without --f
   const written = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).metrics;
   assert.ok(written.some((m) => m.name === 'tests_pass'));
   assert.ok(written.some((m) => m.name === 'assertions'), 'default config includes antihack tripwires');
+  assert.match(written.find((m) => m.name === 'suppressions').cmd, /nosec/, 'suppression tripwire also greps bandit-style # nosec');
   assert.ok(!written.some((m) => m.name === 'lint_errors'), 'no lint metric when eslint is absent');
   assert.equal(pw(d, ['init']).code, 64);         // refuses overwrite (usage error, never a verdict code)
   assert.equal(pw(d, ['init', '--list']).code, 0); // catalog
@@ -459,52 +393,33 @@ test('init: writes the agent gate block to AGENTS.md (idempotent; --no-agent-blo
   rmSync(d, { recursive: true, force: true }); rmSync(d2, { recursive: true, force: true });
 });
 
-test('init --preset security-antihack: security gate + tripwires + evaluatorPaths + installed pack', () => {
-  const d = mkdtempSync(join(tmpdir(), 'pw-secah-'));
-  const g = (a) => execFileSync('git', a, { cwd: d });
-  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
-  const r = pw(d, ['init', '--preset', 'security-antihack']);
-  assert.equal(r.code, 0, r.out);
-  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
-  const names = cfg.metrics.map((m) => m.name);
-  assert.ok(names.includes('security_findings'), 'has the security-findings gate');
-  assert.ok(names.includes('suppressions'), 'has the antihack suppression tripwire');
-  assert.ok(Array.isArray(cfg.evaluatorPaths) && cfg.evaluatorPaths.length, 'ships a starter evaluatorPaths');
-  const sf = cfg.metrics.find((m) => m.name === 'security_findings');
-  assert.match(sf.cmd, /\.promptwheel\/packs\/security\//, 'pack path rewritten into .promptwheel (evaluator-protected)');
-  assert.ok(existsSync(join(d, '.promptwheel/packs/security/scan.mjs')), 'scanner pack copied in');
-  assert.match(cfg.metrics.find((m) => m.name === 'suppressions').cmd, /nosec/, 'suppression tripwire also greps bandit-style # nosec');
-  rmSync(d, { recursive: true, force: true });
-});
-
-test('init --preset security: the pack is copied from the package into .promptwheel and measured from there; an ignored .promptwheel/ is warned about', () => {
+test('init --preset supply-chain: the pack is copied from the package into .promptwheel and measured from there; an ignored .promptwheel/ is warned about', () => {
   // the designed path: the pack is committed with the config, so the worktrees contain it and
-  // the metric measures the real finding count (an npm user has no packs/ directory of their own)
-  const d = mkdtempSync(join(tmpdir(), 'pw-secpack-'));
+  // the metric measures the real count (an npm user has no packs/ directory of their own)
+  const d = mkdtempSync(join(tmpdir(), 'pw-scpack-'));
   const g = (a) => execFileSync('git', a, { cwd: d });
   g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
-  mkdirSync(join(d, 'src'));
-  writeFileSync(join(d, 'src/a.js'), "res.setHeader('Access-Control-Allow-Origin', '*');\n"); commitAll(d, 'base: a CORS wildcard');
-  let r = pw(d, ['init', '--preset', 'security', '--no-agent-block']);
+  writeFileSync(join(d, 'package.json'), '{"name":"x","scripts":{"postinstall":"node x.js"}}\n'); commitAll(d, 'base: an install script');
+  let r = pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']);
   assert.equal(r.code, 0, r.out);
   assert.doesNotMatch(r.out, /gitignored/, 'nothing is ignored here, so no warning');
   const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
-  assert.equal(cfg.metrics[0].cmd, 'node .promptwheel/packs/security/scan.mjs .', 'the preset command is rewritten to the copied pack');
-  assert.ok(existsSync(join(d, '.promptwheel/packs/security/patterns.json')), 'the whole pack is copied, not just the scanner');
+  assert.equal(cfg.metrics.find((m) => m.name === 'lifecycle_scripts').cmd, 'node .promptwheel/packs/supply-chain/scan.mjs lifecycle .', 'the preset command is rewritten to the copied pack');
+  assert.ok(existsSync(join(d, '.promptwheel/packs/supply-chain/lock.mjs')), 'the whole pack is copied, not just the scanner');
   commitAll(d, 'config + pack');
-  writeFileSync(join(d, 'src/a.js'), 'export const a = 1;\n'); commitAll(d, 'fix the wildcard');
+  writeFileSync(join(d, 'package.json'), '{"name":"x"}\n'); commitAll(d, 'drop the install script');
   r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /security_findings\s+1 →\s+0 .*improved/, 'the copied scanner ran in the worktrees and measured 1 -> 0');
+  assert.match(r.out, /lifecycle_scripts\s+1 →\s+0 .*improved/, 'the copied scanner ran in the worktrees and measured 1 -> 0');
   // the trap: with .promptwheel/ ignored the pack never reaches a worktree and the metric reads
   // unmeasurable at both refs; init must say so instead of leaving a FAIL with no hint why
-  const d2 = mkdtempSync(join(tmpdir(), 'pw-secpack-ign-'));
+  const d2 = mkdtempSync(join(tmpdir(), 'pw-scpack-ign-'));
   const g2 = (a) => execFileSync('git', a, { cwd: d2 });
   g2(['init', '-q']); g2(['config', 'user.email', 't@t']); g2(['config', 'user.name', 't']);
   writeFileSync(join(d2, '.gitignore'), '.promptwheel/\n'); writeFileSync(join(d2, 'a.js'), '1\n'); commitAll(d2, 'base');
-  r = pw(d2, ['init', '--preset', 'security', '--no-agent-block']);
+  r = pw(d2, ['init', '--preset', 'supply-chain', '--no-agent-block']);
   assert.equal(r.code, 0, r.out);
-  assert.match(r.out, /\.promptwheel\/packs\/security is gitignored/, 'init warns that the copied pack will not reach the measurement worktrees');
+  assert.match(r.out, /\.promptwheel\/packs\/supply-chain is gitignored/, 'init warns that the copied pack will not reach the measurement worktrees');
   assert.match(r.out, /!\.promptwheel\/packs\//, 'and names the .gitignore rule that fixes it');
   rmSync(d, { recursive: true, force: true }); rmSync(d2, { recursive: true, force: true });
 });
@@ -950,7 +865,9 @@ test('self-heal: another repo\'s checkout survives for a day (mid-measurement fo
 });
 
 // ---------------------------------------- guardrail inheritance + observability
-test('guards: inherits a base config, local overrides by name, reports provenance', () => {
+const reportOf = (out) => JSON.parse(out.slice(out.indexOf('{'), out.lastIndexOf('}') + 1));
+
+test('extends: inherits a base config, local overrides by name', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-inh-'));
   const g = (a) => execFileSync('git', a, { cwd: d });
   g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
@@ -963,12 +880,12 @@ test('guards: inherits a base config, local overrides by name, reports provenanc
     { name: 'cost', cmd: 'echo 1', extract: 'number', direction: 'down', guard: true },  // add a local guard
   ] }));
   writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
-  const r = pw(d, ['guards', '--json']);
-  assert.equal(r.code, 0);
-  const by = Object.fromEntries(JSON.parse(r.out).guards.map((x) => [x.name, x]));
-  assert.equal(by.tests.source, 'base.json'); assert.equal(by.tests.guard, true);  // inherited + enforced
-  assert.equal(by.lint.override, true); assert.equal(by.lint.guard, false);        // local override loosened it
-  assert.equal(by.cost.source, 'local');                                           // added locally
+  const r = pw(d, ['run', '--base', 'HEAD', '--head', 'HEAD', '--json']);
+  assert.notEqual(r.code, 64, r.out);
+  const by = Object.fromEntries(reportOf(r.out).metrics.map((x) => [x.name, x]));
+  assert.equal(by.tests.guard, true);   // inherited + enforced
+  assert.equal(by.lint.guard, false);   // local override loosened it
+  assert.equal(by.cost.guard, true);    // added locally
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -981,9 +898,9 @@ test('extends: a diamond (two bases sharing a grandparent) is NOT a false cycle'
   writeFileSync(join(d, 'c.json'), JSON.stringify({ extends: './d.json', metrics: [{ name: 'c_m', cmd: 'echo 1', extract: 'number', direction: 'up' }] }));
   writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, extends: ['./b.json', './c.json'], metrics: [{ name: 'local_m', cmd: 'echo 1', extract: 'number', direction: 'up' }] }));
   writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
-  const r = pw(d, ['guards', '--json']);
-  assert.equal(r.code, 0); // diamond resolves, no false "cycle" exit 2
-  const names = JSON.parse(r.out).guards.map((x) => x.name);
+  const r = pw(d, ['run', '--base', 'HEAD', '--head', 'HEAD', '--json']);
+  assert.notEqual(r.code, 64, r.out); // diamond resolves, no false "cycle"
+  const names = reportOf(r.out).metrics.map((x) => x.name);
   for (const n of ['base_m', 'b_m', 'c_m', 'local_m']) assert.ok(names.includes(n), `missing ${n}`);
   rmSync(d, { recursive: true, force: true });
 });
@@ -994,42 +911,16 @@ test('extends: a real self-cycle still exits 64 (config error)', () => {
   g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
   writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, extends: './promptwheel.config.json', metrics: [{ name: 'm', cmd: 'echo 1', extract: 'number', direction: 'up' }] }));
   writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'base');
-  assert.equal(pw(d, ['guards']).code, 64); // true cycle caught
+  assert.equal(pw(d, ['run', '--base', 'HEAD', '--head', 'HEAD']).code, 64); // true cycle caught
   rmSync(d, { recursive: true, force: true });
-});
-
-test("guards: reports each guard's flag record from the stream", () => {
-  const d = tmpRepo([TODOS]); // todos: direction down, guarded
-  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
-  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'c1'); // todos 0->2 = regression
-  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']); // records a flag
-  const todos = JSON.parse(pw(d, ['guards', '--json']).out).guards.find((x) => x.name === 'todos');
-  assert.equal(todos.guard, true);
-  assert.ok(todos.flagged >= 1); // the regression shows up as a flag in the record
-  rmSync(d, { recursive: true, force: true });
-});
-
-// --- security guard-pack (decanted from securitychecks) ---
-test('security pack: scanner detects P0 invariants and passes clean code', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'pw-sec-'));
-  mkdirSync(join(dir, 'src'));
-  writeFileSync(join(dir, 'src/a.ts'),
-    "res.setHeader('Access-Control-Allow-Origin', '*');\nconst STRIPE_SECRET = 'sk_live_x';\n");
-  const scan = join(dirname(ENGINE), '..', 'packs', 'security', 'scan.mjs');
-  const vuln = Number(execFileSync('node', [scan, dir], { encoding: 'utf8' }).trim());
-  assert.ok(vuln >= 2, `expected >=2 findings, got ${vuln}`);
-  writeFileSync(join(dir, 'src/a.ts'), 'export const add = (a, b) => a + b;\n');
-  const clean = Number(execFileSync('node', [scan, dir], { encoding: 'utf8' }).trim());
-  assert.equal(clean, 0);
-  rmSync(dir, { recursive: true, force: true });
 });
 
 test("published tarball includes every file the CLI shells out to", () => {
   const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {
     cwd: join(dirname(fileURLToPath(import.meta.url)), ".."), encoding: "utf8" });
   const files = JSON.parse(out)[0].files.map((f) => f.path);
-  assert.ok(files.includes("packs/security/scan.mjs"),
-    "security preset's scanner must ship in the tarball");
+  for (const f of ["packs/supply-chain/scan.mjs", "packs/supply-chain/lock.mjs"])
+    assert.ok(files.includes(f), `${f} must ship in the tarball: init copies it and \`lock\` imports it`);
   assert.ok(files.includes("bin/promptwheel.d.ts"), "the type declarations must ship in the tarball");
 });
 
@@ -1049,14 +940,17 @@ test('types: bin/promptwheel.d.ts exists, declares every runtime export, and pac
   assert.equal(pkg.exports['.'].default, './bin/promptwheel.mjs', 'the "." export must still resolve to the engine');
 });
 
-test("a preset whose command cannot run must NOT pass, cold llm-eval with missing scripts", () => {
+test("a guard whose command cannot run must NOT pass, cold eval scripts that are missing", () => {
   const d = mkdtempSync(join(tmpdir(), "pw-preset-"));
   const g = (a) => execFileSync("git", ["-C", d, ...a], { env: { ...process.env,
     GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
   g(["init", "-q"]);
   writeFileSync(join(d, "a.js"), "let x = 1;\n");
   g(["add", "-A"]); g(["commit", "-q", "-m", "one"]);
-  execFileSync(process.execPath, [ENGINE, "init", "--preset", "llm-eval"], { cwd: d, encoding: "utf8" });
+  writeFileSync(join(d, "promptwheel.config.json"), JSON.stringify({ metrics: [
+    { name: "eval_pass_rate", cmd: "node eval.mjs", extract: "number", direction: "up", guard: true },
+    { name: "cost_per_run_usd", cmd: "node estimate-cost.mjs", extract: "number", direction: "down", guard: true },
+  ] }));
   let out = "", code = 0;
   try {
     out = execFileSync(process.execPath, [ENGINE, "run", "--base", "HEAD", "--head", "HEAD"], { cwd: d, encoding: "utf8" });
@@ -1065,34 +959,23 @@ test("a preset whose command cannot run must NOT pass, cold llm-eval with missin
   assert.ok(!/verdict:\s*PASS/i.test(out), "must not report PASS: " + out.slice(-200));
 });
 
-test("security preset installs its pack into the repo and the scanner actually runs", () => {
-  const d = mkdtempSync(join(tmpdir(), "pw-sec-"));
-  const g = (a) => execFileSync("git", ["-C", d, ...a], { env: { ...process.env,
-    GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
-  g(["init", "-q"]);
-  writeFileSync(join(d, "a.js"), "let x = 1;\n");
-  g(["add", "-A"]); g(["commit", "-q", "-m", "one"]);
-  execFileSync(process.execPath, [ENGINE, "init", "--preset", "security"], { cwd: d, encoding: "utf8" });
-  assert.ok(existsSync(join(d, ".promptwheel", "packs", "security", "scan.mjs")), "pack copied into repo");
-  const cfg = JSON.parse(readFileSync(join(d, "promptwheel.config.json"), "utf8"));
-  assert.match(cfg.metrics[0].cmd, /\.promptwheel\/packs\/security\/scan\.mjs/);
-  g(["add", "-A"]); g(["commit", "-q", "-m", "wire promptwheel"]);
-  const out = execFileSync(process.execPath, [ENGINE, "run", "--base", "HEAD", "--head", "HEAD", "--json"], { cwd: d, encoding: "utf8" });
-  const rep = JSON.parse(out);
-  assert.notEqual(rep.metrics[0].status, "unmeasurable", "scanner must actually run");
-});
-
-test("deleting the copied security pack's patterns is GAMED, not an improvement", () => {
+test("gutting a pack copied into .promptwheel is GAMED, not an improvement", () => {
   const d = mkdtempSync(join(tmpdir(), "pw-game-"));
   const g = (a) => execFileSync("git", ["-C", d, ...a], { env: { ...process.env,
     GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
   g(["init", "-q"]);
   writeFileSync(join(d, "app.js"), "const secret = 'AKIA1234567890ABCDEF';\n");
   g(["add", "-A"]); g(["commit", "-q", "-m", "base with a finding"]);
-  execFileSync(process.execPath, [ENGINE, "init", "--preset", "security"], { cwd: d, encoding: "utf8" });
-  g(["add", "-A"]); g(["commit", "-q", "-m", "wire security gate"]);
+  mkdirSync(join(d, ".promptwheel", "packs", "scan"), { recursive: true });
+  writeFileSync(join(d, ".promptwheel", "packs", "scan", "scan.mjs"),
+    "import { readFileSync } from 'node:fs';\nconst { patterns } = JSON.parse(readFileSync(new URL('./patterns.json', import.meta.url), 'utf8'));\nconst text = readFileSync('app.js', 'utf8');\nconsole.log(patterns.filter((p) => new RegExp(p).test(text)).length);\n");
+  writeFileSync(join(d, ".promptwheel", "packs", "scan", "patterns.json"), JSON.stringify({ patterns: ["AKIA[0-9A-Z]{16}"] }) + "\n");
+  writeFileSync(join(d, "promptwheel.config.json"), JSON.stringify({ linkNodeModules: false, metrics: [
+    { name: "findings", cmd: "node .promptwheel/packs/scan/scan.mjs", extract: "number", direction: "down", guard: true },
+  ] }));
+  g(["add", "-A"]); g(["commit", "-q", "-m", "wire the gate"]);
   // the cheat: gut the pattern database, touch nothing else
-  writeFileSync(join(d, ".promptwheel", "packs", "security", "patterns.json"),
+  writeFileSync(join(d, ".promptwheel", "packs", "scan", "patterns.json"),
     JSON.stringify({ patterns: [] }) + "\n");
   g(["add", "-A"]); g(["commit", "-q", "-m", "improve security posture"]);
   let out = "", code = 0;
@@ -1102,6 +985,7 @@ test("deleting the copied security pack's patterns is GAMED, not an improvement"
       { cwd: d, encoding: "utf8" });
   } catch (e) { code = e.status; out = `${e.stdout || ""}`; }
   const rep = JSON.parse(out);
+  assert.equal(rep.metrics[0].status, "improved", "the gutted scanner reads as a win, so the re-run has one to judge");
   assert.notEqual(rep.verdict, "pass", "pattern-gutting must not PASS: " + rep.verdict);
   assert.notEqual(code, 0, "exit must be nonzero");
 });
@@ -1229,21 +1113,6 @@ test('check(): accepts an in-process config object (no config file needed)', () 
   const report = check({ repo: d, base: 'HEAD~1', head: 'HEAD', config: { linkNodeModules: false, metrics: [TODOS] } });
   assert.equal(report.verdict, 'pass', JSON.stringify(report.metrics));
   assert.throws(() => check({ repo: d, config: { metrics: [] } }), /non-empty array/);
-  rmSync(d, { recursive: true, force: true });
-});
-
-// ---------------------------------------------------------- integration: conformance CLI
-test('conformance CLI: a conforming run exits 0; malformed JSON exits 1', () => {
-  const d = tmpRepo([TODOS]);
-  writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
-  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'improve');
-  const ok = pw(d, ['conformance', '--cmd', `node ${ENGINE} run --base HEAD~1 --head HEAD --no-record --json`]);
-  assert.equal(ok.code, 0, ok.out);
-  assert.match(ok.out, /conforms to the Verified-Outcome Contract/);
-  writeFileSync(join(d, 'bad.json'), JSON.stringify({ base: 'a', head: 'b', verdict: 'green', metrics: [] }));
-  const bad = pw(d, ['conformance', 'bad.json']);
-  assert.equal(bad.code, 1, bad.out);
-  assert.match(bad.out, /does NOT conform/);
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -1562,8 +1431,6 @@ test('a broken config exits 64 (EX_USAGE), so a typo can never read as GAMED (2)
   writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, extends: './missing.json', metrics: [TODOS] }));
   r = pw(d, ['run', '--base', 'HEAD', '--head', 'HEAD', '--no-record']);
   assert.equal(r.code, 64, r.out); assert.match(r.out, /extends target not found/);
-  r = pw(d, ['improve']);                                   // missing --attempt
-  assert.equal(r.code, 64, r.out);
   r = pw(d, ['init', '--preset', 'nope']);                  // unknown preset
   assert.equal(r.code, 64, r.out);
   rmSync(d, { recursive: true, force: true });
@@ -1703,8 +1570,7 @@ test('gaming: a source-only patch git cannot apply reads INCONCLUSIVE through th
 test('cli: an unknown flag is a usage error (64) on every command, never silently ignored; --help after a command is help', () => {
   const d = tmpRepo([TODOS]);
   writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
-  for (const argv of [['run', '--bogus-flag', '--no-record'], ['improve', '--attempt', 'true', '--nope'], ['insights', '--jsno'],
-                      ['guards', '--base', 'HEAD'], ['init', '--preset', 'tests-pass', '--forced'], ['conformance', '--cmd', 'true', '--strict']]) {
+  for (const argv of [['run', '--bogus-flag', '--no-record'], ['init', '--preset', 'antihack', '--forced'], ['lock', '--nope']]) {
     const r = pw(d, argv);
     assert.equal(r.code, 64, `${argv.join(' ')} -> ${r.out}`);
     assert.match(r.out, /unknown flag --/, argv.join(' ')); assert.match(r.out, /promptwheel --help/);
@@ -1718,9 +1584,34 @@ test('cli: an unknown flag is a usage error (64) on every command, never silentl
   r = pw(d, ['run', '--base', 'HEAD', '--head', 'HEAD', '--no-record', '--allow', 'a reason', '--markdown']);
   assert.equal(r.code, 0, r.out);
   r = pw(d, ['init', '--list']);
-  assert.equal(r.code, 0, r.out); assert.match(r.out, /tests-pass/);
-  r = pw(d, ['guards', '--json']);
-  assert.equal(r.code, 0, r.out);
+  assert.equal(r.code, 0, r.out); assert.match(r.out, /supply-chain/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ------------------------------------------- 0.8.0: the smaller surface
+test('cli: the removed commands and presets are usage errors (64), never a verdict; the kept presets remain', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  for (const cmd of ['improve', 'insights', 'guards', 'conformance']) {
+    const r = pw(d, [cmd]);
+    assert.equal(r.code, 64, `${cmd} -> ${r.out}`); assert.match(r.out, new RegExp(`unknown command: ${cmd}`));
+  }
+  const listed = pw(d, ['init', '--list']).out.split('\n').filter((l) => l.startsWith('  ')).map((l) => l.trim().split(/\s+/)[0]);
+  assert.deepEqual(listed.sort(), ['antihack', 'no-ai-tells', 'supply-chain']);
+  for (const preset of ['tests-pass', 'lint', 'bundle-size', 'security', 'llm-eval', 'security-antihack']) {
+    const r = pw(d, ['init', '--preset', preset, '--force']);
+    assert.equal(r.code, 64, `${preset} -> ${r.out}`); assert.match(r.out, /unknown preset/);
+  }
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('run: --no-record stays accepted (Sawbuck passes it on every check) and no run writes a record', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'fix');
+  assert.equal(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']).code, 0);
+  assert.equal(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json']).code, 0);
+  assert.equal(existsSync(join(d, '.promptwheel')), false);
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -1733,15 +1624,14 @@ test('plugin: the plugin version matches the marketplace entry', () => {
 });
 
 // ------------------------------------------------------ review 4: check({ repo }) from a subdirectory
-test('check: a repo path that names a subdirectory gates at the repository root (root config, root record)', () => {
+test('check: a repo path that names a subdirectory gates at the repository root', () => {
   const d = tmpRepo([TODOS]);
   mkdirSync(join(d, 'packages', 'api'), { recursive: true });
   writeFileSync(join(d, 'packages', 'api', 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
   writeFileSync(join(d, 'packages', 'api', 'app.js'), 'a\n');
-  const r = check({ repo: join(d, 'packages', 'api'), working: true, record: true });
+  const r = check({ repo: join(d, 'packages', 'api'), working: true });
   assert.equal(r.verdict, 'pass', JSON.stringify(r.metrics));
   assert.equal(r.metrics[0].name, 'todos', 'the ROOT config was used, not an auto-config of the subdir');
-  assert.equal(existsSync(join(d, '.promptwheel', 'outcomes.jsonl')), true, 'the record is written at the root');
   assert.equal(existsSync(join(d, 'packages', 'api', '.promptwheel')), false, 'nothing is written in the subdir');
   rmSync(d, { recursive: true, force: true });
 });

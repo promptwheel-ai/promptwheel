@@ -38,7 +38,7 @@ A smaller bundle that came from **relaxing the size config** rather than the sou
 See **[`reliability-sprint/`](reliability-sprint/)** - gates `eval_pass_rate` (up) and `cost_per_run_usd` (down). Catches a higher pass-rate bought by **deleting hard eval cases, editing the golden answers, or mocking the scorer** - all caught in [`../bench/RESULTS.md`](../bench/RESULTS.md).
 
 ---
-**One mechanism, every stack:** revert the test/config/grader/golden edits, re-run *your* gate, see if the win survives. `--detect-gaming` is on by default in `run` and `improve`; `--no-detect-gaming` for the bare gate.
+**One mechanism, every stack:** revert the test/config/grader/golden edits, re-run *your* gate, see if the win survives. `--detect-gaming` is on by default in `run`; `--no-detect-gaming` for the bare gate.
 
 ## Runnable demos
 - **[`catch-a-cheat/`](catch-a-cheat/)** - the 60-second "watch it fire": an agent greens a suite by editing the test → `GAMED`.

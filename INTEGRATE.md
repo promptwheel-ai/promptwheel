@@ -72,11 +72,7 @@ truncated SHA-256 fingerprint of the gate definition (metrics, guards, `evaluato
 and lists any guard the change dropped to hide a regression; a non-empty `gate.weakened`
 forces `gamed`, so an agent cannot pass by disabling the guard it is judged by.
 
-Self-check your implementation against this schema (see Section 4 below):
-
-```bash
-your-tool --json | promptwheel conformance -
-```
+Self-check your implementation against this schema with `conformsToContract` (see Section 4 below).
 
 ---
 
@@ -135,7 +131,6 @@ Returns the Section 2 verdict object (identical to `run --json`). Reproducible f
 | `repeat` | number | `config.repeat ?? 1` | measurement repeats for the noise band |
 | `detectGaming` | boolean | `true` | run the Section 3 source-only re-proof |
 | `allow` | string | none | a declared override reason (the same as `--allow` / a `Promptwheel-Allow:` trailer): a would-be `gamed`, or an `unprovable` win (its source-only re-run could not be applied), reads `pass` with the reason recorded in `report.allowed` |
-| `record` | boolean | `false` | append the run to `.promptwheel/outcomes.jsonl` |
 
 Preconditions throw (they do not exit the host): not inside a git repository; `auto: false`
 with no `promptwheel.config.json` and no `config` option; a `config` with no non-empty
@@ -173,22 +168,19 @@ of truth instead of hardcoding the strings.
 
 ---
 
-## 4. Self-check with `promptwheel conformance`
+## 4. Self-check with `conformsToContract`
 
 Prove your own check, loop, or CI step speaks the Contract.
 
-```bash
-# validate a verdict JSON (from a file or stdin) against the Section 2 schema
-promptwheel conformance report.json
-cat report.json | promptwheel conformance -
+```js
+import { conformsToContract, verdictExitCode } from 'promptwheel';
 
-# run a command, then validate BOTH its --json stdout (Section 2)
-# AND that its exit code matches the verdict (Section 1)
-promptwheel conformance --cmd "your-tool --json"
+const { ok, errors } = conformsToContract(JSON.parse(reportJson));   // Section 2
+const exitMatches = exitCode === verdictExitCode(report.verdict);    // Section 1
 ```
 
-Exit `0` if it conforms, `1` otherwise, listing every problem. This is how a third-party
-implementation earns the right to say "Verified-Outcome Contract compatible."
+`ok` is `true` when the report conforms; otherwise `errors` lists every problem. This is how a
+third-party implementation earns the right to say "Verified-Outcome Contract compatible."
 
 ---
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.0 (2026-11-05): a smaller surface
+
+Breaking for anyone who used these directly. Sawbuck, the GitHub Action, and the verdict contract are unchanged.
+
+- **Commands removed:** `improve`, `insights`, `guards`, `conformance`. Each now exits 64 as an unknown command. `conformsToContract` stays in the library and does what `conformance` did.
+- **Presets removed:** `tests-pass`, `lint`, `bundle-size`, `security`, `llm-eval`, `security-antihack`, and `packs/security`. Each now exits 64 as an unknown preset. Configs already written by them keep working, and a pack already copied into `.promptwheel/packs/` keeps running. `antihack` (the `init` default), `no-ai-tells` and `supply-chain` stay.
+- **No outcome record.** A run no longer writes `.promptwheel/outcomes.jsonl`; only `insights` and `guards` read it. `--no-record` stays accepted and does nothing. The `record` config key and the `record` option of `check()` are ignored.
+- **Plugin 0.1.15:** the `/promptwheel:improve` and `/promptwheel:insights` skills are gone.
+
 ## 0.7.12 (2026-11-04): adopting a contract no longer fails its own commit
 
 - A guard the change adds has no value at base, because its scanner did not exist there; it now starts counting from head (`adopted: true` on the metric) instead of failing as unmeasurable. A guard the base contract already had still fails when it cannot be measured, and removing one is still caught.
