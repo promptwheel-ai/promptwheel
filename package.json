@@ -1,6 +1,6 @@
 {
   "name": "promptwheel",
-  "version": "0.7.15",
+  "version": "0.7.16",
   "description": "A deterministic, zero-LLM check for your coding loop. A win must survive a re-run from the agent's source edits alone, so a test that went green by editing the test reads GAMED. Runs in CI or a Claude Code plugin.",
   "type": "module",
   "bin": {
