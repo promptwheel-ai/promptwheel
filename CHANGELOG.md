@@ -2,6 +2,7 @@
 
 ## 0.8.1 (2026-11-05): claims checked against the code
 
+- **Two cheats in one change.** A guard swapped or renamed in the same change that edits the test green is judged under the old definition, source-only re-run included, and reads `GAMED`. A file dropped from `evaluatorPaths` in the change that edits it still counts as a goalpost. Stated limits: a build script the unchanged `setup` runs, and a base config that extends a file outside the repository.
 - **A guard measured another way is a gate change.** The gate fingerprint now includes each metric's `cmd` and how it is read (`extract`, `direction`, `exact`, `report`), at both refs and through `extends`. A guard whose definition changed is re-measured under the base definition; if it would have failed, or would still fail, the verdict is `gamed` (`gate.weakened[].change: guard-edited`). Before, setting `tests_pass.cmd` to `true` hid a real regression and read `pass`. `--allow` clears it like any gate change. Fingerprints and `configHash` differ from 0.8.0 for every config.
   Replacing the placeholder test command that `init` writes is setup, not a weakened gate: it reads as a gate change only.
 - **A person can accept a hooks change.** In the supply-chain preset `hooks-frozen` now takes `--allow "<reason>"`, like the contract and the lock, so a team can commit shared hooks to a repo that is already set up. A commit trailer still clears nothing.

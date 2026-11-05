@@ -766,7 +766,10 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
     const res = measureSourceOnlyAll(repo, base, head, defs, baseRun, repeat);
     for (const m of held) { const r = res[m.name]; if (r && r.samples && r.samples.length && median(r.samples) !== 1) m.heldByTestEdit = true; }
   }
-  const evalChanged = changedEvaluatorPaths(repo, base, head, cfg);
+  // a file declared as a goalpost before this change still is one for this change: dropping the declaration in the
+  // same diff that edits the file does not make the edit count as source
+  const declared = [...new Set([...(cfg.evaluatorPaths || []), ...((baseGate && baseGate.scalars.evaluatorPaths) || [])])];
+  const evalChanged = changedEvaluatorPaths(repo, base, head, { ...cfg, evaluatorPaths: declared });
   if (evalChanged.length) {
     for (const m of metrics) {
       if (m.status !== 'improved' || m.gamed === true) continue;
@@ -786,13 +789,25 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
     const defs = weak.map((w) => w.def);
     const b = measureAt(repo, base, { ...baseRun, metrics: defs }, repeat);
     const a = measureAt(repo, head, { ...baseRun, metrics: defs }, repeat);
+    const evs = new Map();
     for (const w of weak) {
       const ev = evaluate(w.def, b[w.name], a[w.name], repeat);
+      evs.set(w.name, ev);
       // an edited guard that still fails under its old definition was turned green by the edit, not the code
       let hidden = !ev.ok || (w.change === 'guard-edited' && ev.inert);
       // a guard measured another way counts only when the new measurement hides it: it fails the old way and reads fine the new way
       if (w.change === 'measurement-edited') { const hm = metrics.find((x) => x.name === w.name); hidden = (!ev.ok || !!ev.inert) && !!hm && hm.ok && !hm.inert; }
       if (hidden) weakened.push({ name: w.name, change: w.change, status: ev.inert ? 'failed' : ev.status });
+    }
+    // a win under the old definition still has to be earned in the source: swapping or renaming the guard in the same
+    // change does not skip the source-only re-run
+    const won = weak.filter((w) => w.def.gamingCheck !== false && !weakened.some((x) => x.name === w.name) && evs.get(w.name).status === 'improved');
+    if (won.length) {
+      const src = measureSourceOnlyAll(repo, base, head, won.map((w) => w.def), baseRun, repeat);
+      for (const w of won) {
+        const j = judgeGaming({ name: w.name, direction: w.def.direction || 'up', guard: true, ...evs.get(w.name) }, src[w.name], w.def.gamingThreshold ?? (bs && bs.gamingThreshold) ?? 0.5);
+        if (j.gamed) weakened.push({ name: w.name, change: w.change, status: 'gamed' });
+      }
     }
   }
   // the fingerprint is of a config file: `base` stays null when there was none there (the zero-config gate is not a file)

@@ -2132,6 +2132,65 @@ test('supply-chain: a person can accept a hooks change with --allow; a trailer c
   rmSync(d, { recursive: true, force: true });
 });
 
+// two cheats in one change: the guard is swapped or renamed AND the test is edited, so the old guard "passes" too
+const TPG = { name: 'tests_pass', cmd: 'node app.test.js', extract: 'exit', direction: 'pass', guard: true };
+const SRC_BAD = 'module.exports = { add: (a, b) => a - b };\n', SRC_GOOD = 'module.exports = { add: (a, b) => a + b };\n';
+const T_HONEST = "require('assert').strictEqual(require('./src').add(2, 3), 5);\n", T_RIGGED = "require('assert').strictEqual(require('./src').add(2, 3), -1);\n";
+function comboRepo(config) {
+  const d = mkdtempSync(join(tmpdir(), 'pw-combo-'));
+  for (const x of [['init', '-q'], ['config', 'user.email', 't@t'], ['config', 'user.name', 't']]) execFileSync('git', x, { cwd: d });
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, ...config }));
+  writeFileSync(join(d, 'src.js'), SRC_BAD); writeFileSync(join(d, 'app.test.js'), T_HONEST); commitAll(d, 'base (red)');
+  return d;
+}
+const verdictOf = (d) => { const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json']); return { code: r.code, rep: reportOf(r.out) }; };
+test('gate integrity: a guard swapped to `true` in the change that also edits the test green reads GAMED; swapped alongside a real fix it passes', () => {
+  let d = comboRepo({ metrics: [TPG] });
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [{ ...TPG, cmd: 'true' }] })); writeFileSync(join(d, 'app.test.js'), T_RIGGED); commitAll(d, 'cheat');
+  let v = verdictOf(d); assert.equal(v.code, 2, JSON.stringify(v.rep.gate)); assert.equal(v.rep.verdict, 'gamed');
+  rmSync(d, { recursive: true, force: true });
+  d = comboRepo({ metrics: [TPG] });
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [{ ...TPG, cmd: 'node ./app.test.js' }] })); writeFileSync(join(d, 'src.js'), SRC_GOOD); commitAll(d, 'real fix, new command');
+  v = verdictOf(d); assert.equal(v.code, 0, JSON.stringify(v.rep.gate)); assert.equal(v.rep.gate.weakened, undefined);
+  rmSync(d, { recursive: true, force: true });
+});
+test('gate integrity: a guard renamed with its re-run switched off, in the change that edits the test green, reads GAMED; renamed alongside a real fix it passes', () => {
+  let d = comboRepo({ metrics: [TPG] });
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [{ ...TPG, name: 'suite', gamingCheck: false }] })); writeFileSync(join(d, 'app.test.js'), T_RIGGED); commitAll(d, 'cheat');
+  let v = verdictOf(d); assert.equal(v.code, 2, JSON.stringify(v.rep.gate)); assert.equal(v.rep.verdict, 'gamed');
+  rmSync(d, { recursive: true, force: true });
+  d = comboRepo({ metrics: [TPG] });
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [{ ...TPG, name: 'suite' }] })); writeFileSync(join(d, 'src.js'), SRC_GOOD); commitAll(d, 'real fix, renamed guard');
+  v = verdictOf(d); assert.equal(v.code, 0, JSON.stringify(v.rep.gate)); assert.equal(v.rep.gate.weakened, undefined);
+  rmSync(d, { recursive: true, force: true });
+});
+test('gate integrity: an evaluatorPath dropped in the change that edits that file to win still counts; dropped with the file untouched it is only a gate change', () => {
+  const GATE = { name: 'gate', cmd: 'node check.js', extract: 'exit', direction: 'pass', guard: true };
+  const mk = () => { const d = mkdtempSync(join(tmpdir(), 'pw-combo-')); for (const x of [['init', '-q'], ['config', 'user.email', 't@t'], ['config', 'user.name', 't']]) execFileSync('git', x, { cwd: d });
+    writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, evaluatorPaths: ['limits.json'], metrics: [GATE] }));
+    writeFileSync(join(d, 'limits.json'), '{"max":1}\n'); writeFileSync(join(d, 'check.js'), "process.exit(require('./limits.json').max >= 5 ? 0 : 1);\n"); commitAll(d, 'base (red)'); return d; };
+  let d = mk();
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [GATE] })); writeFileSync(join(d, 'limits.json'), '{"max":9}\n'); commitAll(d, 'cheat');
+  let v = verdictOf(d); assert.equal(v.code, 2, JSON.stringify(v.rep)); assert.equal(v.rep.verdict, 'gamed');
+  rmSync(d, { recursive: true, force: true });
+  d = mk();
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics: [GATE] })); commitAll(d, 'drop the declaration only');
+  v = verdictOf(d); assert.notEqual(v.rep.verdict, 'gamed', JSON.stringify(v.rep));
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('limit: a build script that the unchanged setup runs is source, so a change that makes it rewrite a test is not seen', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-combo-'));
+  for (const x of [['init', '-q'], ['config', 'user.email', 't@t'], ['config', 'user.name', 't']]) execFileSync('git', x, { cwd: d });
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, setup: 'npm run build --silent', metrics: [TPG] }));
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x', scripts: { build: 'true' } }));
+  writeFileSync(join(d, 'src.js'), SRC_GOOD); writeFileSync(join(d, 'app.test.js'), T_HONEST); commitAll(d, 'base (green)');
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x', scripts: { build: 'echo > app.test.js' } })); writeFileSync(join(d, 'src.js'), SRC_BAD); commitAll(d, 'break the source, rig the build');
+  // stated in the README: a cheat that lives in the source or the build is outside what a source-only re-run can see
+  assert.equal(verdictOf(d).code, 0);
+  rmSync(d, { recursive: true, force: true });
+});
+
 const GRADER_PATHS = ['grader.py', 'eval.py', 'grader.sh', 'eval.sh', 'score.py', 'evals/check.py', 'graders/check.sh', 'scripts/grade.sh', 'grade.js', 'evals/run.js'];
 test('isNonSource: a grader, eval or score script in any scripting language, and anything under evals/ or graders/, is non-source', () => {
   for (const p of [...GRADER_PATHS, 'tools/eval_model.py', 'grader/rubric.rb', 'evals/fixtures.json', 'packages/x/evals/judge.ts', 'scoring.R'])
