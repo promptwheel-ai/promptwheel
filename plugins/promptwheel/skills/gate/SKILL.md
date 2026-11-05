@@ -7,7 +7,7 @@ allowed-tools: ["Bash(promptwheel:*)"]
 Run the PromptWheel outcome gate on the current uncommitted changes.
 
 1. Run via Bash: `promptwheel run --working $ARGUMENTS`
-2. If the command is not found, stop and tell me; I will set it up myself (promptwheel.com has the one line). Do not set it up for me.
+2. If the command is not found, stop and tell me; I will set it up myself (`npm i -g promptwheel`). Do not set it up for me.
 3. If there is no `promptwheel.config.json` in the repo, run `promptwheel init` first (it detects the stack and writes a starter config), then re-run the gate.
 4. Read the verdict (the exit code is the contract) and report concisely:
    - **PASS (exit 0)** - which metrics improved (plus any informational / within-noise ones).

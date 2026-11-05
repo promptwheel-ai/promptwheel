@@ -69,7 +69,7 @@ Gaming detection is on by default in `run`; `--no-detect-gaming` gives you the b
     config, or grader, not the source, so revert and earn it in the source. Exit 1 means a guarded
     metric regressed, revert that too. Never weaken, skip, or delete a test to go green.
 
-**Two callers, by design.** Your *agent* consumes the verdict as a per-turn signal (`run --working --json`). The *harness* (a Stop-hook, or CI) runs the same check as an audit the agent cannot self-clear, because the check re-proves from the source alone and never asks the code to grade itself. See [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md) for the three places to enforce it.
+**Two callers, by design.** Your *agent* consumes the verdict as a per-turn signal (`run --working --json`). The *harness* (a Stop-hook, or CI) runs the same check as an audit the agent cannot self-clear, because the check re-proves from the source alone and never asks the code to grade itself. See [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md) for the two places to enforce it.
 
 ## Config, `promptwheel.config.json`
 

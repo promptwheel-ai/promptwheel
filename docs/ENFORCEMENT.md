@@ -1,4 +1,4 @@
-# Enforcing `--detect-gaming` - making "the agent can't skip it" real
+# Enforcing the check: making "the agent can't skip it" real
 
 A check the agent *chooses* to run is a suggestion. **Enforcement** means: a `GAMED` verdict **mechanically blocks the thing the agent is trying to get** - a kept commit, a merge, a "done" - and the gate is run by **something the agent doesn't control.**
 
@@ -8,7 +8,7 @@ There are two places to put it. Use the hook for fast in-session feedback; use C
 
 ## 1. CI + branch protection - the hard backstop (can't be looped past)
 
-The Action runs `--detect-gaming` on every PR; a `GAMED` verdict fails the check. Then a **branch-protection rule** makes that check a *merge requirement* - the merge button is disabled until it's green, and the PR author (human or agent) can't change the rule.
+The Action runs the check on every PR; a `GAMED` verdict fails the check. Then a **branch-protection rule** makes that check a *merge requirement* - the merge button is disabled until it's green, and the PR author (human or agent) can't change the rule.
 
 ```yaml
 # .github/workflows/promptwheel.yml  (the repo already ships action.yml)
@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - run: npx promptwheel run --detect-gaming   # exit 2 = GAMED → check fails
+      - run: npx promptwheel run   # gaming detection is on by default; exit 2 = GAMED → check fails
 ```
 
 Then in **Settings → Branches → Branch protection rules**: require the `PromptWheel` check to pass before merging (and "Include administrators" if you want it to bind you too). This runs on GitHub's servers - the agent has no access to the runner or the protection rule, so it's the layer that truly can't be skipped.

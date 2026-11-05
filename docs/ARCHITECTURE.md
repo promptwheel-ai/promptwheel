@@ -1,6 +1,6 @@
 # Architecture (v0)
 
-The whole engine is `bin/promptwheel.mjs` (~1290 LOC, Node ESM, zero deps). It is intentionally a single file - importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
+The whole engine is `bin/promptwheel.mjs` (about 1,500 lines, Node ESM, zero deps). It is intentionally a single file - importable (pure helpers are exported for unit tests) that runs the CLI only when invoked directly.
 
 ## Flow
 
@@ -33,7 +33,7 @@ The working tree is **never** touched - every read happens in a temp worktree th
 | `pr-allow` | read a PR's comments as JSON on stdin and print the newest `sawbuck-allow:` reason from someone with write access (the Action's approval step) |
 
 ### detect-gaming (antihack)
-`run --detect-gaming` re-proves every *win* from the agent's source edits **alone**. After the normal gate, it partitions the head diff into **production source** vs. **`{test, config, grader, golden}`** files, rebuilds a clean worktree at the base with **only the source slice** applied, and re-runs the gate. If a guarded win does **not** survive that source-only re-run - because it passed by editing/skipping a test, mocking the grader, editing a golden, relaxing config, or touching zero source files - the verdict is **`GAMED`** (exit 2). Metrics with `gamingCheck: false` are exempt from the re-run (test-side tripwires whose gains legitimately live in test files; the `antihack` preset sets this). A change is judged by the gate that was in force before it: `gamingCheck: false` set on a metric that had the re-run on, a lower `gamingThreshold`, and an edited `setup`, `env` or `linkDirs` all apply from the next change, and a change that adds the first config is compared with the zero-config gate (the detected test command). Deterministic, zero-LLM: a diff partition plus a re-run, so every flag is reproducible with a human-readable reason. The 50%-of-gain-survives threshold is the default and is tunable. See `DETECTION-LAYERS.md` for scope and `../bench/RESULTS.md` for measured recall.
+`run` re-proves every *win* from the agent's source edits **alone**. After the normal gate, it partitions the head diff into **production source** vs. **`{test, config, grader, golden}`** files, rebuilds a clean worktree at the base with **only the source slice** applied, and re-runs the gate. If a guarded win does **not** survive that source-only re-run - because it passed by editing/skipping a test, mocking the grader, editing a golden, relaxing config, or touching zero source files - the verdict is **`GAMED`** (exit 2). Metrics with `gamingCheck: false` are exempt from the re-run (test-side tripwires whose gains legitimately live in test files; the `antihack` preset sets this). A change is judged by the gate that was in force before it: `gamingCheck: false` set on a metric that had the re-run on, a lower `gamingThreshold`, and an edited `setup`, `env` or `linkDirs` all apply from the next change, and a change that adds the first config is compared with the zero-config gate (the detected test command). Deterministic, zero-LLM: a diff partition plus a re-run, so every flag is reproducible with a human-readable reason. The 50%-of-gain-survives threshold is the default and is tunable. See `DETECTION-LAYERS.md` for scope and `../bench/RESULTS.md` for measured recall.
 
 ## Config schema - `promptwheel.config.json`
 
@@ -51,7 +51,7 @@ The working tree is **never** touched - every read happens in a temp worktree th
       "extract": "number",     // number | lines | exit | { "regex": "coverage: (\\d+)" }
       "direction": "down",     // up (higher better) | down (lower better) | pass (boolean 0/1)
       "guard": true,           // true = a trusted regression FAILS the gate; false = informational
-      "gamingCheck": true,     // (default true) include this metric in --detect-gaming's source-only re-run; false exempts test-side tripwires whose gains legitimately live in test files (the antihack preset sets this on its tripwires)
+      "gamingCheck": true,     // (default true) include this metric in the source-only re-run; false exempts test-side tripwires whose gains legitimately live in test files (the antihack preset sets this on its tripwires)
       "timeoutSec": 300
     }
   ]
@@ -88,7 +88,7 @@ So `--repeat` is how you trade time for trust: it earns a real confidence label 
 ```jsonc
 {
   "base": "a1b2c3d", "head": "e4f5g6h", "repeat": 5, "mode": "refs",
-  "verdict": "pass",             // pass | fail | gamed | inconclusive  (gamed only with --detect-gaming; inconclusive = an inert guard measured nothing - exit 3)
+  "verdict": "pass",             // pass | fail | gamed | inconclusive  (gamed detection is on by default, --no-detect-gaming turns it off; inconclusive = an inert guard measured nothing - exit 3)
   "metrics": [
     { "name": "lint_errors", "direction": "down", "guard": true,
       "before": 12, "after": 7, "delta": -5,
