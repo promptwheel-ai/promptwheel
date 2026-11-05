@@ -768,6 +768,7 @@ test('run: a default run in a repo with no origin/main prints nothing from git',
 test('run: the hint on a protected path says how to accept it: --allow for a rule that takes it, a change of its own for one that does not', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-hint-'));
   execFileSync('git', ['init', '-q'], { cwd: d });
+  execFileSync('git', ['config', 'user.email', 't@t'], { cwd: d }); execFileSync('git', ['config', 'user.name', 't'], { cwd: d });
   writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x' }));
   assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0);
   commitAll(d, 'contract');
@@ -2113,6 +2114,7 @@ test('setup: a base config that extends a file outside the repository is not com
 test('supply-chain: a person can accept a hooks change with --allow; a trailer cannot, and a workflow stays frozen either way', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-hooks-'));
   execFileSync('git', ['init', '-q'], { cwd: d });
+  execFileSync('git', ['config', 'user.email', 't@t'], { cwd: d }); execFileSync('git', ['config', 'user.name', 't'], { cwd: d });
   mkdirSync(join(d, 'src')); writeFileSync(join(d, 'src/a.js'), 'export const a = 1;\n');
   writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x' }));
   assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0);
