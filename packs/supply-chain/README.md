@@ -27,7 +27,7 @@ clean git worktrees, so a pack that is not in git is absent at both refs and the
   count. A private registry mirror makes this baseline large, not failing.
 - **unpinned_execution**: code run from a reference that can move. A GitHub Action not pinned to a full commit SHA (a local `./action` does not count), `npx`, `bunx` or `dlx` with no exact version, `npm install -g` with no exact version, and a remote script piped into a shell. Read from workflows, `action.yml`, package.json scripts, `scripts/*.sh` and Dockerfiles. In package.json scripts, a tool the manifest declares does not count: the lockfile already pins it.
 - **install_policy_gaps**: 0, 1 or 2. Are install scripts disabled, and is a release-age cooldown set (`ignore-scripts=true` and `min-release-age` in `.npmrc`, or the pnpm or yarn equivalents)? The cooldown is enforced by the package manager, not by this pack: a registry lookup here would make the verdict depend on the clock.
-- **lock_drift**: structural items the tree has that `promptwheel.lock.json` does not. `promptwheel lock` reads the repo once and writes its shape: dependencies, install scripts, workflows, modules, import edges between modules, routes, public entry points, and the network hosts the source names. It also records each script's body, native binaries, and what a module can do (network, process spawning, eval), so a new capability shows even when the host is built at runtime. Ordinary edits never touch it. A new route is reported but not held by default; add `--routes` to hold it. On 1,403 commits across eight repositories this guard would have stopped 5.1%, about one in 20. JS and TS only for edges, routes, hosts and capabilities today.
+- **lock_drift**: structural items the tree has that `promptwheel.lock.json` does not. `promptwheel lock` reads the repo once and writes its shape: dependencies, install scripts, workflows, modules, import edges between modules, routes, public entry points, and the network hosts the source names. It also records each script's body, native binaries, and what a module can do (network, process spawning, eval), so a new capability shows even when the host is built at runtime. Ordinary edits never touch it. A new route is locked but not counted by default (`lock.mjs drift . --list` shows it); add `--routes` to the `lock_drift` command in your config to hold it. On 1,403 commits across eight repositories this guard would have stopped 5.1%, about one in 20. JS and TS only for edges, routes, hosts and capabilities today.
 - **pins_changed**: a fingerprint of the resolved dependency tree, compared base to head, because a new version under an old name is how a worm arrives. It covers every package, version, source and integrity, not the file's bytes, so a release of your own project does not count. Any change needs a reason. Nothing is stored, so the lock does not change across updates and an approved update does not blind the next check. On the same commits this stopped 8.7%, dependency changes; use the CI path below for those.
 
 **On a pull request.** Someone with write access comments `sawbuck-allow: <reason>` and re-runs the check. `sawbuck contract` marks everyday guards `report: true`, so they note a change without failing until you tighten them; this preset on its own holds them all.
@@ -57,10 +57,10 @@ Sometimes adding a dependency is exactly what was asked. Say so, and the gate re
 promptwheel run --working --allow "needed for the CSV export (papaparse)"
 ```
 
-or a `Promptwheel-Allow: <reason>` trailer on the commit. The seven metrics carry `allowable: true`,
-which means a declared reason clears their guarded regression for that one run, with the reason
-written into `report.allowed` and the outcome record. Nothing is loosened in the config, and a rise
-without a reason still fails. That is the point: every added package, script, or non-registry
+A commit trailer does not count here. The seven metrics carry `allowable: "flag"`, which means a
+reason from the `--allow` flag clears their guarded regression for that one run, with the reason
+written into `report.allowed`. Nothing is loosened in the config, and a rise without a reason still
+fails. That is the point: every added package, script, or non-registry
 source leaves an audit line a reviewer can read.
 
 `gamingCheck` is `false` on all seven because these numbers legitimately live in config files
@@ -69,8 +69,8 @@ flag every honest dependency bump.
 
 ## The mandates the preset writes
 
-A mandate is a path the agent must not touch in a change; the gate fails before any metric is read,
-and a mandate deleted or narrowed in the same change that violates it stays in force.
+A mandate is a path the agent must not touch in a change. Touching one fails the gate whatever the
+metrics say, and a mandate deleted or narrowed in the same change that violates it stays in force.
 
 | mandate | paths | why |
 | --- | --- | --- |
@@ -79,15 +79,19 @@ and a mandate deleted or narrowed in the same change that violates it stays in f
 | build-images-frozen | `Dockerfile*`, `docker-compose*` | what runs at build and deploy time |
 | publish-scripts-frozen | `scripts/release*`, `scripts/publish*` | the publish path is how a compromise spreads |
 | codeowners-frozen | `CODEOWNERS` | review ownership is set by people |
+| scanner-frozen | `.promptwheel/packs/**` | the scanners are not edited by the change they read |
 | contract-frozen | `promptwheel.config.json`, `sawbuck.config.json` | the contract changes with a reason from a person (`--allow`) |
+| lock-frozen | `promptwheel.lock.json` | the lock changes with a reason from a person (`--allow`) |
 | hooks-frozen | `.claude/settings.json`, `.claude/settings.local.json`, `.sawbuck/**` | the hooks that enforce the contract are wired by a person |
 
 The contract itself (`promptwheel.config.json`, `sawbuck.config.json`) is frozen too, and it is also an
 `evaluatorPaths` entry. A change to it needs `--allow "<reason>"` from a person. Without that, a change that
 only weakens a rule would pass, and the next change would be judged by the weakened contract.
 
-A person who needs to change a frozen path does it in a separate change that only touches that
-path, reviewed as such.
+`--allow` clears only two of these: `contract-frozen` and `lock-frozen`. Every other frozen path stays
+frozen, even with `--allow`. To change one, a person first retires its mandate in a change of its own
+(it edits the contract, so it needs `--allow`), then makes the change, then puts the mandate back the
+same way.
 
 ## What this is not
 
@@ -100,5 +104,4 @@ path, reviewed as such.
 - **Not a scanner.** No matchers, no findings, no false positives to triage: a path, a count, or a
   hash.
 
-Pair it with the `security` preset for the eight code-level invariants, and with the GitHub Action so
-the gate runs where the agent cannot switch it off.
+Pair it with the GitHub Action so the gate runs where the agent cannot switch it off.

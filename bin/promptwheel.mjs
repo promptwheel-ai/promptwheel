@@ -266,9 +266,12 @@ const NON_SOURCE = [
   /_spec\.rb$/i,
   /[a-z0-9](Test|Tests)\.(java|kt|kts|scala)$/,
   /\.snap$/i, /(^|\/)golden[^/]*$/i, /\.golden$/i,
-  // a grader/eval/score FILE by name (eval.ts, grader-x.js, score.test.mjs, scoring.ts), never a prefix:
-  // evaluate.ts, evaluation.js, scoreboard.js are production source and must stay in the slice
-  /(^|\/)(eval|evals|grader|graders|score|scorer|scoring)([._-][^/]*)?\.[cm]?[jt]s$/i,
+  // a grader/eval/score FILE by name in a scripting language (eval.py, grader-x.js, grade.sh, scoring.ts), never a
+  // prefix: evaluate.ts, evaluation.py, scoreboard.js stay source. Compiled names stay source too (eval.c, eval.go
+  // are interpreters; Score.java is a type), and so do .tsx/.vue files (a Score component, a /score page).
+  /(^|\/)(eval|evals|grade|grader|graders|score|scorer|scoring)([._-][^/]*)?\.([cm]?[jt]s|py|sh|bash|zsh|rb|pl|php|lua|r|jl)$/i,
+  // anything under an evals/ or grader(s)/ directory. Not eval/ (an interpreter's package) or scoring/ (a product module).
+  /(^|\/)(evals|graders?)\//i,
   // config files only, require a .config/.conf/.setup segment so PRODUCTION source that
   // happens to be named after a tool (e.g. src/installers/eslint.ts) is NOT swept out of
   // the source slice (a false sweep here can flag an honest win as GAMED).
@@ -311,9 +314,9 @@ function evaluatorMatcher(cfg) {
 // forbids ANY change to its paths (same glob semantics as evaluatorPaths). A hit fails the gate
 // regardless of metrics and rides at the top of the report; mandates inherit through `extends`,
 // so a parent scope's rule holds for every repo beneath it.
-// The mandates in force are the UNION of the head config's and the base ref's (`baseMandates`,
-// resolved by gateDefAtRef): deleting a mandate in the same change that violates it does not
-// clear it. A mandate removed at head but violated in the diff is reported with `removed: true`; one
+// The mandates in force are the base ref's (`baseMandates`, resolved by gateDefAtRef), in their head
+// version when both have them: deleting a mandate in the same change that violates it does not
+// clear it, and one the change adds does not apply to it (see below). A mandate removed at head but violated in the diff is reported with `removed: true`; one
 // whose paths were edited at head (same name, different paths) is tested in BOTH versions and reported
 // with `edited: true`, so narrowing a rule in the change that breaks it does not clear it either.
 // The honest way to retire one is a separate change that only edits the config.
@@ -482,12 +485,14 @@ function workingSnapshot(repo) {
   }
 }
 
-// self-heal: a hard-killed run (SIGKILL / power loss) can leave an orphaned worktree, 
+// self-heal: a hard-killed run (SIGKILL / power loss) can leave an orphaned worktree,
 // its `finally` never ran. On the next run, drop stale worktree registry entries and any
-// abandoned /tmp checkout, so nothing accumulates in your repo or temp dir. Never touches a
-// live worktree (a still-registered dir, or this repo's checkout younger than 1h). A dir tagged
-// for ANOTHER repo may be mid-measurement, so it gets a full day; after that it is an orphan of a
-// repo that was deleted or moved (a new real path is a new tag nobody will ever claim).
+// abandoned /tmp checkout, so nothing accumulates in your repo or temp dir. Ages, by dir mtime:
+// this repo's unregistered checkout after 1h; this repo's still-registered worktree after a full day
+// (a killed run leaves it registered, and a younger one may be a concurrent gate still measuring);
+// a dir tagged for ANOTHER repo, or untagged, after a full day (an orphan of a repo that was deleted
+// or moved: a new real path is a new tag nobody will ever claim). A registered worktree that is not
+// tagged for this repo is never touched: it may be yours.
 function selfHeal(repo) {
   try {
     git(['worktree', 'prune'], repo); // remove registry entries whose dir is already gone (always safe)
@@ -501,11 +506,12 @@ function selfHeal(repo) {
       if (!name.startsWith('promptwheel-') && !name.startsWith('pw-idx-')) continue; // worktrees + temp-index dirs
       const tag = (name.match(TAGGED) || [])[2] || null;
       // ours after an hour; another repo's, or an untagged dir (an older engine's), only after a full day
-      const maxAge = tag === mine ? 3600_000 : 86_400_000;
       const p = join(tmp, name);
-      if (tracked.has(p)) continue;                   // a live/registered worktree, leave it
+      if (tracked.has(p) && tag !== mine) continue;   // a registered worktree this repo's gate did not make
+      const maxAge = tag === mine && !tracked.has(p) ? 3600_000 : 86_400_000;
       try { if (statSync(p).mtimeMs < now - maxAge) rmSync(p, { recursive: true, force: true }); } catch { /* */ }
     }
+    git(['worktree', 'prune'], repo);   // drop the registry entries of anything removed above
   } catch { /* cleanup must never block the gate */ }
 }
 
@@ -573,11 +579,13 @@ function gateDefAtRef(repo, ref) {
   return resolve('promptwheel.config.json');
 }
 
+// how a metric is measured and judged: change any of these on a guard and it is a different guard
+const measuredBy = (m) => JSON.stringify([m.cmd ?? null, m.extract ?? 'number', m.direction || 'up', m.exact === true, m.report === true]);
 // an order-independent SHA-256 (truncated) fingerprint of a gate definition, for the audit record
 function gateFingerprint(metricsList, scalars) {
   const norm = {
     metrics: metricsList.map((m) => ({
-      name: m.name, guard: m.guard === true, direction: m.direction || 'up',
+      name: m.name, guard: m.guard === true, measuredBy: measuredBy(m),
       gamingThreshold: m.gamingThreshold ?? null, gamingCheck: m.gamingCheck !== false,
     })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
     gamingThreshold: scalars.gamingThreshold ?? null,
@@ -626,7 +634,8 @@ function verdictFingerprint(report) {
   return createHash('sha256').update(JSON.stringify(norm)).digest('hex').slice(0, 16);
 }
 
-// guarded metrics that HEAD dropped relative to BASE (removed entirely, or guard turned off)
+// guarded metrics that HEAD dropped relative to BASE (removed entirely, or guard turned off), or
+// measures another way (a new cmd, extract, direction, exact or report flag): `cmd: "true"` is a dropped guard too
 function gateWeakenings(baseGate, headMetrics) {
   if (!baseGate) return [];
   const head = new Map(headMetrics.map((m) => [m.name, m]));
@@ -636,6 +645,7 @@ function gateWeakenings(baseGate, headMetrics) {
     const hm = head.get(bm.name);
     if (!hm) weak.push({ name: bm.name, change: 'guard-removed', def: bm });
     else if (hm.guard !== true) weak.push({ name: bm.name, change: 'guard-disabled', def: bm });
+    else if (!bm.report && measuredBy(hm) !== measuredBy(bm)) weak.push({ name: bm.name, change: 'guard-edited', def: bm });
   }
   return weak;
 }
@@ -709,7 +719,8 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat) {
     const a = measureAt(repo, head, { ...cfg, metrics: defs }, repeat);
     for (const w of weak) {
       const ev = evaluate(w.def, b[w.name], a[w.name], repeat);
-      if (!ev.ok) weakened.push({ name: w.name, change: w.change, status: ev.status });
+      // an edited guard that still fails under its old definition was turned green by the edit, not the code
+      if (!ev.ok || (w.change === 'guard-edited' && ev.inert)) weakened.push({ name: w.name, change: w.change, status: ev.inert ? 'failed' : ev.status });
     }
   }
   const fpBase = baseGate ? gateFingerprint([...baseGate.metrics.values()], baseGate.scalars) : null;
@@ -820,7 +831,7 @@ function gate(repo, opts) {
       for (const m of ga) { m.ok = true; m.allowed = true; allowed.cleared.push(m.name); }
     } else for (const m of ga) m.allowable = true;   // failed, and a declared reason would clear it: say so in the report
   }
-  // mandates run first: a protected-path hard rule fails the gate no matter what the metrics say.
+  // mandates: a protected-path hard rule fails the gate no matter what the metrics say.
   // The base ref's mandates count too (resolved through `extends` by gateDefAtRef), so a change
   // cannot clear a mandate by deleting it in the same diff that violates it.
   const baseMandates = (gateInfo && gateInfo.baseMandates) || (!opts.detectGaming ? ((gateDefAtRef(repo, base) || {}).scalars || {}).mandates : null);
@@ -1075,11 +1086,11 @@ function printHuman(r) {
     if (m.inert) console.log(`      ⚠ "${m.name}" never ran (same value at both refs): its command needs a build/deps first, or is not your real test command. Fix: promptwheel init, or set setup/linkDirs in promptwheel.config.json`);
     if (m.gamed === true) console.log(`      🚩 GAMED, ${m.gamingReason}`);
   }
-  if (r.gate && r.gate.weakened) for (const w of r.gate.weakened) console.log(`  🚩 GATE WEAKENED, the guard "${w.name}" was ${w.change === 'guard-removed' ? 'removed' : 'disabled'} in this change and it would have ${w.status} at head (goalpost moved, not earned)`);
+  if (r.gate && r.gate.weakened) for (const w of r.gate.weakened) console.log(`  🚩 GATE WEAKENED, the guard "${w.name}" was ${w.change === 'guard-removed' ? 'removed' : w.change === 'guard-edited' ? 'edited' : 'disabled'} in this change and it would have ${w.status} at head (goalpost moved, not earned)`);
   if (r.gate && r.gate.changed) console.log(`  ⚠ gate definition changed in this change (fingerprint ${r.gate.fingerprint.base} -> ${r.gate.fingerprint.head}): a metric, guard, evaluatorPath or mandate was added, removed or edited; review promptwheel.config.json as part of the diff`);
   const failReason = r.mandates ? ', a mandate was violated (a protected path changed)' : ', a guarded metric regressed (beyond noise)';
   console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? failReason : r.verdict === 'gamed' ? ', a metric "improved" by editing the goalposts, not the source' : r.verdict === 'inconclusive' ? ', a guard is inert (measured nothing); a pass cannot be certified' : ''}`);
-  if (r.verdict === 'fail' && r.mandates) console.log('  a mandate is a hard rule; if the change is truly intended, edit the mandate in promptwheel.config.json (a tracked, tamper-evident change), do not work around it');
+  if (r.verdict === 'fail' && r.mandates) console.log('  a mandate is a hard rule; if the change is truly intended, retire the mandate in promptwheel.config.json in a change of its own first (a tracked, tamper-evident change), do not work around it');
   else if (r.verdict === 'fail' && r.metrics.some((m) => m.allowable)) console.log(`  intentional? this guard accepts a person's declared reason: promptwheel run --allow "<reason>" passes with the reason on the record (${r.metrics.filter((m) => m.allowable).map((m) => m.name).join(', ')})`);
   else if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name)');
   if (r.allowed) console.log(`  ✓ allowed: ${r.allowed.cleared.join(', ')} acknowledged as an intentional change, recorded (Promptwheel-Allow: ${r.allowed.reason})`);
@@ -1134,8 +1145,9 @@ function renderMarkdown(r) {
     '|---|--:|--:|--:|---|---|',
     rows,
     '',
-    r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader, not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? (r.mandates ? '> ⛔ A protected path changed. This is a hard rule, enforced before any metric.' : '> ❌ A 🛡️ guarded metric regressed beyond the noise band.') : r.verdict === 'inconclusive' ? '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.' : '> ✅ No guarded metric regressed.',
-    ...(r.gate && r.gate.weakened ? ['', `> 🚩 **Gate weakened:** ${r.gate.weakened.map((w) => `\`${w.name}\` ${w.change === 'guard-removed' ? 'removed' : 'disabled'} (would have ${w.status} at head)`).join('; ')}. The pass was bought by dropping a guard, not by earning it.`] : []),
+    r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader, not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? (r.mandates ? '> ⛔ A protected path changed. This is a hard rule; no metric result clears it.' : '> ❌ A 🛡️ guarded metric regressed beyond the noise band.') : r.verdict === 'inconclusive' ? '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.' : '> ✅ No guarded metric regressed.',
+    ...(r.gate && r.gate.weakened ? ['', `> 🚩 **Gate weakened:** ${r.gate.weakened.map((w) => `\`${w.name}\` ${w.change === 'guard-removed' ? 'removed' : w.change === 'guard-edited' ? 'edited' : 'disabled'} (would have ${w.status} at head)`).join('; ')}. The pass was bought by dropping a guard, not by earning it.`] : []),
+    ...(r.allowed ? ['', `> ✓ **Allowed:** \`${r.allowed.cleared.join('`, `')}\` cleared by a declared reason: ${r.allowed.reason}`] : []),
     ...(r.gate && r.gate.changed ? ['', `> ⚠ **Gate definition changed** in this diff (fingerprint \`${r.gate.fingerprint.base}\` -> \`${r.gate.fingerprint.head}\`): a metric, guard, evaluatorPath or mandate was added, removed or edited. Review the config change with the code.`] : []),
     '',
     '<sub>🛡️ = guard · _prove every change moved a metric_ · [PromptWheel](https://github.com/promptwheel-ai/promptwheel)</sub>',
@@ -1169,7 +1181,7 @@ export { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluat
 // Importing this file never runs the CLI (see the isMain guard at the bottom).
 // Stable across 0.x minor versions. The schema check() returns and the exit codes
 // verdictExitCode() maps are specified in CONTRACT.md; integration paths (conform,
-// shell, import, MCP) are in INTEGRATE.md.
+// shell, import) are in INTEGRATE.md.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // The contract revision this build implements (CONTRACT.md "Versioning"). Bumps only
@@ -1339,6 +1351,16 @@ function checkFlags(cmd, argv) {
   }
 }
 
+// read PR comments on stdin: a JSON array, or one comment per line as `gh api --paginate --jq '.[]'` prints every
+// page. Streamed: readFileSync(0) corrupted the heap on Node 24.22 reading a live paginated gh pipe.
+async function prAllow() {
+  let t = ''; process.stdin.setEncoding('utf8');
+  for await (const chunk of process.stdin) t += chunk;
+  t = t.trim(); let c = [];
+  try { c = [].concat(JSON.parse(t || '[]')); } catch { try { c = t.split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { /* unreadable, no approval */ } }
+  process.stdout.write(allowFromComments(c));
+}
+
 // write or refresh the architecture lock from the tree as it stands. A person runs this: the lock file is
 // a mandate, so the refreshed file passes the gate only with --allow "<reason>".
 async function lock() {
@@ -1353,9 +1375,9 @@ function dispatch() {
   const cmd = (rest.includes('--help') || rest.includes('-h')) ? 'help' : first;   // `promptwheel run --help` is a help request, not a gate run
   if (cmd in COMMAND_FLAGS) checkFlags(cmd, rest);
   if (cmd === 'run') run(rest);
-  else if (cmd === 'pr-allow') { let c = []; try { c = JSON.parse(readFileSync(0, 'utf8') || '[]'); } catch { /* no comments, no approval */ } process.stdout.write(allowFromComments(c)); }
+  else if (cmd === 'pr-allow') return prAllow();
   else if (cmd === 'init') init(rest);
-  else if (cmd === 'lock') lock(rest);
+  else if (cmd === 'lock') return lock(rest);
   else {
     const help = !cmd || cmd === '--help' || cmd === '-h' || cmd === 'help';
     if (!help) console.error(`unknown command: ${cmd}`);
@@ -1370,10 +1392,11 @@ function dispatch() {
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',
       '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
+      '  promptwheel pr-allow < comments.json         print the newest `sawbuck-allow: <reason>` from a PR comment by someone with write access (the Action uses it)',
       '  promptwheel run --allow "<reason>"           acknowledge an intentional test/config change (or a `Promptwheel-Allow: <reason>` commit trailer; `Sawbuck-Allow:` is an alias): recorded, not flagged GAMED',
       '',
       'Exit codes: 0 pass · 1 fail (a guarded metric regressed, or a mandate was violated) · 2 gamed · 3 inconclusive · 64 usage or config error (never a verdict).',
-      'Integrate (library / conform / shell / MCP): see INTEGRATE.md. Import: `import { check } from \'promptwheel\'`.',
+      'Integrate (library / conform / shell): see INTEGRATE.md. Import: `import { check } from \'promptwheel\'`.',
       'Config:   promptwheel.config.json → { extends?, metrics:[{ name, cmd, direction, extract?, guard? }] }   (or: promptwheel init)',
       '          extends: a path (or array) to a shared base config, repos INHERIT its guardrails; local metrics override by name.',
     ].join('\n'));
@@ -1384,8 +1407,8 @@ function dispatch() {
 // run the CLI only when invoked directly (resolves symlinks so the npm bin still works)
 let isMain = false;
 try { isMain = !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { /* not main */ }
-function main() {
-  try { dispatch(); }
+async function main() {
+  try { await dispatch(); }
   catch (e) { if (e && e.name === 'ConfigError') die(e.message); throw e; }
 }
 if (isMain) main();

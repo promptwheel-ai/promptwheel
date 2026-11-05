@@ -68,11 +68,16 @@ metric's gain that survived the source-only re-run (Section 3). `confidence`
 (`none | unverified | low | medium | high`, `none` for an unmeasurable metric) and `sourceOnly` are informational fields this
 implementation adds; a minimal conforming report may omit them. `gate` (optional) records a
 truncated SHA-256 fingerprint of the gate definition (metrics, guards, `evaluatorPaths`,
-`gamingThreshold`, `mandates`) at base and head, sets `gate.changed: true` when they differ,
-and lists any guard the change dropped to hide a regression; a non-empty `gate.weakened`
-forces `gamed`, so an agent cannot pass by disabling the guard it is judged by.
+`gamingThreshold`, `mandates`; each metric with its `cmd` and how it is read) at base and head,
+sets `gate.changed: true` when they differ, and lists in `gate.weakened` any guard the change
+removed, disabled, or measured another way (`change: guard-edited`, such as `cmd: "true"`) to
+hide a regression; a non-empty `gate.weakened` forces `gamed`, so an agent cannot pass by
+disabling the guard it is judged by. `allowed` (optional) is `{ reason, cleared }` when a declared
+reason turned a would-be `gamed`, `fail` or `inconclusive` into `pass`: `cleared` names each metric,
+`gate`, or `mandate:<name>` it cleared, and each cleared metric carries `allowed: true` and keeps its
+`gamingReason`, so a consumer can say what was allowed and why it would have failed.
 
-Self-check your implementation against this schema with `conformsToContract` (see Section 4 below).
+Self-check your implementation against this schema with `conformsToContract` (see part 4 below).
 
 ---
 
@@ -99,8 +104,8 @@ measurement runs in a throwaway git worktree.
 ## 3. Import the library (in process)
 
 Zero dependencies, no build step, the whole engine is one file. `check()` runs the gate in
-process and returns the Section 2 object. It never prints and never calls `process.exit`; it
-throws a plain `Error` on a precondition failure. Types ship in the package
+process and returns the Section 2 object. It never prints and never calls `process.exit`; on a
+precondition failure it throws an `Error` named `ConfigError` with `exitCode` 64. Types ship in the package
 (`bin/promptwheel.d.ts`, hand-written, no build step): `import type { Report, CheckOptions, Config } from 'promptwheel'`
 works in TypeScript, and editors complete the options and the report in plain JavaScript.
 

@@ -34,7 +34,8 @@ runs:
         node-version: '20'
 
     # Runs straight from this action's own checkout: no npm install, no build.
-    # a person's approval on the PR: the newest `sawbuck-allow: <reason>` comment from someone with write access
+    # a person's approval on the PR: the newest `sawbuck-allow: <reason>` comment from someone with write access.
+    # The endpoint lists oldest first, so every page is read: one call would stop at the oldest 100.
     - id: approval
       if: ${{ inputs.allow == '' && github.event_name == 'pull_request' }}
       shell: bash
@@ -43,7 +44,7 @@ runs:
         REPO: ${{ github.repository }}
         PR: ${{ github.event.pull_request.number }}
       run: |
-        reason=$(gh api "repos/$REPO/issues/$PR/comments?per_page=100" 2>/dev/null | node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" pr-allow 2>/dev/null || true)
+        reason=$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" --jq '.[]' 2>/dev/null | node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" pr-allow 2>/dev/null || true)
         { echo 'allow<<SAWBUCK_ALLOW_END'; printf '%s\n' "$reason"; echo 'SAWBUCK_ALLOW_END'; } >> "$GITHUB_OUTPUT"
 
     - id: gate

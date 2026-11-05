@@ -62,7 +62,7 @@ export interface MetricConfig {
   allowable?: boolean;
 }
 
-/** A named hard rule: any change touching one of `paths` fails the gate before any metric is read. */
+/** A named hard rule: any change touching one of `paths` fails the gate, whatever the metrics read. */
 export interface Mandate {
   name: string;
   /** Globs: a bare name matches that basename at any depth, a pattern with `/` is anchored at the repo root, `**` crosses directories. */
@@ -174,9 +174,10 @@ export interface MandateViolation {
 
 export interface GateWeakening {
   name: string;
-  change: 'guard-removed' | 'guard-disabled';
-  /** What the dropped guard would have read at head under its base definition. */
-  status: MetricStatus;
+  /** `guard-edited`: the guard is still on but measured another way (a new `cmd`, `extract`, `direction`, `exact` or `report`). */
+  change: 'guard-removed' | 'guard-disabled' | 'guard-edited';
+  /** What the dropped guard would have read at head under its base definition; `failed` when an edited guard still fails there. */
+  status: MetricStatus | 'failed';
 }
 
 export interface EvaluatorChange {

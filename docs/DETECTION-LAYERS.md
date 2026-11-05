@@ -75,7 +75,7 @@ A guard that can't actually run - an inert pass/fail metric that reads 0 at both
 
 ## What PromptWheel does and does not claim
 
-**Claims (in-scope, caught deterministically):** evaluator tampering - test-file edits, grader/scorer tampering, golden/snapshot rewriting, config/threshold relaxation, harness-exit hacks.
+**Claims (in-scope, caught deterministically):** evaluator tampering - test-file edits, grader/scorer tampering (a grader recognized by name or an `evals/`/`graders/` directory, or declared in `evaluatorPaths`), golden/snapshot rewriting, config/threshold relaxation, harness-exit hacks.
 
 **Does NOT claim (out-of-scope - route to another layer):**
 - **Leakage / retrieval** (the agent fetched the fix from an upstream PR, the web, or git history) - no protected file was edited, so a source-revert is blind to it.

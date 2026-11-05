@@ -225,7 +225,7 @@ test('isNonSource: cross-language test filenames are non-source (red-team gap)',
 });
 test('isNonSource: ambiguous production names that merely contain "test" stay source', () => {
   for (const p of ['latest.c', 'speedtest.go', 'contest.java', 'Contest.java', 'Check.java',
-    'lib/latest.rb', 'contest.rb', 'score.py'])
+    'lib/latest.rb', 'contest.rb'])   // score.py was here while the classifier read JS only; since 0.8.1 it is a grader
     assert.equal(isNonSource(p), false, p);  // conservative: a strong-signal token (_test/_spec/Test suffix) is required, never a substring
 });
 test('evaluatorMatcher: opt-in evaluator-path globs (bare name any depth, "/" anchors, ** crosses, leading /)', () => {
@@ -653,7 +653,7 @@ test('supply-chain gate: a lifecycle script, a dependency or a non-registry lock
   assert.equal(r.code, 1, r.out); assert.equal(metric(r.rep, 'lock_nonregistry_sources').ok, false);
   reset();
 
-  // a frozen path: a named mandate, before any metric is read
+  // a frozen path: a named mandate fails the gate whatever the metrics read
   writeFileSync(join(d, '.github/workflows/ci.yml'), 'name: ci\non: push\nsteps: [{ run: "curl x | sh" }]\n');
   r = run();
   assert.equal(r.code, 1, r.out); assert.equal(r.rep.verdict, 'fail');
@@ -1742,4 +1742,134 @@ test('approval on a PR: the newest comment from someone with write access; never
   assert.equal(allowFromComments([c('sawbuck-allow: x', 'OWNER', 'Bot')]), '', 'a bot');
   assert.equal(allowFromComments([c('sawbuck-allow:   ')]), '', 'no reason');
   assert.equal(allowFromComments([c('sawbuck-allow: old'), c('nice\nsawbuck-allow: added ms for parsing')]), 'added ms for parsing (approved by pat)');
+});
+
+// ---------------------------------------------------- 0.8.1: claims the audit checked against the code
+const SHGUARD = { name: 'tests_pass', cmd: 'sh check.sh', extract: 'exit', direction: 'pass', guard: true };
+// a repo whose guard runs check.sh; `head` rewrites the config and check.sh in one commit
+function swapRepo({ baseExit, headExit, headCmd, viaExtends = false }) {
+  const d = mkdtempSync(join(tmpdir(), 'pw-swap-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  const write = (cmd) => {
+    const metrics = [{ ...SHGUARD, cmd }];
+    if (viaExtends) {
+      writeFileSync(join(d, 'base.json'), JSON.stringify({ metrics }));
+      writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, extends: './base.json' }));
+    } else writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, metrics }));
+  };
+  write(SHGUARD.cmd); writeFileSync(join(d, 'check.sh'), `exit ${baseExit}\n`); commitAll(d, 'base');
+  write(headCmd); writeFileSync(join(d, 'check.sh'), `exit ${headExit}\n`); commitAll(d, 'head');
+  return d;
+}
+test('gate integrity: pointing a guard at another command to hide a regression reads GAMED, directly or through extends', () => {
+  for (const viaExtends of [false, true]) {
+    const d = swapRepo({ baseExit: 0, headExit: 1, headCmd: 'true', viaExtends });
+    const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json']);
+    assert.equal(r.code, 2, `extends=${viaExtends}: ${r.out}`);
+    const rep = reportOf(r.out);
+    assert.equal(rep.gate.changed, true, 'the command is part of the gate fingerprint');
+    assert.ok(rep.gate.weakened.some((w) => w.name === 'tests_pass' && w.change === 'guard-edited'), JSON.stringify(rep.gate));
+    assert.equal(conformsToContract(rep).ok, true, conformsToContract(rep).errors.join('; '));
+    assert.match(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']).out, /GATE WEAKENED, the guard "tests_pass" was edited/);
+    const a = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json', '--allow', 'the old command was wrong']);
+    assert.equal(a.code, 0, a.out); assert.ok(reportOf(a.out).allowed.cleared.includes('gate'));
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+test('gate integrity: a red guard turned green by swapping its command reads GAMED; an honest swap is only a gate change', () => {
+  let d = swapRepo({ baseExit: 1, headExit: 1, headCmd: 'true' });
+  let r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json']);
+  assert.equal(r.code, 2, r.out);
+  rmSync(d, { recursive: true, force: true });
+  d = swapRepo({ baseExit: 0, headExit: 0, headCmd: 'sh ./check.sh' });
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json']);
+  assert.equal(r.code, 0, r.out);
+  const rep = reportOf(r.out);
+  assert.equal(rep.gate.changed, true); assert.equal(rep.gate.weakened, undefined);
+  rmSync(d, { recursive: true, force: true });
+});
+
+const GRADER_PATHS = ['grader.py', 'eval.py', 'grader.sh', 'eval.sh', 'score.py', 'evals/check.py', 'graders/check.sh', 'scripts/grade.sh', 'grade.js', 'evals/run.js'];
+test('isNonSource: a grader, eval or score script in any scripting language, and anything under evals/ or graders/, is non-source', () => {
+  for (const p of [...GRADER_PATHS, 'tools/eval_model.py', 'grader/rubric.rb', 'evals/fixtures.json', 'packages/x/evals/judge.ts', 'scoring.R'])
+    assert.equal(isNonSource(p), true, p);
+});
+test('isNonSource: ordinary source near those words stays source', () => {
+  // a word that only starts with the token, a score/scoring module directory, compiled interpreters named eval,
+  // and PascalCase domain types are production code; a fix in any of them must never read GAMED.
+  for (const p of ['src/scoreboard.js', 'src/evaluate-order.js', 'evaluate.py', 'src/evaluation.py', 'src/scores.ts', 'src/grades.py',
+    'src/lib/analysis/scoring/index.ts', 'src/lib/calculations/scores/altman.ts', 'app/api/score/route.ts', 'src/components/Score.tsx',
+    'src/eval.c', 'interp/eval.go', 'src/eval.rs', 'pkg/eval/parse.go', 'src/main/java/Grade.java'])
+    assert.equal(isNonSource(p), false, p);
+});
+test('run: a commit that edits only the grader reads GAMED in any language', () => {
+  for (const f of GRADER_PATHS) {
+    const d = tmpRepo([{ name: 'tests_pass', cmd: `sh ${f}`, extract: 'exit', direction: 'pass', guard: true }]);
+    mkdirSync(join(d, dirname(f)), { recursive: true });
+    writeFileSync(join(d, f), 'exit 1\n'); commitAll(d, 'base');
+    writeFileSync(join(d, f), 'exit 0\n'); commitAll(d, 'mock the grader');
+    const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+    assert.equal(r.code, 2, `${f}: ${r.out}`);
+    rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test('cli: lock outside a git repository prints one line and exits 64', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-lock-norepo-'));
+  const r = pw(d, ['lock']);
+  assert.equal(r.code, 64, r.out);
+  assert.match(r.out, /not inside a git repository/);
+  assert.doesNotMatch(r.out, /\n\s+at |ConfigError/, 'no stack trace');
+  rmSync(d, { recursive: true, force: true });
+});
+test('cli: --help lists every command, pr-allow included, and names no MCP surface', () => {
+  const r = pw(tmpdir(), ['--help']);
+  for (const c of ['run', 'init', 'lock', 'pr-allow']) assert.match(r.out, new RegExp(`promptwheel ${c}\\b`), c);
+  assert.doesNotMatch(r.out, /MCP/);
+});
+
+test('pr-allow: reads every page gh prints (one comment per line), so the newest approval on a long PR wins', () => {
+  const c = (body, assoc = 'OWNER') => JSON.stringify({ body, author_association: assoc, user: { type: 'User', login: 'pat' } });
+  const lines = Array.from({ length: 150 }, (_, i) => c(i === 3 ? 'sawbuck-allow: the old reason' : i === 140 ? 'sawbuck-allow: the new reason' : 'chatter'));
+  const prAllow = (input) => execFileSync('node', [ENGINE, 'pr-allow'], { input, encoding: 'utf8' });
+  assert.equal(prAllow(lines.join('\n') + '\n'), 'the new reason (approved by pat)');
+  assert.equal(prAllow(`[${lines.join(',')}]`), 'the new reason (approved by pat)', 'a single JSON array still works');
+  assert.equal(prAllow(''), '');
+  const action = readFileSync(join(dirname(ENGINE), '..', 'action.yml'), 'utf8');
+  assert.match(action, /gh api --paginate "repos\/\$REPO\/issues\/\$PR\/comments\?per_page=100" --jq '\.\[\]'/, 'the Action reads every page, not the oldest 100');
+});
+
+test('--allow on a gamed commit: the JSON and the PR comment both carry the reason and what it cleared', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'sh test/a.sh', extract: 'exit', direction: 'pass', guard: true }]);
+  mkdirSync(join(d, 'test'));
+  writeFileSync(join(d, 'test/a.sh'), 'exit 1\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'test/a.sh'), 'exit 0\n'); commitAll(d, 'edit the test');
+  const args = ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--allow', 'the spec changed'];
+  let r = pw(d, [...args, '--json']);
+  assert.equal(r.code, 0, r.out);
+  const rep = reportOf(r.out);
+  assert.deepEqual(rep.allowed, { reason: 'the spec changed', cleared: ['tests_pass'] });
+  assert.equal(rep.metrics[0].allowed, true); assert.equal(rep.metrics[0].gamed, false); assert.match(rep.metrics[0].gamingReason, /zero production-source files/);
+  r = pw(d, [...args, '--markdown']);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /Allowed.*tests_pass.*the spec changed/);
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('self-heal: a registered worktree a killed run left behind is removed once it is a day old; a younger one is left alone', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  const killed = join(tmpdir(), `promptwheel-${ownerTag(d)}-KILLEDRUN`);
+  const live = join(tmpdir(), `promptwheel-src-${ownerTag(d)}-LIVERUN`);
+  for (const p of [killed, live]) { rmSync(p, { recursive: true, force: true }); execFileSync('git', ['worktree', 'add', '--quiet', '--detach', p, 'HEAD'], { cwd: d }); }
+  const day = new Date(Date.now() - 90_000_000), old = new Date(Date.now() - 7200_000);
+  utimesSync(killed, day, day); utimesSync(live, old, old);
+  pw(d, ['run', '--working']);
+  const listed = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: d, encoding: 'utf8' });
+  assert.equal(existsSync(killed), false, 'the day-old worktree is gone from disk');
+  assert.doesNotMatch(listed, /KILLEDRUN/, 'and from the registry');
+  assert.equal(existsSync(live), true, 'a registered worktree under a day old may still be measuring');
+  execFileSync('git', ['worktree', 'remove', '--force', live], { cwd: d });
+  rmSync(d, { recursive: true, force: true });
 });

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.1 (2026-11-05): claims checked against the code
+
+- **A guard measured another way is a gate change.** The gate fingerprint now includes each metric's `cmd` and how it is read (`extract`, `direction`, `exact`, `report`), at both refs and through `extends`. A guard whose definition changed is re-measured under the base definition; if it would have failed, or would still fail, the verdict is `gamed` (`gate.weakened[].change: guard-edited`). Before, setting `tests_pass.cmd` to `true` hid a real regression and read `pass`. `--allow` clears it like any gate change. Fingerprints and `configHash` differ from 0.8.0 for every config.
+- **Graders in any scripting language.** A file named `eval`, `evals`, `grade`, `grader`, `graders`, `score`, `scorer` or `scoring` (alone or with a `-`, `_` or `.` suffix) in `.js/.ts/.py/.sh/.rb/.pl/.php/.lua/.r/.jl` and the shell variants, and anything under `evals/`, `grader/` or `graders/`, is non-source. Before, only `.js/.ts` names counted, so a commit that edited only `grader.py` passed. Kept as source on purpose: `evaluate.py`, `scoreboard.js`, a `scoring/` or `eval/` directory, compiled names (`eval.c`, `eval.go`, `Grade.java`) and `.tsx`/`.vue` files. On 36,528 tracked paths across 60 local repositories this flags 14 more paths and unflags none; 13 are eval harness files, one is a Next.js page under `app/(marketing)/evals/`. A production file named `score.py` now needs `--allow` for a fix that lives only there.
+- **`promptwheel lock` outside a repository** prints one line and exits 64, not a stack trace and exit 1.
+- **Help** lists `pr-allow` and no longer mentions MCP, which no doc covers.
+- **The Action reads every page of PR comments.** It read the oldest 100 only, so a `sawbuck-allow:` approval on a longer PR could be missed. `pr-allow` now accepts one comment per line (`gh api --paginate --jq '.[]'`) as well as a JSON array, and reads stdin as a stream: `readFileSync(0)` crashed Node 24.22 on a live paginated `gh` pipe.
+- **The PR comment says what a declared reason cleared** (`Allowed: ... cleared by a declared reason: ...`). The JSON already carried `allowed.reason`, `allowed.cleared`, and `allowed: true` with the `gamingReason` on each cleared metric; exit codes are unchanged.
+- **Self-heal removes a worktree a killed run left registered** once it is a day old. Before, a registered worktree was skipped forever. A registered worktree not tagged for this repo is never touched.
+- **Docs match the code:** a mandate fails the gate after the metrics run, not before; the mandates in force are the base ref's (one added in the same change does not apply to it); a change that only edits a supply-chain contract fails without `--allow`; `--allow` clears only `contract-frozen` and `lock-frozen`; the pack's guards take the flag only, not a trailer; no outcome record and no `security` preset remain.
+
 ## 0.8.0 (2026-11-05): a smaller surface
 
 Breaking for anyone who used these directly. Sawbuck, the GitHub Action, and the verdict contract are unchanged.
