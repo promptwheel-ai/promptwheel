@@ -6,7 +6,7 @@
 
 ![PromptWheel catching an agent game the metric, then passing an honest fix](demo/promptwheel.gif)
 
-## Catch your agent cheating, in 60 seconds
+## See it in 60 seconds
 
 A hand-built cheat, so you can watch the mechanism fire (illustrative, not evidence):
 
