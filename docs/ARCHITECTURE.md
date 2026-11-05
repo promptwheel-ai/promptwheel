@@ -27,17 +27,10 @@ The working tree is **never** touched - every read happens in a temp worktree th
 | `run [--base R] [--head R] [--repeat N] [--json\|--markdown]` | gate a change between two refs |
 | `run --detect-gaming` / `--no-detect-gaming` | antihack is **on by default**: re-prove each win from source edits alone (verdict `gamed`, exit 2); `--no-detect-gaming` for the bare gate. `--markdown` emits a PR-comment table |
 | `run --working` | gate **uncommitted** changes incl. newly added files (temp-index `write-tree`/`commit-tree` snapshot; real index + tree untouched) |
-| `run --no-record` | don't append to the reward stream |
-| `improve --attempt "<cmd>"` | run any agent/script, gate, **keep only if a metric improved** (commit) else revert. Exit `0` kept / `1` regression / `2` gamed / `3` plateau or inconclusive (the same codes as `run`); `--json` adds a top-level `result` |
-| `insights [--json]` | aggregate `.promptwheel/outcomes.jsonl` into per-metric counts (how often each metric improved, regressed, read inconclusive) |
-| `init [--preset <name> \| --list] [--no-agent-block]` | write a starter config (detect stack; presets `tests-pass`/`lint`/`bundle-size`/`security`/`llm-eval`/`antihack`/`no-ai-tells`/`security-antihack`) and an agent-orienting block in `AGENTS.md` |
-| `guards [--json]` | list the effective guardrails (incl. inherited via `extends`) with provenance + each guard's flag record |
-| `conformance [file \| -] [--cmd C]` | validate a verdict JSON (or a command's `--json` output and exit code) against the Verified-Outcome Contract; exit 0 conforms, 1 otherwise |
-
-`run` and `improve` share one `gate(repo, opts)` core. `improve` requires a clean tree (ignoring `.promptwheel/`), runs the attempt, gates working-vs-HEAD, then **commits** on a real improvement or reverts (`git reset --hard` + `git clean -fd -e .promptwheel`) on a regression / no-op.
-
-### Reward stream
-Every gated run (unless `--no-record` or `record:false`) appends one JSON line to `.promptwheel/outcomes.jsonl`: `{ ts, base, head, repeat, mode, verdict, metrics }`. Commit it to accumulate the per-repo "what moves what" record; `insights` reads it.
+| `run --no-record` | accepted and does nothing; no record is written |
+| `init [--preset <name> \| --list] [--no-agent-block]` | write a starter config (detect stack; presets `antihack`/`no-ai-tells`/`supply-chain`) and an agent-orienting block in `AGENTS.md` |
+| `lock` | write `promptwheel.lock.json`, the shape of the repo, held by the `supply-chain` preset |
+| `pr-allow` | read a PR's comments as JSON on stdin and print the newest `sawbuck-allow:` reason from someone with write access (the Action's approval step) |
 
 ### detect-gaming (antihack)
 `run --detect-gaming` re-proves every *win* from the agent's source edits **alone**. After the normal gate, it partitions the head diff into **production source** vs. **`{test, config, grader, golden}`** files, rebuilds a clean worktree at the base with **only the source slice** applied, and re-runs the gate. If a guarded win does **not** survive that source-only re-run - because it passed by editing/skipping a test, mocking the grader, editing a golden, relaxing config, or touching zero source files - the verdict is **`GAMED`** (exit 2). Metrics with `gamingCheck: false` are exempt from the re-run (test-side tripwires whose gains legitimately live in test files; the `antihack` preset sets this). Deterministic, zero-LLM: a diff partition plus a re-run, so every flag is reproducible with a human-readable reason. The 50%-of-gain-survives threshold is the default and is tunable. See `DETECTION-LAYERS.md` for scope and `../bench/RESULTS.md` for measured recall.
@@ -107,11 +100,11 @@ So `--repeat` is how you trade time for trust: it earns a real confidence label 
 }
 ```
 
-Exit code: `0` = pass · `1` = fail (a guarded metric had a trusted regression, or a mandate was violated) · `2` = **`GAMED`** (a win that didn't survive the source-only re-run, or a weakened gate) · `3` = **inconclusive** (an inert guard measured nothing) - also the code `improve` returns for a plateau/no-op · `64` = a usage or config error (`EX_USAGE`: a malformed config, a missing `extends` target, an unknown command or preset). 64 is deliberately outside the verdict range so a broken config can never be read as a verdict. This JSON is the persisted reward stream (`.promptwheel/outcomes.jsonl`), appended once per gated run.
+Exit code: `0` = pass · `1` = fail (a guarded metric had a trusted regression, or a mandate was violated) · `2` = **`GAMED`** (a win that didn't survive the source-only re-run, or a weakened gate) · `3` = **inconclusive** (an inert guard measured nothing) · `64` = a usage or config error (`EX_USAGE`: a malformed config, a missing `extends` target, an unknown command or preset). 64 is deliberately outside the verdict range so a broken config can never be read as a verdict. This JSON is the persisted reward stream (`.promptwheel/outcomes.jsonl`), appended once per gated run.
 
 ## Testing
 
-`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` - **99 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, `renderMarkdown`, the source/non-source classifier and `judgeGaming` (imported directly), plus integration tests that spawn the real CLI or call `check()` against throwaway git repos (run pass/fail, `--working` + tree-untouched, `improve` keep/revert/gamed, gaming detection, evaluatorPaths, mandates, gate integrity and fingerprints, the allow trailer, zero-config, `init` presets, exit 64 on a broken config, `--version`/`--help`). No test dependencies.
+`npm test` (= `node --test`) runs `test/promptwheel.test.mjs` - **124 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, `renderMarkdown`, the source/non-source classifier and `judgeGaming` (imported directly), plus integration tests that spawn the real CLI or call `check()` against throwaway git repos (run pass/fail, `--working` + tree-untouched, gaming detection, evaluatorPaths, mandates, gate integrity and fingerprints, the allow trailer, zero-config, `init` presets, exit 64 on a broken config, `--version`/`--help`). No test dependencies.
 
 ## Design constraints
 - **Zero runtime dependencies, no build.** Node 18+, ESM, runs straight from source.

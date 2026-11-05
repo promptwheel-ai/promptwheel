@@ -85,8 +85,6 @@ export interface Config {
   env?: Record<string, string>;
   /** A per-ref build or install, run in the worktree before measuring (a failed setup leaves the metric inert, never a false green). */
   setup?: string;
-  /** `false` never appends to `.promptwheel/outcomes.jsonl`. */
-  record?: boolean;
   /** Fraction of a gain that must survive the source-only re-run; below it the win is `gamed`. Default 0.5. */
   gamingThreshold?: number;
   /** Extra files that define the gate (a threshold, a budget); a change to one alongside a win is gamed by declaration. Same glob rules as `Mandate.paths`. */
@@ -120,8 +118,6 @@ export interface CheckOptions {
   detectGaming?: boolean;
   /** A declared override reason (the same as `--allow` or a `Promptwheel-Allow:` commit trailer): a would-be `gamed`, or an `unprovable` win (its source-only re-run could not be applied), reads `pass`, recorded in `report.allowed`. */
   allow?: string;
-  /** Append the run to `.promptwheel/outcomes.jsonl`. Default `false`. */
-  record?: boolean;
 }
 
 // ---------------------------------------------------------------------------

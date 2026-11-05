@@ -21,14 +21,12 @@ npm install -g promptwheel
 
 Most people want the Sawbuck plugin instead: `/plugin marketplace add sawbuck-ai/reins`, which runs this engine for you. This plugin is for wiring the engine by hand.
 
-Four skills ship in `skills/`:
+Two skills ship in `skills/`:
 
 | skill | wraps | what it does |
 |---|---|---|
 | `/promptwheel:setup` | `promptwheel init` | detect the stack, write a starter config |
 | `/promptwheel:gate` | `promptwheel run --working` | gate uncommitted changes; reports the verdict (pass, fail, gamed, inconclusive) and what to do about each |
-| `/promptwheel:improve <cmd>` | `promptwheel improve --attempt "<cmd>"` | keep a change only if a metric improved, else revert (exit 0 kept, 1 regression, 2 gamed, 3 plateau) |
-| `/promptwheel:insights` | `promptwheel insights` | which metrics actually respond (loop memory) |
 
 For repo history, install the Logbook plugin: `/plugin marketplace add promptwheel-ai/logbook`, then `/plugin install logbook@logbook`.
 
@@ -38,23 +36,17 @@ It's the **signal inside your loop, not the driver**: `/promptwheel:gate` after 
 
 ## What this plugin runs, writes, and sends (the full list)
 
-**Programs it runs.** The four skills are instructions; the program they tell Claude to run is
-the `promptwheel` CLI you installed (`promptwheel init|run|improve|insights`). `promptwheel run` and `improve`
-also run your repo's own test or metric command (from `promptwheel.config.json`, or the detected
-test script) in throwaway git worktrees, exactly as you would run it yourself. `/promptwheel:improve`
-takes an attempt command from you (`--attempt "<the command you name>"`, for example an agent
-invocation) and runs exactly that command in the repo to make the change it then gates; the plugin
-composes no command of its own. The plugin registers no hooks and no mod.
+**Programs it runs.** The two skills are instructions; the program they tell Claude to run is
+the `promptwheel` CLI you installed (`promptwheel init|run`). `promptwheel run` also runs your repo's
+own test or metric command (from `promptwheel.config.json`, or the detected test script) in throwaway
+git worktrees, exactly as you would run it yourself. The plugin composes no command of its own and
+registers no hooks and no mod.
 
 **Files it writes.** Only inside the repo: `promptwheel.config.json` and a short block in
 `AGENTS.md` (created if absent) and in `CLAUDE.md` and `.cursorrules` when those already exist,
-written by `/promptwheel:setup` (`--no-agent-block` skips the block); under the `security` and
-`security-antihack` presets, a copy of the security pack at `.promptwheel/packs/security/`
-(`scan.mjs`, `patterns.json`, `pack.json`, `README.md`), which you commit with the config; and the
-outcome record `.promptwheel/outcomes.jsonl` (add `--no-record` to skip). `/promptwheel:improve` also changes
-the working tree: when the attempt's change improved a metric it is committed (one commit, message
-prefixed `promptwheel:`), and otherwise the working tree is hard-reset to HEAD and untracked files
-are removed (except `.promptwheel/`), so run it on a clean tree you mean to let it change.
+written by `/promptwheel:setup` (`--no-agent-block` skips the block); and under the `supply-chain`
+preset, a copy of the pack at `.promptwheel/packs/supply-chain/` and `promptwheel.lock.json`, which
+you commit with the config.
 
 **What it sends, and where.** Nothing. The check is deterministic and never calls a model or the
 network; the only network traffic is npm fetching the packages. There is no telemetry.

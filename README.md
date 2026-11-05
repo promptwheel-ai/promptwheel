@@ -54,18 +54,11 @@ npx promptwheel run --working             # gate UNCOMMITTED changes (incl. newl
 npx promptwheel run --repeat 5 --json     # measure 5× to establish a noise band, emit JSON
 
 npx promptwheel init                      # optional: write promptwheel.config.json (guarded tests + antihack tripwires, + lint if eslint is set up)
-npx promptwheel init --list               # presets: tests-pass · lint · bundle-size · security · llm-eval · antihack · no-ai-tells · security-antihack · supply-chain
-
-# the loop: run any agent/script, keep the change ONLY if a metric improved, else revert
-npx promptwheel improve --attempt "claude -p 'reduce lint errors'"
-#   exit 0 = kept a real win · 1 = guarded regression (reverted) · 2 = gamed (reverted) · 3 = plateau / inconclusive (reverted) · add --json
-while npx promptwheel improve --attempt "<your agent command>"; do :; done     # converges: stops on the first non-zero
-
-npx promptwheel insights                  # which metrics actually respond in this repo (counts from .promptwheel/outcomes.jsonl)
-npx promptwheel guards                    # the effective guardrails, including ones inherited through extends
+npx promptwheel init --list               # presets: antihack · no-ai-tells · supply-chain
+npx promptwheel lock                      # write promptwheel.lock.json, the shape of this repo; the supply-chain preset holds it
 ```
 
-Gaming detection is on by default in `run` and `improve`; `--no-detect-gaming` gives you the bare outcome gate.
+Gaming detection is on by default in `run`; `--no-detect-gaming` gives you the bare outcome gate.
 
 **Give your agent the gate.** `promptwheel init` writes this into your `AGENTS.md` (and `CLAUDE.md` / `.cursorrules` if present; `--no-agent-block` to skip), so the coding agent runs the gate itself. To paste it yourself:
 
@@ -74,7 +67,7 @@ Gaming detection is on by default in `run` and `improve`; `--no-detect-gaming` g
     config, or grader, not the source, so revert and earn it in the source. Exit 1 means a guarded
     metric regressed, revert that too. Never weaken, skip, or delete a test to go green.
 
-**Two callers, by design.** Your *agent* consumes the verdict as a per-turn signal (`improve`, or `run --working --json`). The *harness* (a Stop-hook, or CI) runs the same check as an audit the agent cannot self-clear, because the check re-proves from the source alone and never asks the code to grade itself. See [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md) for the three places to enforce it.
+**Two callers, by design.** Your *agent* consumes the verdict as a per-turn signal (`run --working --json`). The *harness* (a Stop-hook, or CI) runs the same check as an audit the agent cannot self-clear, because the check re-proves from the source alone and never asks the code to grade itself. See [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md) for the three places to enforce it.
 
 ## Config, `promptwheel.config.json`
 
@@ -119,7 +112,7 @@ Teams keep one shared base config and have every repo inherit it via `extends`:
   "metrics": [ { "name": "cost_per_run_usd", "guard": false } ] }   // loosen one inherited guard, locally
 ```
 
-`extends` takes a path (or array of paths) to base configs: a repo **inherits** their guardrails, and a local metric of the same name **overrides** the inherited one (tighten, loosen, or disable). `promptwheel guards` shows the effective set with provenance (`inherited ← base.json`, `local`, or `local override`) plus each guard's flag record from the outcome record. Read this way, `extends` is the set of shared invariants your agents are held to, enforced as measured guards rather than advisory text. Natural-language conventions belong in `AGENTS.md`; only deterministic, measurable guards belong here.
+`extends` takes a path (or array of paths) to base configs: a repo **inherits** their guardrails, and a local metric of the same name **overrides** the inherited one (tighten, loosen, or disable). Read this way, `extends` is the set of shared invariants your agents are held to, enforced as measured guards rather than advisory text. Natural-language conventions belong in `AGENTS.md`; only deterministic, measurable guards belong here.
 
 ### Mandates (protected paths)
 
@@ -173,7 +166,7 @@ The Action runs straight from its own checkout, no npm install, no build. See [`
 /plugin install promptwheel@promptwheel-ai
 ```
 
-Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommitted changes) · `/promptwheel:improve <cmd>` (keep-if-improved) · `/promptwheel:insights`. See [`plugins/promptwheel/`](plugins/promptwheel/). A Stop-hook that refuses to let an agent end a turn on a `GAMED` win ships at [`examples/detect-gaming-stop.sh`](examples/detect-gaming-stop.sh).
+Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommitted changes). See [`plugins/promptwheel/`](plugins/promptwheel/). A Stop-hook that refuses to let an agent end a turn on a `GAMED` win ships at [`examples/detect-gaming-stop.sh`](examples/detect-gaming-stop.sh).
 
 ## Trust model
 
@@ -194,7 +187,7 @@ Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommit
 
 A check runs your metric commands in two throwaway worktrees (before and after) plus a source-only re-run when a metric improved, so one check takes roughly 2 to 3× your metric command's runtime plus about 40ms of worktree overhead. Point the per-turn gate at a *fast* metric (a lint count, a quick test subset, a build-size check) and leave the slow full suite for CI: a 50ms check is invisible in a loop, a two-minute one is not. A deterministic metric (a test exit, a count) is accurate at the default `repeat: 1`; only a noisy metric (latency, timing) needs `repeat: 3` or more, which multiplies the cost.
 
-**Footprint.** It never touches your working tree: every measurement runs in a throwaway git worktree in your system temp dir (one at a time; configured `linkDirs` are symlinked, not copied), removed when the run finishes. The only thing PromptWheel writes to your repo is the optional `.promptwheel/outcomes.jsonl` record; commit it, `.gitignore` it, or pass `--no-record`. A hard-killed run cannot leave clutter behind: the next run self-heals any orphaned worktree.
+**Footprint.** It never touches your working tree: every measurement runs in a throwaway git worktree in your system temp dir (one at a time; configured `linkDirs` are symlinked, not copied), removed when the run finishes. A run writes nothing to your repo; only `init` and `lock` write files, the ones you commit. A hard-killed run cannot leave clutter behind: the next run self-heals any orphaned worktree.
 
 ## Portability
 
@@ -202,9 +195,9 @@ The core gamed-win check is git only and runs anywhere git does: it classifies t
 
 ## Docs
 
-- [INTEGRATE.md](INTEGRATE.md), the integration surface: the exit-code and verdict-JSON contract, shelling `--json`, `import { check }`, and `promptwheel conformance` for self-checking a third-party implementation.
+- [INTEGRATE.md](INTEGRATE.md), the integration surface: the exit-code and verdict-JSON contract, shelling `--json`, `import { check }`, and `conformsToContract` for self-checking a third-party implementation.
 - [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md), how the source-only re-run fits as the deterministic layer alongside held-out tests, LLM judges, and human review: the coverage matrix and the honest in/out-of-scope boundary.
-- [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md), making "the agent can't skip it" real: the three places to enforce (loop-revert, CI + branch protection, a Claude Code Stop-hook), the exact wiring, and the protect-the-gate's-own-config caveat.
+- [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md), making "the agent can't skip it" real: the two places to enforce (CI + branch protection, a Claude Code Stop-hook), the exact wiring, and the protect-the-gate's-own-config caveat.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), how the engine works: schemas, extract modes, the trust/noise model.
 - [CHANGELOG.md](CHANGELOG.md), what shipped in each version.
 - [CLAUDE.md](CLAUDE.md), the working notes for anyone (human or agent) changing this repo.

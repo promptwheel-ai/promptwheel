@@ -11,11 +11,11 @@
 3. **Never trust noise.** A delta inside the measured jitter band is `inconclusive`, not a regression. Guards must never fail on noise. This is the credibility feature - protect it.
 4. **Never touch the user's working tree.** All measurement happens in throwaway git worktrees.
 5. **Outcome over orchestration.** Every feature must serve the question "did a real metric move, provably?" If it doesn't, it belongs in a different tool.
-6. **Open-core.** The CLI + GitHub Action are OSS (Apache-2.0). The paid surface is *later*: hosted cross-repo intelligence + dashboards over the accumulated outcome record. Don't build billing/cloud into the core.
+6. **Open-core.** The CLI + GitHub Action are OSS (Apache-2.0). The paid surface is *later*: hosted cross-repo intelligence + dashboards. Don't build billing/cloud into the core.
 
 ## Layout
 
-- `bin/promptwheel.mjs` - the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict + the source-only re-run, evaluatorPaths auto-fail and gate integrity; commands run/improve/insights/init/guards/conformance). ~1320 LOC. `bin/promptwheel.d.ts` is its hand-written type declaration (no build step; a test keeps it in step with the export list).
+- `bin/promptwheel.mjs` - the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict + the source-only re-run, evaluatorPaths auto-fail and gate integrity; commands run/init/lock/pr-allow). ~1400 LOC. `bin/promptwheel.d.ts` is its hand-written type declaration (no build step; a test keeps it in step with the export list).
 - `promptwheel.config.json` - example metrics config.
 - `docs/ARCHITECTURE.md` - how the engine works, schemas, the trust model.
 - `docs/history/` - the original pivot rationale (`VISION.md`) and the phased plan (`ROADMAP.md`); historical, not maintained.
@@ -24,7 +24,7 @@
 
 ```bash
 node bin/promptwheel.mjs run --base <ref> --head <ref> [--repeat N] [--json]
-npm test          # 101 dep-free node:test tests (unit + integration)
+npm test          # 124 dep-free node:test tests (unit + integration)
 ```
 
 Tests live in `test/promptwheel.test.mjs` - keep them **dep-free** (`node:test`): import the pure helpers for unit tests, shell out to the CLI for integration. `bin/promptwheel.mjs` is the single source of behavior; **add/adjust a test with every behavior change**. The engine is importable (pure helpers exported; the CLI runs only when invoked directly) - don't break that, the tests rely on it.
