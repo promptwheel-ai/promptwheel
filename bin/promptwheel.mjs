@@ -580,6 +580,8 @@ function gateDefAtRef(repo, ref) {
 }
 
 // how a metric is measured and judged: change any of these on a guard and it is a different guard
+// what init writes when it finds no test command. It guards nothing, so replacing it is setup, not a weakened gate.
+const PLACEHOLDER_TEST = 'echo "set your test command in promptwheel.config.json" && false';
 const measuredBy = (m) => JSON.stringify([m.cmd ?? null, m.extract ?? 'number', m.direction || 'up', m.exact === true, m.report === true]);
 // an order-independent SHA-256 (truncated) fingerprint of a gate definition, for the audit record
 function gateFingerprint(metricsList, scalars) {
@@ -645,7 +647,7 @@ function gateWeakenings(baseGate, headMetrics) {
     const hm = head.get(bm.name);
     if (!hm) weak.push({ name: bm.name, change: 'guard-removed', def: bm });
     else if (hm.guard !== true) weak.push({ name: bm.name, change: 'guard-disabled', def: bm });
-    else if (!bm.report && measuredBy(hm) !== measuredBy(bm)) weak.push({ name: bm.name, change: 'guard-edited', def: bm });
+    else if (!bm.report && bm.cmd !== PLACEHOLDER_TEST && measuredBy(hm) !== measuredBy(bm)) weak.push({ name: bm.name, change: 'guard-edited', def: bm });
   }
   return weak;
 }
@@ -940,7 +942,7 @@ function detectTestCmd(repo) {
   try {
     if (JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).scripts?.test) return 'npm test --silent';
   } catch { /* no or unparsable package.json, fall through */ }
-  return 'echo "set your test command in promptwheel.config.json" && false';
+  return PLACEHOLDER_TEST;
 }
 
 // deps that live outside git + the env a test needs, defaulted per stack. init writes these into

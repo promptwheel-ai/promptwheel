@@ -1790,6 +1790,25 @@ test('gate integrity: a red guard turned green by swapping its command reads GAM
   rmSync(d, { recursive: true, force: true });
 });
 
+test('gate integrity: replacing the placeholder test command init writes is setup, not gaming', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-placeholder-'));
+  const g = (...x) => execFileSync('git', x, { cwd: d, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@b.c', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@b.c' } });
+  g('init', '-q'); writeFileSync(join(d, 'app.py'), 'x = 1\n'); g('add', '-A'); g('commit', '-qm', 'base');
+  assert.equal(pw(d, ['init']).code, 0);
+  const cfgPath = join(d, 'promptwheel.config.json');
+  const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+  const ph = cfg.metrics.find((m) => /set your test command/.test(m.cmd));
+  assert.ok(ph && ph.guard === true, 'init wrote the placeholder guard');
+  g('add', '-A'); g('commit', '-qm', 'init');
+  ph.cmd = 'true && echo 1'; writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+  g('add', '-A'); g('commit', '-qm', 'set the real test command');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json', '--no-auto']);
+  const rep = reportOf(r.out);
+  assert.notEqual(rep.verdict, 'gamed', r.out);
+  assert.equal(rep.gate.changed, true); assert.equal(rep.gate.weakened, undefined);
+  rmSync(d, { recursive: true, force: true });
+});
+
 const GRADER_PATHS = ['grader.py', 'eval.py', 'grader.sh', 'eval.sh', 'score.py', 'evals/check.py', 'graders/check.sh', 'scripts/grade.sh', 'grade.js', 'evals/run.js'];
 test('isNonSource: a grader, eval or score script in any scripting language, and anything under evals/ or graders/, is non-source', () => {
   for (const p of [...GRADER_PATHS, 'tools/eval_model.py', 'grader/rubric.rb', 'evals/fixtures.json', 'packages/x/evals/judge.ts', 'scoring.R'])
