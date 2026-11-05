@@ -4,7 +4,7 @@
   "plugins": [
     {
       "name": "promptwheel",
-      "version": "0.1.13",
+      "version": "0.1.14",
       "source": "./plugins/promptwheel",
       "description": "A deterministic, zero-LLM check for your coding loop. It proves every change earned its win by re-running the result from the agent's source edits alone, so a green that came from editing the test reads GAMED. Wraps the promptwheel CLI."
     }

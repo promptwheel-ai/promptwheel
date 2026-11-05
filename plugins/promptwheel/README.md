@@ -19,7 +19,7 @@ npm install -g promptwheel
 
 ## Skills
 
-Five skills ship in `skills/`:
+Four skills ship in `skills/`:
 
 | skill | wraps | what it does |
 |---|---|---|
@@ -27,7 +27,8 @@ Five skills ship in `skills/`:
 | `/promptwheel:gate` | `promptwheel run --working` | gate uncommitted changes; reports the verdict (pass, fail, gamed, inconclusive) and what to do about each |
 | `/promptwheel:improve <cmd>` | `promptwheel improve --attempt "<cmd>"` | keep a change only if a metric improved, else revert (exit 0 kept, 1 regression, 2 gamed, 3 plateau) |
 | `/promptwheel:insights` | `promptwheel insights` | which metrics actually respond (loop memory) |
-| `/promptwheel:logbook` | `@promptwheel/logbook` (separate package) | the memory engine's skill, carried here because the two engines are a pair: read a repo's git history as agent memory (hotspots, do-not-retry reverts, suppressions, fragile areas) |
+
+For repo history, install the Logbook plugin: `/plugin marketplace add promptwheel-ai/logbook`, then `/plugin install logbook@logbook`.
 
 No hooks are registered by the plugin. A Claude Code Stop-hook that blocks a GAMED turn ships as a copyable example at [`examples/detect-gaming-stop.sh`](../../examples/detect-gaming-stop.sh); wiring is in [`docs/ENFORCEMENT.md`](../../docs/ENFORCEMENT.md).
 
@@ -35,9 +36,8 @@ It's the **signal inside your loop, not the driver**: `/promptwheel:gate` after 
 
 ## What this plugin runs, writes, and sends (the full list)
 
-**Programs it runs.** The five skills are instructions; the programs they tell Claude to run are
-the `promptwheel` CLI you installed (`promptwheel init|run|improve|insights`) and, for the logbook
-skill, `npx -y @promptwheel/logbook@0.9.10` (pinned to that version). `promptwheel run` and `improve`
+**Programs it runs.** The four skills are instructions; the program they tell Claude to run is
+the `promptwheel` CLI you installed (`promptwheel init|run|improve|insights`). `promptwheel run` and `improve`
 also run your repo's own test or metric command (from `promptwheel.config.json`, or the detected
 test script) in throwaway git worktrees, exactly as you would run it yourself. `/promptwheel:improve`
 takes an attempt command from you (`--attempt "<the command you name>"`, for example an agent
@@ -48,10 +48,8 @@ composes no command of its own. The plugin registers no hooks and no mod.
 `AGENTS.md` (created if absent) and in `CLAUDE.md` and `.cursorrules` when those already exist,
 written by `/promptwheel:setup` (`--no-agent-block` skips the block); under the `security` and
 `security-antihack` presets, a copy of the security pack at `.promptwheel/packs/security/`
-(`scan.mjs`, `patterns.json`, `pack.json`, `README.md`), which you commit with the config; the
-outcome record `.promptwheel/outcomes.jsonl` (add `--no-record` to skip); and, for the logbook
-skill, the memory engine's cache of that repo's own git history (`events.jsonl`, `LOGBOOK.md`),
-which includes the commit author names already in the git log. `/promptwheel:improve` also changes
+(`scan.mjs`, `patterns.json`, `pack.json`, `README.md`), which you commit with the config; and the
+outcome record `.promptwheel/outcomes.jsonl` (add `--no-record` to skip). `/promptwheel:improve` also changes
 the working tree: when the attempt's change improved a metric it is committed (one commit, message
 prefixed `promptwheel:`), and otherwise the working tree is hard-reset to HEAD and untracked files
 are removed (except `.promptwheel/`), so run it on a clean tree you mean to let it change.

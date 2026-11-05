@@ -1724,16 +1724,9 @@ test('cli: an unknown flag is a usage error (64) on every command, never silentl
   rmSync(d, { recursive: true, force: true });
 });
 
-// ------------------------------------------- review 5: the plugin pins the live logbook and its versions agree
-const LOGBOOK_PIN = '0.9.10';
-test('plugin: the logbook skill and the plugin README pin the live @promptwheel/logbook, and the plugin version matches the marketplace entry', () => {
+// ------------------------------------------- review 5: the plugin's versions agree
+test('plugin: the plugin version matches the marketplace entry', () => {
   const root = join(dirname(ENGINE), '..');
-  for (const f of ['plugins/promptwheel/skills/logbook/SKILL.md', 'plugins/promptwheel/README.md']) {
-    const text = readFileSync(join(root, f), 'utf8');
-    const pins = [...text.matchAll(/@promptwheel\/logbook@([0-9][0-9.]*[0-9])/g)].map((x) => x[1]);
-    assert.ok(pins.length > 0, `${f} carries a pin`);
-    for (const pin of pins) assert.equal(pin, LOGBOOK_PIN, `${f} pins ${pin}, the live release is ${LOGBOOK_PIN}`);
-  }
   const plugin = JSON.parse(readFileSync(join(root, 'plugins/promptwheel/.claude-plugin/plugin.json'), 'utf8'));
   const market = JSON.parse(readFileSync(join(root, '.claude-plugin/marketplace.json'), 'utf8'));
   assert.equal(market.plugins.find((x) => x.name === 'promptwheel').version, plugin.version, 'plugin.json and marketplace.json agree on the version');
