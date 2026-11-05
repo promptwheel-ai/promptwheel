@@ -1,6 +1,6 @@
 # PromptWheel - working notes for agents
 
-**What this is now:** the **per-turn reward signal for AI coding loops** (and the **outcome gate for AI code** in CI) - a tiny CLI that proves a change *moved a measurable metric without regressing another*. It is the signal a loop *consumes*, not the loop driver. It is NOT (anymore) an agent orchestrator. That product was retired in June 2026 because base tools (Claude Code Workflows/subagents/hooks/Routines, Cursor) commoditized orchestration. See `docs/history/VISION.md` for the full why.
+**What this is now:** the engine behind Sawbuck and the **outcome gate for AI code** in CI - a tiny CLI that proves a change *moved a measurable metric without regressing another*. It is the signal a loop *consumes*, not the loop driver. It is NOT (anymore) an agent orchestrator. That product was retired in June 2026 because base tools (Claude Code Workflows/subagents/hooks/Routines, Cursor) commoditized orchestration. See `docs/history/VISION.md` for the full why.
 
 > The "wheel" = the **improvement flywheel**: every turn only counts if it provably improved something. The outcome gate is the hub.
 
