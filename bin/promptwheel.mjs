@@ -919,7 +919,7 @@ const PRESETS = {
       { name: 'codeowners-frozen', paths: ['CODEOWNERS'], reason: 'review ownership is set by people' },
       { name: 'scanner-frozen', paths: ['.promptwheel/packs/**'], reason: 'the scanners that read the contract are not edited by the change they read' },
       { name: 'lock-frozen', paths: ['promptwheel.lock.json'], allowable: 'flag', reason: 'the architecture lock changes with a reason from a person (--allow), never as a side effect of a change' },
-      { name: 'hooks-frozen', paths: ['.claude/settings.json', '.claude/settings.local.json', '.sawbuck/**'], reason: 'the hooks that enforce the contract are wired by a person, not detached by the agent' },
+      { name: 'hooks-frozen', paths: ['.claude/settings.json', '.claude/settings.local.json', '.sawbuck/**'], allowable: 'flag', reason: 'the hooks that enforce the contract change with a reason from a person (--allow), and are never detached by the agent' },
     ],
     metrics: [
       { name: 'lifecycle_scripts', cmd: 'node packs/supply-chain/scan.mjs lifecycle .', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },

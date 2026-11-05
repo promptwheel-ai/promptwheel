@@ -1809,6 +1809,28 @@ test('gate integrity: replacing the placeholder test command init writes is setu
   rmSync(d, { recursive: true, force: true });
 });
 
+test('supply-chain: a person can accept a hooks change with --allow; a trailer cannot, and a workflow stays frozen either way', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-hooks-'));
+  execFileSync('git', ['init', '-q'], { cwd: d });
+  mkdirSync(join(d, 'src')); writeFileSync(join(d, 'src/a.js'), 'export const a = 1;\n');
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x' }));
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0);
+  commitAll(d, 'contract');
+  mkdirSync(join(d, '.claude')); writeFileSync(join(d, '.claude/settings.json'), '{"hooks":{}}\n');
+  commitAll(d, 'share the hooks\n\nPromptwheel-Allow: an agent approving itself');
+  let r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
+  assert.equal(r.code, 1, 'a trailer does not clear it');
+  assert.ok(JSON.parse(r.out.slice(r.out.indexOf('{'))).mandates.some((m) => m.name === 'hooks-frozen'));
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', '--allow', 'the team shares the hooks']);
+  assert.equal(r.code, 0, r.out);
+  assert.ok(JSON.parse(r.out).allowed.cleared.includes('mandate:hooks-frozen'));
+  mkdirSync(join(d, '.github/workflows'), { recursive: true }); writeFileSync(join(d, '.github/workflows/x.yml'), 'on: push\n');
+  commitAll(d, 'add a workflow');
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', '--allow', 'please']);
+  assert.equal(r.code, 1, 'a workflow change is not cleared by --allow');
+  rmSync(d, { recursive: true, force: true });
+});
+
 const GRADER_PATHS = ['grader.py', 'eval.py', 'grader.sh', 'eval.sh', 'score.py', 'evals/check.py', 'graders/check.sh', 'scripts/grade.sh', 'grade.js', 'evals/run.js'];
 test('isNonSource: a grader, eval or score script in any scripting language, and anything under evals/ or graders/, is non-source', () => {
   for (const p of [...GRADER_PATHS, 'tools/eval_model.py', 'grader/rubric.rb', 'evals/fixtures.json', 'packages/x/evals/judge.ts', 'scoring.R'])

@@ -82,13 +82,14 @@ metrics say, and a mandate deleted or narrowed in the same change that violates 
 | scanner-frozen | `.promptwheel/packs/**` | the scanners are not edited by the change they read |
 | contract-frozen | `promptwheel.config.json`, `sawbuck.config.json` | the contract changes with a reason from a person (`--allow`) |
 | lock-frozen | `promptwheel.lock.json` | the lock changes with a reason from a person (`--allow`) |
-| hooks-frozen | `.claude/settings.json`, `.claude/settings.local.json`, `.sawbuck/**` | the hooks that enforce the contract are wired by a person |
+| hooks-frozen | `.claude/settings.json`, `.claude/settings.local.json`, `.sawbuck/**` | the hooks change with a reason from a person (`--allow`) |
 
 The contract itself (`promptwheel.config.json`, `sawbuck.config.json`) is frozen too, and it is also an
 `evaluatorPaths` entry. A change to it needs `--allow "<reason>"` from a person. Without that, a change that
 only weakens a rule would pass, and the next change would be judged by the weakened contract.
 
-`--allow` clears only two of these: `contract-frozen` and `lock-frozen`. Every other frozen path stays
+`--allow` clears only three of these: `contract-frozen`, `lock-frozen` and `hooks-frozen` (so a team can commit
+shared hooks to a repo that already has its rules). A commit trailer clears none. Every other frozen path stays
 frozen, even with `--allow`. To change one, a person first retires its mandate in a change of its own
 (it edits the contract, so it needs `--allow`), then makes the change, then puts the mandate back the
 same way.
