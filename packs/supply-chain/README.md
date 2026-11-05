@@ -30,6 +30,8 @@ clean git worktrees, so a pack that is not in git is absent at both refs and the
 - **lock_drift**: structural items the tree has that `promptwheel.lock.json` does not. `promptwheel lock` reads the repo once and writes its shape: dependencies, install scripts, workflows, modules, import edges between modules, routes, public entry points, and the network hosts the source names. It also records each script's body, native binaries, and what a module can do (network, process spawning, eval), so a new capability shows even when the host is built at runtime. Ordinary edits never touch it. A new route is reported but not held by default; add `--routes` to hold it. On 1,403 commits across eight repositories this guard would have stopped 5.1%, about one in 20. JS and TS only for edges, routes, hosts and capabilities today.
 - **pins_changed**: a fingerprint of the resolved dependency tree, compared base to head, because a new version under an old name is how a worm arrives. It covers every package, version, source and integrity, not the file's bytes, so a release of your own project does not count. Any change needs a reason. Nothing is stored, so the lock does not change across updates and an approved update does not blind the next check. On the same commits this stopped 8.7%, dependency changes; use the CI path below for those.
 
+**On a pull request.** Someone with write access comments `sawbuck-allow: <reason>` and re-runs the check. `sawbuck contract` marks everyday guards `report: true`, so they note a change without failing until you tighten them; this preset on its own holds them all.
+
 **Dependency updates in CI.** Give the reason from a step the agent cannot reach. Workflows are a frozen path, so an agent cannot edit this:
 
 ```yaml
