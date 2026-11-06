@@ -2278,3 +2278,126 @@ test('self-heal: a registered worktree a killed run left behind is removed once 
   execFileSync('git', ['worktree', 'remove', '--force', live], { cwd: d });
   for (const p of [tmp, d]) rmSync(p, { recursive: true, force: true });
 });
+
+// ---- a workspaces repo, as an outside field report hit it on 0.1.44: the check linked only the root node_modules,
+// so a test that needed a workspace's own dependencies could not run, and nothing was measured
+function monoRepo({ pnpm = false } = {}) {
+  const d = mkdtempSync(join(tmpdir(), 'pw-mono-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  const put = (f, c) => { mkdirSync(dirname(join(d, f)), { recursive: true }); writeFileSync(join(d, f), c); };
+  put('.gitignore', 'node_modules\n.promptwheel/\n');
+  put('package.json', JSON.stringify({ name: 'mono', private: true, version: '1.0.0', workspaces: ['apps/*', 'packages/*'], scripts: { test: 'node --test' } }));
+  put('apps/web/package.json', '{"name":"web","version":"1.0.0"}');
+  put('packages/util/package.json', '{"name":"@x/util","version":"1.0.0","main":"index.js"}');
+  put('packages/util/index.js', 'exports.add=(a,b)=>a-b\n');
+  // one outside dependency in the root, and one only the web workspace has
+  put('node_modules/rootdep/package.json', '{"name":"rootdep","version":"1.0.0","main":"index.js"}'); put('node_modules/rootdep/index.js', 'module.exports=(x)=>x\n');
+  put('apps/web/node_modules/localdep/package.json', '{"name":"localdep","version":"1.0.0","main":"index.js"}'); put('apps/web/node_modules/localdep/index.js', 'module.exports=(x)=>x\n');
+  // the link to the sibling package: npm and yarn put it in the root, pnpm in the workspace that depends on it
+  const at = pnpm ? 'apps/web/node_modules/@x' : 'node_modules/@x';
+  mkdirSync(join(d, at), { recursive: true }); symlinkSync(pnpm ? '../../../../packages/util' : '../../packages/util', join(d, at, 'util'));
+  put('apps/web/src/sum.js', "const id=require('localdep'),root=require('rootdep');const {add}=require('@x/util');exports.sum=(a,b)=>root(id(add(a,b)))\n");
+  put('apps/web/test/sum.test.js', "require('node:test').test('sum',()=>require('node:assert').equal(require('../src/sum.js').sum(2,3),5))\n");
+  commitAll(d, 'base: add subtracts');
+  return { d, put };
+}
+const runJson = (d, ...extra) => { const r = spawnSync('node', [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--json', '--no-record', ...extra], { cwd: d, encoding: 'utf8' }); return { code: r.status, rep: JSON.parse(r.stdout) }; };
+for (const pnpm of [false, true]) {
+  test(`measure env: with no config, a workspaces repo is measured (${pnpm ? 'pnpm' : 'npm and yarn'} layout): the workspace's own dependencies resolve, and a sibling package is read at the ref being measured`, () => {
+    const { d, put } = monoRepo({ pnpm });
+    put('packages/util/index.js', 'exports.add=(a,b)=>a+b\n'); commitAll(d, 'fix add, in the sibling package');
+    const { code, rep } = runJson(d);
+    const m = rep.metrics.find((x) => x.name === 'tests_pass');
+    assert.equal(m.before, 0, 'the base ref is measured with the base ref\'s sibling package, not the working tree\'s');
+    assert.equal(m.after, 1);
+    assert.equal(rep.verdict, 'pass'); assert.equal(code, 0); assert.ok(!m.inert);
+    rmSync(d, { recursive: true, force: true });
+  });
+}
+test('measure env: a regression in a sibling package is seen, not hidden by reading the working tree at both refs', () => {
+  const { d, put } = monoRepo();
+  put('packages/util/index.js', 'exports.add=(a,b)=>a+b\n'); commitAll(d, 'good');
+  put('packages/util/index.js', 'exports.add=(a,b)=>a*b\n'); commitAll(d, 'break add');
+  const { code, rep } = runJson(d);
+  const m = rep.metrics.find((x) => x.name === 'tests_pass');
+  assert.equal(m.before, 1); assert.equal(m.after, 0);
+  assert.equal(rep.verdict, 'fail'); assert.equal(code, 1);
+  rmSync(d, { recursive: true, force: true });
+});
+test('measure env: a single-package repo keeps one link for node_modules; a workspaces repo gets its own folder, so a test cannot write into the real one', () => {
+  const probe = [{ name: 'nm_is_link', cmd: '[ -L node_modules ] && echo 1 || echo 0', extract: 'number', direction: 'up' },
+    { name: 'writes', cmd: 'touch node_modules/.made-by-a-test 2>/dev/null; echo 1', extract: 'number', direction: 'up' }];
+  const single = mkdtempSync(join(tmpdir(), 'pw-single-'));
+  const g = (a) => execFileSync('git', a, { cwd: single });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(single, '.gitignore'), 'node_modules\n.promptwheel/\n'); mkdirSync(join(single, 'node_modules/dep'), { recursive: true }); writeFileSync(join(single, 'node_modules/dep/index.js'), '');
+  writeFileSync(join(single, 'promptwheel.config.json'), JSON.stringify({ metrics: probe })); writeFileSync(join(single, 'a.txt'), '1'); commitAll(single, 'a'); writeFileSync(join(single, 'a.txt'), '2'); commitAll(single, 'b');
+  assert.equal(runJson(single).rep.metrics.find((x) => x.name === 'nm_is_link').after, 1);
+  const { d, put } = monoRepo();
+  put('promptwheel.config.json', JSON.stringify({ metrics: probe })); commitAll(d, 'cfg'); put('a.txt', '2'); commitAll(d, 'b');
+  assert.equal(runJson(d).rep.metrics.find((x) => x.name === 'nm_is_link').after, 0);
+  assert.ok(!existsSync(join(d, 'node_modules/.made-by-a-test')), 'the real node_modules is untouched');
+  rmSync(single, { recursive: true, force: true }); rmSync(d, { recursive: true, force: true });
+});
+
+// ---- the same report: signing moved test_count by 37, the matches inside the tool's own copied scanners
+test('init: every counting tripwire leaves out the tool\'s own .promptwheel folder, so installing the tool does not move its own baseline', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-tripwire-'));
+  execFileSync('git', ['init', '-q'], { cwd: d });
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'node --test' } }));
+  mkdirSync(join(d, 'test')); writeFileSync(join(d, 'test/a.test.js'), "test('a', () => { expect(1) })\n");
+  assert.equal(pw(d, ['init', '--no-agent-block']).code, 0);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  const count = (name) => +execFileSync('sh', ['-c', cfg.metrics.find((m) => m.name === name).cmd], { cwd: d, encoding: 'utf8' }).trim();
+  const names = ['test_count', 'skipped_tests', 'suppressions', 'assertions'];
+  const was = names.map(count);
+  mkdirSync(join(d, '.promptwheel/packs/x'), { recursive: true });
+  writeFileSync(join(d, '.promptwheel/packs/x/scan.mjs'), "test('t', () => {}); it('i', () => {}); describe('d', () => {}); it.skip('s'); expect(1); assert(1) // eslint-disable\n");
+  assert.deepEqual(names.map(count), was);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ---- the same report: one message for a red suite, a failed setup and a missing dependency, and setup output thrown away
+test('run: a setup that fails is named in the report with its exit code and last line, at each ref it failed', () => {
+  const d = tmpRepo([{ name: 'ok', cmd: 'true', extract: 'exit', direction: 'pass', guard: true }]);
+  const f = join(d, 'promptwheel.config.json');
+  writeFileSync(f, JSON.stringify({ ...JSON.parse(readFileSync(f, 'utf8')), setup: 'echo building; echo "boom: missing compiler" >&2; exit 7' }));
+  writeFileSync(join(d, 'a.txt'), '1'); commitAll(d, 'a'); writeFileSync(join(d, 'a.txt'), '2'); commitAll(d, 'b');
+  const { rep } = runJson(d);
+  assert.deepEqual(rep.setup, { base: { exit: 7, lastLine: 'boom: missing compiler' }, head: { exit: 7, lastLine: 'boom: missing compiler' } });
+  assert.match(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']).out, /setup failed \(exit 7\)[^\n]*boom: missing compiler/);
+  writeFileSync(f, JSON.stringify({ ...JSON.parse(readFileSync(f, 'utf8')), setup: 'true' })); commitAll(d, 'setup works');
+  writeFileSync(join(d, 'a.txt'), '3'); commitAll(d, 'c');
+  assert.equal(runJson(d).rep.setup, undefined, 'no setup field when setup worked');
+  rmSync(d, { recursive: true, force: true });
+});
+test('run: a test metric that fails at both refs says whether a dependency is missing or the tests just fail', () => {
+  const mk = (testBody) => {
+    const d = mkdtempSync(join(tmpdir(), 'pw-cause-'));
+    const g = (a) => execFileSync('git', a, { cwd: d });
+    g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+    writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+    writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x', version: '1.0.0', scripts: { test: 'node --test' } }));
+    mkdirSync(join(d, 'test')); writeFileSync(join(d, 'test/a.test.js'), testBody); commitAll(d, 'a');
+    writeFileSync(join(d, 'note.txt'), 'x'); commitAll(d, 'b');
+    const m = runJson(d).rep.metrics.find((x) => x.name === 'tests_pass');
+    rmSync(d, { recursive: true, force: true });
+    return m;
+  };
+  const missing = mk("const dep = require('a-package-nobody-installed');\nrequire('node:test').test('t', () => dep());\n");
+  assert.equal(missing.inert, true); assert.equal(missing.cause, 'missing-dependency'); assert.match(missing.detail, /a-package-nobody-installed/);
+  const red = mk("require('node:test').test('t', () => require('node:assert').equal(1, 2));\n");
+  assert.equal(red.inert, true); assert.equal(red.cause, 'failing');
+});
+
+// ---- the same report: on 0.7.16 --allow turned "could not measure" into exit 0
+test('run: --allow does not turn an inconclusive result into a pass: a waiver overrides a verdict, not the lack of one', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'false', extract: 'exit', direction: 'pass', guard: true }]);
+  writeFileSync(join(d, 'a.txt'), '1'); commitAll(d, 'a'); writeFileSync(join(d, 'a.txt'), '2'); commitAll(d, 'b');
+  assert.equal(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']).code, 3);
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--allow', 'ship it']);
+  assert.equal(r.code, 3, r.out);
+  assert.doesNotMatch(r.out, /VERDICT: PASS/);
+  rmSync(d, { recursive: true, force: true });
+});

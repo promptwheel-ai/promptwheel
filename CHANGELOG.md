@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.2 (2026-11-06): what a field report found on a real monorepo
+
+An outside report ran 0.7.16 on a private npm-workspaces monorepo. These are the engine findings from it.
+
+- **Workspaces are measured with no config.** The check linked only the root `node_modules`, so a test that needed a workspace's own dependencies could not run and nothing was measured. With no `linkDirs` set, the `node_modules` of every folder that has a tracked `package.json` is linked too.
+- **A sibling package is read at the ref being measured.** npm, yarn and pnpm link a workspace package from `node_modules` back into the repo. Through one symlink to the real folder, a test in the worktree imported the sibling from the working tree at both refs, so a regression there read as "nothing changed". A `node_modules` that holds such links is now rebuilt in the worktree with those links pointed at the worktree. A repo with no workspace links keeps the single symlink.
+- **`test_count` leaves out `.promptwheel`.** The other three counting tripwires already did. Copying the supply-chain scanners into a repo moved its own `test_count` baseline by 37.
+- **A failed `setup` is reported.** Its output was thrown away. The report now carries `setup: { base, head }` with the exit code and last line at each ref where it failed, and the terminal says so.
+- **A test metric that fails at both refs says why.** `cause` is `missing-dependency` when the output names a module, package or command the clean copy does not have (with the line in `detail`), else `failing`. A hint for the person, never part of a verdict.
+- **`--allow` and an inconclusive result.** A test now holds that a waiver does not turn "could not measure" into a pass. A win whose source-only patch could not be applied still takes `--allow`, as before, and reads as allowed, not proved.
+
 ## 0.8.1 (2026-11-05): claims checked against the code
 
 - **Two cheats in one change.** A guard swapped or renamed in the same change that edits the test green is judged under the old definition, source-only re-run included, and reads `GAMED`. A file dropped from `evaluatorPaths` in the change that edits it still counts as a goalpost. Stated limits: a build script the unchanged `setup` runs, and a base config that extends a file outside the repository.

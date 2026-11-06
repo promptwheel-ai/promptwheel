@@ -146,6 +146,10 @@ export interface MetricResult extends Evaluation {
   guard: boolean;
   /** With `inert`: where the command ran and failed (`both` refs, or only `base` or `head`). Absent when it ran at neither: exit 126 or 127, a timeout, or the placeholder command `init` writes. */
   ran?: 'both' | 'base' | 'head';
+  /** With `inert`: a hint read from the command's output. `missing-dependency` when it names a module, package or command the clean copy does not have, else `failing`. Never part of a verdict. */
+  cause?: 'missing-dependency' | 'failing';
+  /** With `cause: 'missing-dependency'`: the line that names what is missing, at most 200 characters. */
+  detail?: string;
   /** `true` when the win did not survive the source-only re-run; `null` when the source-only patch could not be applied (then `unprovable` is set and the verdict is `inconclusive`, never `pass`). Absent without gaming detection or when the metric did not improve. */
   gamed?: boolean | null;
   /** `true`: the source-only patch could not be applied, so this win could not be re-proven and the verdict is `inconclusive`. `false` only after a declared override cleared it (then `allowed` is `true`). */
@@ -234,7 +238,15 @@ export interface Report {
   mandates?: MandateViolation[];
   gate?: GateRecord;
   allowed?: AllowedRecord;
+  /** Present only when the `setup` command failed: at which ref, with what exit code, and its last output line. */
+  setup?: { base?: SetupFailure; head?: SetupFailure };
   provenance: Provenance;
+}
+
+export interface SetupFailure {
+  /** The setup command's exit code, or `null` when it was killed (a timeout). */
+  exit: number | null;
+  lastLine: string;
 }
 
 // ---------------------------------------------------------------------------

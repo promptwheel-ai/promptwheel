@@ -16,7 +16,7 @@ import { execSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, realpathSync, readdirSync, lstatSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, isAbsolute, relative } from 'node:path';
+import { join, dirname, basename, isAbsolute, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
@@ -147,7 +147,15 @@ function resolveBase(repo, base) {
 // test that ran and failed
 const exitCodes = new WeakMap();
 const neverRan = (samples) => { const c = exitCodes.get(samples) || []; return c.length > 0 && c.every((x) => x == null || x === 126 || x === 127); };
-function runMetric(cwd, m, env, codes) {
+// Why a metric's command failed, read from its output: a dependency the clean copy does not have reads differently
+// from tests that simply fail. A hint for the person, never part of a verdict.
+const MISSING_DEP = /Cannot find (?:module|package) ['"][^'"\n]+['"]|ERR_MODULE_NOT_FOUND[^\n]*|ModuleNotFoundError: [^\n]+|No module named [^\n]+|error TS2307: [^\n]+|[^\n:]*: (?:command )?not found[^\n]*|can't find crate[^\n]*|cannot find package [^\n]+/i;
+function whyFailed(text) {
+  const m = String(text || '').replace(/\x1b\[[0-9;]*m/g, '').match(MISSING_DEP);
+  return m ? { cause: 'missing-dependency', detail: m[0].trim().slice(0, 200) } : { cause: 'failing' };
+}
+const failNotes = new WeakMap();   // samples -> why the last failing run failed
+function runMetric(cwd, m, env, codes, notes) {
   let stdout = '', code = 0, status = 0;
   // Never leak the harness's own node:test context into the measured gate: a metric like
   // `node --test` would see NODE_TEST_CONTEXT, act as a child reporter, and report a bogus
@@ -155,7 +163,7 @@ function runMetric(cwd, m, env, codes) {
   const childEnv = { ...(env || process.env) }; delete childEnv.NODE_TEST_CONTEXT;
   try {
     stdout = execSync(m.cmd, { cwd, env: childEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: (m.timeoutSec ?? 300) * 1000 });
-  } catch (e) { status = e.status ?? null; code = e.status ?? 1; stdout = `${e.stdout || ''}${e.stderr || ''}`; }
+  } catch (e) { status = e.status ?? null; code = e.status ?? 1; stdout = `${e.stdout || ''}${e.stderr || ''}`; if (notes) notes.push(whyFailed(`${e.stderr || ''}\n${e.stdout || ''}`)); }
   if (codes) codes.push(status);
   return extract(stdout, code, m.extract, m.allowNonzero);
 }
@@ -186,11 +194,56 @@ function extract(stdout, code, mode, allowNonzero) {
 // Python run can put the measured ref FIRST on PYTHONPATH). Ecosystem knowledge lives in config,
 // not here, the engine stays ecosystem-agnostic.
 const linkDirsOf = (cfg) => (Array.isArray(cfg.linkDirs) ? cfg.linkDirs : (cfg.linkNodeModules === false ? [] : ['node_modules']));
-function bridgeEnv(repo, wt, cfg) {
-  for (const d of linkDirsOf(cfg)) {
-    if (existsSync(join(repo, d)) && !existsSync(join(wt, d))) {
-      try { symlinkSync(join(repo, d), join(wt, d)); } catch { /* best effort */ }
+// Every folder that has a tracked package.json and a node_modules of its own: the workspaces of a monorepo, whichever
+// tool laid them out. Asked of git, so nothing walks the tree.
+function workspaceModuleDirs(repo) {
+  let files = '';
+  try { files = execFileSync('git', ['ls-files', '-z', '--', '*/package.json'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }); } catch { return []; }
+  const out = [];
+  for (const f of files.split('\0')) {
+    if (!f || f.split('/').includes('node_modules')) continue;
+    const d = join(dirname(f), 'node_modules');
+    if (existsSync(join(repo, d))) out.push(d);
+    if (out.length >= 500) break;
+  }
+  return out;
+}
+// A node_modules folder in a workspaces repo holds links back into the repo: npm and yarn link each workspace package
+// from the root, pnpm from the workspace that depends on it. One symlink to the real folder would make a test in the
+// worktree import a sibling package from the working tree, at both refs, so a regression there would never show. Such
+// a folder is rebuilt in the worktree instead: each entry linked on its own, and an entry that points back into the
+// repo pointed at the same path in the worktree. A folder with no such entry keeps the single link it always had.
+function linkModules(repo, wt, d) {
+  const src = join(repo, d), dst = join(wt, d);
+  const entries = [];
+  try {
+    for (const e of readdirSync(src, { withFileTypes: true })) {
+      if (e.name.startsWith('@') && e.isDirectory()) { for (const s of readdirSync(join(src, e.name), { withFileTypes: true })) entries.push([join(e.name, s.name), s]); }
+      else entries.push([e.name, e]);
     }
+  } catch { return; }
+  const back = (name, e) => {
+    if (!e.isSymbolicLink()) return null;
+    try { const r = relative(repo, realpathSync(join(src, name))); return r && !r.startsWith('..') && !isAbsolute(r) && !r.split(sep).includes('node_modules') ? r : null; } catch { return null; }
+  };
+  const links = entries.map(([name, e]) => [name, back(name, e)]);
+  try {
+    if (!links.some(([, rel]) => rel)) { symlinkSync(src, dst); return; }
+    mkdirSync(dst, { recursive: true });
+    for (const [name, rel] of links) {
+      if (name.includes(sep)) mkdirSync(dirname(join(dst, name)), { recursive: true });
+      symlinkSync(rel ? join(wt, rel) : join(src, name), join(dst, name));
+    }
+  } catch { /* best effort */ }
+}
+function bridgeEnv(repo, wt, cfg) {
+  let root = repo; try { root = realpathSync(repo); } catch { /* keep the path as given */ }
+  // with nothing declared, a Node repo links its root node_modules and each workspace's own
+  const dirs = (Array.isArray(cfg.linkDirs) || cfg.linkNodeModules === false) ? linkDirsOf(cfg) : ['node_modules', ...workspaceModuleDirs(root)];
+  for (const d of dirs) {
+    if (!existsSync(join(root, d)) || existsSync(join(wt, d)) || !existsSync(dirname(join(wt, d)))) continue;
+    if (basename(d) === 'node_modules') linkModules(root, wt, d);
+    else { try { symlinkSync(join(root, d), join(wt, d)); } catch { /* best effort */ } }
   }
   if (!cfg.env) return process.env;
   return { ...process.env, ...Object.fromEntries(Object.entries(cfg.env).map(([k, v]) => [k, String(v).replaceAll('{wt}', () => wt)])) }; // fn replacement: a literal wt avoids $-pattern interpretation
@@ -198,10 +251,16 @@ function bridgeEnv(repo, wt, cfg) {
 // an optional per-ref build/install (e.g. `npm run build`, `pip install -e .`). Best-effort: a
 // failed setup just leaves the metric inert → INCONCLUSIVE (never a false green). Run by the
 // caller AFTER any source patch, so it builds the tree actually being measured.
+// Returns nothing when setup worked, or { exit, lastLine } when it did not, so the report can say so.
 function runSetup(wt, cfg, env) {
-  if (!cfg.setup) return;
-  try { execSync(cfg.setup, { cwd: wt, env, stdio: 'ignore', timeout: 300_000 }); } catch { /* inert → inconclusive */ }
+  if (!cfg.setup) return undefined;
+  try { execSync(cfg.setup, { cwd: wt, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000, maxBuffer: 1024 * 1024 * 1024 }); return undefined; }
+  catch (e) {
+    const lines = `${e.stdout || ''}\n${e.stderr || ''}`.replace(/\x1b\[[0-9;]*m/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
+    return { exit: e.status ?? null, lastLine: (lines[lines.length - 1] || '').slice(0, 200) };   // the metric goes inert → inconclusive
+  }
 }
+const setupFails = new WeakMap();   // a measureAt result -> how its setup failed
 
 // measure every metric `repeat` times at a ref, in a throwaway worktree (never touches your tree)
 function measureAt(repo, ref, cfg, repeat) {
@@ -209,12 +268,14 @@ function measureAt(repo, ref, cfg, repeat) {
   git(['worktree', 'add', '--quiet', '--detach', wt, ref], repo);
   try {
     const env = bridgeEnv(repo, wt, cfg);
-    runSetup(wt, cfg, env);
+    const setupFailed = runSetup(wt, cfg, env);
     const out = {};
+    if (setupFailed) setupFails.set(out, setupFailed);
     for (const m of cfg.metrics) {
-      const samples = [], codes = [];
-      for (let i = 0; i < repeat; i++) samples.push(runMetric(wt, m, env, codes));
+      const samples = [], codes = [], notes = [];
+      for (let i = 0; i < repeat; i++) samples.push(runMetric(wt, m, env, codes, notes));
       exitCodes.set(samples, codes);
+      if (notes.length) failNotes.set(samples, notes[notes.length - 1]);
       out[m.name] = samples;
     }
     return out;
@@ -883,6 +944,8 @@ function gate(repo, opts) {
     if (ev.inert && m.cmd !== PLACEHOLDER_TEST) {
       const nb = neverRan(before[m.name]), na = neverRan(after[m.name]);
       if (!nb || !na) ev.ran = !nb && !na ? 'both' : nb ? 'head' : 'base';
+      const note = failNotes.get(after[m.name]) || failNotes.get(before[m.name]);   // a hint: a missing dependency or tests that fail
+      if (note) Object.assign(ev, note);
     }
     return { name: m.name, direction: m.direction || 'up', guard: !!m.guard, ...(gamingCheckOff(m, baseGate) ? { tripwire: true } : {}), ...ev };
   });
@@ -954,6 +1017,9 @@ function gate(repo, opts) {
     ...(gateInfo ? { gate: gateInfo } : {}),
     ...(allowed ? { allowed } : {}),
   };
+  // a setup command that failed, at the ref it failed at: the usual reason a metric could not be measured
+  const sb = setupFails.get(before), sa = setupFails.get(after);
+  if (sb || sa) report.setup = { ...(sb ? { base: sb } : {}), ...(sa ? { head: sa } : {}) };
   // provenance receipt: makes the verdict tamper-evident + reproducible ("re-run and get the same
   // verdict is checkable"). Additive to the record; never changes the verdict.
   report.provenance = {
@@ -988,7 +1054,7 @@ const PRESETS = {
   'antihack': { desc: 'catch reward-hacking: a target + tripwires; pairs with `run --detect-gaming` (source-only re-run)',
     metrics: [
       { name: 'tests_pass', cmd: '__TESTCMD__', extract: 'exit', direction: 'pass', guard: true },
-      { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
+      { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
       { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|xit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
       { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa|# ?nosec|//nolint|#!?\\[allow\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
       { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert|\\bt\\.(is|deepEqual|throws|truthy|falsy|not|ok) ?\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
@@ -1179,10 +1245,12 @@ function printHuman(r) {
     const tag = m.guard ? (m.ok ? 'guard✓' : 'GUARD✗') : 'info';
     const d = m.delta == null ? 'n/a' : (m.delta > 0 ? `+${m.delta}` : `${m.delta}`);
     console.log(`  ${arrowFor(m)} ${m.name.padEnd(18)} ${String(m.before).padStart(8)} → ${String(m.after).padStart(8)}  (${d}, ${m.status}) [${tag}, ${m.confidence}]`);
-    if (m.inert && m.ran === 'both') console.log(`      ⚠ "${m.name}" ran and failed before and after this change, so it guards nothing here. Fix the failing tests, or the command, before trusting a pass`);
+    if (m.inert && m.ran && m.cause === 'missing-dependency') console.log(`      ⚠ "${m.name}" could not run in the clean copy at either ref: ${m.detail}. Link or install what it needs (linkDirs or setup in promptwheel.config.json), then check again`);
+    else if (m.inert && m.ran === 'both') console.log(`      ⚠ "${m.name}" ran and failed before and after this change, so it guards nothing here. Fix the failing tests, or the command, before trusting a pass`);
     else if (m.inert) console.log(`      ⚠ "${m.name}" ${m.ran ? `ran and failed at the ${m.ran} ref and did not run at the other` : 'never ran (same value at both refs)'}: its command needs a build/deps first, or is not your real test command. Fix: promptwheel init, or set setup/linkDirs in promptwheel.config.json`);
     if (m.gamed === true) console.log(`      🚩 GAMED, ${m.gamingReason}`);
   }
+  if (r.setup) { const at = Object.keys(r.setup), f = r.setup[at[0]]; console.log(`  ⚠ setup failed (exit ${f.exit}) at the ${at.join(' and ')} ref${at.length > 1 ? 's' : ''}${f.lastLine ? ': ' + f.lastLine : ''}`); }
   if (r.gate && r.gate.weakened) for (const w of r.gate.weakened) console.log(w.change === 'measurement-edited'
     ? `  🚩 GATE WEAKENED, how the guard "${w.name}" is measured (setup, env or linked dirs) was edited in this change, and measured the way it was before it would have ${wouldHave(w.status)} at head (goalpost moved, not earned)`
     : `  🚩 GATE WEAKENED, the guard "${w.name}" was ${w.change === 'guard-removed' ? 'removed' : w.change === 'guard-edited' ? 'edited' : 'disabled'} in this change and it would have ${wouldHave(w.status)} at head (goalpost moved, not earned)`);
