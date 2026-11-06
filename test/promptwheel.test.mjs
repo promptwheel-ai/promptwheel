@@ -2341,6 +2341,29 @@ test('measure env: a single-package repo keeps one link for node_modules; a work
   rmSync(single, { recursive: true, force: true }); rmSync(d, { recursive: true, force: true });
 });
 
+// ---- found by running real repos (proof-bench/field, vuejs/pinia): pnpm keeps a state folder in node_modules and refuses
+// to use it, or node_modules itself, through a symlink, so its scripts failed at once in the clean copy
+test('measure env: a pnpm repo gets a real node_modules folder, and a tool\'s own state folder is not linked into it', () => {
+  const probe = [{ name: 'nm_is_link', cmd: '[ -L node_modules ] && echo 1 || echo 0', extract: 'number', direction: 'up' },
+    { name: 'state_is_link', cmd: '[ -L node_modules/.pnpm-task-run-state-v1 ] && echo 1 || echo 0', extract: 'number', direction: 'up' },
+    { name: 'cache_is_link', cmd: '[ -L node_modules/.cache ] && echo 1 || echo 0', extract: 'number', direction: 'up' },
+    { name: 'bin_works', cmd: '[ -x node_modules/.bin/tool ] && echo 1 || echo 0', extract: 'number', direction: 'up' },
+    { name: 'store_works', cmd: 'node -e "console.log(require(\'dep\'))"', extract: 'number', direction: 'up' }];
+  const d = mkdtempSync(join(tmpdir(), 'pw-pnpm-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  const put = (f, c, mode) => { mkdirSync(dirname(join(d, f)), { recursive: true }); writeFileSync(join(d, f), c, mode ? { mode } : undefined); };
+  put('.gitignore', 'node_modules\n.promptwheel/\n');
+  // one package, laid out the way pnpm does it: the store under .pnpm, the package a link into it, and pnpm's state
+  put('node_modules/.pnpm/dep@1.0.0/node_modules/dep/index.js', 'module.exports = 7\n');
+  symlinkSync('.pnpm/dep@1.0.0/node_modules/dep', join(d, 'node_modules/dep'));
+  put('node_modules/.modules.yaml', 'layoutVersion: 5\n'); put('node_modules/.pnpm-task-run-state-v1/x.json', '{}'); put('node_modules/.cache/y', 'y'); put('node_modules/.bin/tool', '#!/bin/sh\n', 0o755);
+  put('promptwheel.config.json', JSON.stringify({ metrics: probe })); put('a.txt', '1'); commitAll(d, 'a'); put('a.txt', '2'); commitAll(d, 'b');
+  const after = Object.fromEntries(runJson(d).rep.metrics.map((m) => [m.name, m.after]));
+  assert.deepEqual(after, { nm_is_link: 0, state_is_link: 0, cache_is_link: 0, bin_works: 1, store_works: 7 });
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---- the same report: signing moved test_count by 37, the matches inside the tool's own copied scanners
 test('init: every counting tripwire leaves out the tool\'s own .promptwheel folder, so installing the tool does not move its own baseline', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-tripwire-'));

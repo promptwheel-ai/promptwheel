@@ -215,7 +215,8 @@ function workspaceModuleDirs(repo) {
 // from the root, pnpm from the workspace that depends on it. One symlink to the real folder would make a test in the
 // worktree import a sibling package from the working tree, at both refs, so a regression there would never show. Such
 // a folder is rebuilt in the worktree instead: each entry linked on its own, and an entry that points back into the
-// repo pointed at the same path in the worktree. A folder with no such entry keeps the single link it always had.
+// repo pointed at the same path in the worktree. A folder with no such entry, in a repo pnpm did not lay out, keeps
+// the single link it always had.
 function linkModules(repo, wt, d) {
   const src = join(repo, d), dst = join(wt, d);
   const entries = [];
@@ -229,11 +230,16 @@ function linkModules(repo, wt, d) {
     if (!e.isSymbolicLink()) return null;
     try { const r = relative(repo, realpathSync(join(src, name))); return r && !r.startsWith('..') && !isAbsolute(r) && !r.split(sep).includes('node_modules') ? r : null; } catch { return null; }
   };
-  const links = entries.map(([name, e]) => [name, back(name, e)]);
+  const links = entries.map(([name, e]) => [name, back(name, e), e]);
+  // pnpm refuses a node_modules, or its own state folder inside it, that is a symlink: its scripts stop at once
+  const pnpm = entries.some(([name]) => name === '.pnpm' || name === '.modules.yaml');
   try {
-    if (!links.some(([, rel]) => rel)) { symlinkSync(src, dst); return; }
+    if (!pnpm && !links.some(([, rel]) => rel)) { symlinkSync(src, dst); return; }
     mkdirSync(dst, { recursive: true });
-    for (const [name, rel] of links) {
+    for (const [name, rel, e] of links) {
+      // a tool's own state or cache folder (pnpm's task-run state, .cache, .vite) is written to, so each worktree gets
+      // its own, made by the tool. The store (.pnpm) and the executables (.bin) are read, so they are linked.
+      if (name.startsWith('.') && name !== '.bin' && name !== '.pnpm' && e.isDirectory()) continue;
       if (name.includes(sep)) mkdirSync(dirname(join(dst, name)), { recursive: true });
       symlinkSync(rel ? join(wt, rel) : join(src, name), join(dst, name));
     }
