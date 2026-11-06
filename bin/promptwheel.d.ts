@@ -147,7 +147,7 @@ export interface MetricResult extends Evaluation {
   /** With `inert`: where the command ran and failed (`both` refs, or only `base` or `head`). Absent when it ran at neither: exit 126 or 127, a timeout, or the placeholder command `init` writes. */
   ran?: 'both' | 'base' | 'head';
   /** With `inert`: a hint read from the command's output. `missing-dependency` when it names a module, package or command the clean copy does not have, else `failing`. Never part of a verdict. */
-  cause?: 'missing-dependency' | 'failing';
+  cause?: 'missing-dependency' | 'failing' | 'too-much-output';
   /** With `cause: 'missing-dependency'`: the line that names what is missing, at most 200 characters. */
   detail?: string;
   /** `true` when the win did not survive the source-only re-run; `null` when the source-only patch could not be applied (then `unprovable` is set and the verdict is `inconclusive`, never `pass`). Absent without gaming detection or when the metric did not improve. */

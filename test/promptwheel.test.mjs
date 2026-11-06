@@ -2391,6 +2391,17 @@ test('run: a test metric that fails at both refs says whether a dependency is mi
   assert.equal(red.inert, true); assert.equal(red.cause, 'failing');
 });
 
+// ---- found by running real repos (proof-bench/field): tap prints every assertion when its output is a pipe, more than
+// the 1 MB the engine would take, so a passing suite was killed and read as failing at both refs
+test('run: a test command that passes while printing megabytes of output is measured as passing', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'node -e "process.stdout.write(Buffer.alloc(3 * 1024 * 1024, 120).toString())"', extract: 'exit', direction: 'pass', guard: true }]);
+  writeFileSync(join(d, 'a.txt'), '1'); commitAll(d, 'a'); writeFileSync(join(d, 'a.txt'), '2'); commitAll(d, 'b');
+  const { code, rep } = runJson(d);
+  const m = rep.metrics[0];
+  assert.equal(m.before, 1); assert.equal(m.after, 1); assert.ok(!m.inert); assert.equal(code, 0);
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---- the same report: on 0.7.16 --allow turned "could not measure" into exit 0
 test('run: --allow does not turn an inconclusive result into a pass: a waiver overrides a verdict, not the lack of one', () => {
   const d = tmpRepo([{ name: 'tests_pass', cmd: 'false', extract: 'exit', direction: 'pass', guard: true }]);

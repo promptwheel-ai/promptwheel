@@ -162,8 +162,11 @@ function runMetric(cwd, m, env, codes, notes) {
   // exit code (so the gate can't be trusted when PromptWheel itself runs under a test runner).
   const childEnv = { ...(env || process.env) }; delete childEnv.NODE_TEST_CONTEXT;
   try {
-    stdout = execSync(m.cmd, { cwd, env: childEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: (m.timeoutSec ?? 300) * 1000 });
-  } catch (e) { status = e.status ?? null; code = e.status ?? 1; stdout = `${e.stdout || ''}${e.stderr || ''}`; if (notes) notes.push(whyFailed(`${e.stderr || ''}\n${e.stdout || ''}`)); }
+    // maxBuffer: the default is 1 MB, and a suite that prints more than that was killed and read as failing. A real
+    // repo found it (tap prints every assertion when its output is a pipe): the check said "your tests fail" about
+    // a suite that passes.
+    stdout = execSync(m.cmd, { cwd, env: childEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: (m.timeoutSec ?? 300) * 1000, maxBuffer: 1024 * 1024 * 1024 });
+  } catch (e) { status = e.status ?? null; code = e.status ?? 1; stdout = `${e.stdout || ''}${e.stderr || ''}`; if (notes) notes.push(e.code === 'ENOBUFS' ? { cause: 'too-much-output', detail: 'the command printed more than 1 GB, so it was stopped before it finished' } : whyFailed(`${e.stderr || ''}\n${e.stdout || ''}`)); }
   if (codes) codes.push(status);
   return extract(stdout, code, m.extract, m.allowNonzero);
 }
