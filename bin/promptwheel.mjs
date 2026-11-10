@@ -165,7 +165,7 @@ const exitCodes = new WeakMap();
 const neverRan = (samples) => { const c = exitCodes.get(samples) || []; return c.length > 0 && c.every((x) => x == null || x === 126 || x === 127); };
 // Why a metric's command failed, read from its output: a dependency the clean copy does not have reads differently
 // from tests that simply fail. A hint for the person, never part of a verdict.
-const MISSING_DEP = /Cannot find (?:module|package) ['"][^'"\n]+['"]|ERR_MODULE_NOT_FOUND[^\n]*|ModuleNotFoundError: [^\n]+|No module named [^\n]+|error TS2307: [^\n]+|[^\n:]*: (?:command )?not found[^\n]*|can't find crate[^\n]*|cannot find package [^\n]+/i;
+const MISSING_DEP = /Cannot find (?:module|package) ['"][^'"\n]+['"]|ERR_MODULE_NOT_FOUND[^\n]*|ModuleNotFoundError: [^\n]+|No module named [^\n]+|error TS2307: [^\n]+|(?:^|\n)[^\n:]*(?:sh|bash|zsh|dash)(?::\s*\d+)?:[^\n]*?: (?:command )?not found[^\n]*|(?:^|\n)\S+: command not found[^\n]*|can't find crate[^\n]*|cannot find package [^\n]+/i;
 function whyFailed(text) {
   const m = String(text || '').replace(/\x1b\[[0-9;]*m/g, '').match(MISSING_DEP);
   return m ? { cause: 'missing-dependency', detail: m[0].trim().slice(0, 200) } : { cause: 'failing' };
@@ -1368,7 +1368,7 @@ function parseArgs(argv) {
 
 // pure, side-effect-free helpers are exported for unit testing; the CLI below only
 // runs when this file is executed directly (not when imported by the test suite).
-export { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint };
+export { MISSING_DEP, extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public library API: the Verified-Outcome Contract, in process.

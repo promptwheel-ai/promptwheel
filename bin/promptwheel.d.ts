@@ -254,6 +254,8 @@ export interface SetupFailure {
 // ---------------------------------------------------------------------------
 
 /** The Contract revision this build implements; bumps only when the verdict schema or the exit codes change. */
+/** The output lines read as a missing dependency in the clean copy (module not found, a shell's "command not found"). */
+export declare const MISSING_DEP: RegExp;
 export declare const CONTRACT_VERSION: '1';
 export declare const VERDICTS: readonly ['pass', 'fail', 'gamed', 'inconclusive'];
 export declare const METRIC_STATUSES: readonly ['improved', 'regressed', 'unchanged', 'inconclusive', 'unmeasurable'];

@@ -2452,3 +2452,10 @@ test('run: --allow does not turn an inconclusive result into a pass: a waiver ov
   assert.doesNotMatch(r.out, /VERDICT: PASS/);
   rmSync(d, { recursive: true, force: true });
 });
+
+test('a test that prints an HTTP "Not found" is not read as a missing dependency; a shell "command not found" still is', async () => {
+  const { MISSING_DEP } = await import('../bin/promptwheel.mjs');
+  for (const t of ['#   Error: Not found', 'GET /users/9 404 Not found', 'expected "Not found" to equal "OK"']) assert.ok(!MISSING_DEP.test(t), t);
+  for (const t of ['sh: 1: jest: not found', '/bin/sh: 1: vitest: not found', 'bash: tsc: command not found', "Error: Cannot find module 'left-pad'"]) assert.ok(MISSING_DEP.test(t), t);
+});
+
