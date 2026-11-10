@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint,
   allowFromComments, check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION, deriveVerdict } from '../bin/promptwheel.mjs';
 import { createHash } from 'node:crypto';
-import { realpathSync } from 'node:fs';
+import { realpathSync, chmodSync } from 'node:fs';
 
 const ENGINE = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'promptwheel.mjs');
 
@@ -891,6 +891,17 @@ const pwTmp = (tmp, d, args) => {
   try { return { out: execFileSync('node', [ENGINE, ...args], { cwd: d, encoding: 'utf8', env: { ...process.env, TMPDIR: tmp } }), code: 0 }; }
   catch (e) { return { out: `${e.stdout || ''}${e.stderr || ''}`, code: e.status }; }
 };
+test('a read-only system temp folder (a sandboxed agent, a locked-down runner) does not stop the gate: it measures inside .git', () => {
+  const ro = mkdtempSync(join(tmpdir(), 'pw-ro-')); chmodSync(ro, 0o555);
+  const d = tmpRepo([TODOS]);
+  const before = execFileSync('git', ['status', '--porcelain'], { cwd: d, encoding: 'utf8' }).trim();
+  try {
+    const r = pwTmp(ro, d, ['run', '--no-record']);
+    assert.ok(!/EROFS|EACCES|mkdtemp/.test(r.out), r.out);
+    assert.ok(existsSync(join(d, '.git', 'promptwheel-tmp')), 'the clean copies went under .git');
+    assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: d, encoding: 'utf8' }).trim(), before, 'git status shows nothing new');
+  } finally { chmodSync(ro, 0o755); rmSync(ro, { recursive: true, force: true }); rmSync(d, { recursive: true, force: true }); }
+});
 test('self-heal: a stale /tmp worktree from a crashed run is cleaned on the next run; an untagged dir is never removed', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'pw-heal-'));
   const d = tmpRepo([TODOS]);

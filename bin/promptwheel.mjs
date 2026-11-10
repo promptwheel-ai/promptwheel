@@ -16,7 +16,7 @@ import { execSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, realpathSync, readdirSync, lstatSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname, basename, isAbsolute, relative, sep } from 'node:path';
+import { join, dirname, basename, isAbsolute, relative, sep, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // ---------------------------------------------------------------------------
@@ -36,6 +36,19 @@ const spread = (xs) => { const a = xs.filter((x) => x != null); return a.length 
 // repo is still measuring in (a long gate elsewhere must not lose its worktree mid-run)
 function tmpOwnerTag(repo) { let r = repo; try { r = realpathSync(repo); } catch { /* keep as given */ } return createHash('sha1').update(String(r)).digest('hex').slice(0, 8); }
 const tmpPrefix = (repo, kind) => `${kind}-${tmpOwnerTag(repo)}-`;
+// where the engine makes its clean copies: the system temp folder, or, where that is read-only (Claude Code's sandbox,
+// a locked-down CI runner), a folder inside the repo's own .git, which git status never shows
+const tmpBases = new Map();
+function tmpBase(repo) {
+  if (tmpBases.has(repo)) return tmpBases.get(repo);
+  let base = tmpdir();
+  try { rmSync(mkdtempSync(join(base, 'pw-probe-')), { recursive: true, force: true }); }
+  catch {
+    let gd = ''; try { gd = resolve(repo, execFileSync('git', ['-C', repo, 'rev-parse', '--git-common-dir'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()); } catch { /* */ }
+    if (gd) { base = join(gd, 'promptwheel-tmp'); try { mkdirSync(base, { recursive: true }); } catch { base = tmpdir(); } }
+  }
+  tmpBases.set(repo, base); return base;
+}
 // exactly the names mkdtemp makes from tmpPrefix: the kind, the 8-hex owner tag, then mkdtemp's 6 random
 // characters. Self-heal removes nothing else, so a folder that only starts with "promptwheel-" is never ours.
 const ENGINE_TMP = /^(promptwheel-src|promptwheel|pw-idx)-([0-9a-f]{8})-[A-Za-z0-9]{6}$/;
@@ -273,7 +286,7 @@ const setupFails = new WeakMap();   // a measureAt result -> how its setup faile
 
 // measure every metric `repeat` times at a ref, in a throwaway worktree (never touches your tree)
 function measureAt(repo, ref, cfg, repeat) {
-  const wt = mkdtempSync(join(tmpdir(), tmpPrefix(repo, 'promptwheel')));
+  const wt = mkdtempSync(join(tmpBase(repo), tmpPrefix(repo, 'promptwheel')));
   git(['worktree', 'add', '--quiet', '--detach', wt, ref], repo);
   try {
     const env = bridgeEnv(repo, wt, cfg);
@@ -489,7 +502,7 @@ function measureSourceOnlyAll(repo, base, head, defs, cfg, repeat) {
   if (!defs.length) return out;
   const { source } = changedSourcePaths(repo, base, head, evaluatorMatcher(cfg));
   if (!source.length) { for (const m of defs) out[m.name] = { samples: [], hadSourceChange: false }; return out; } // a "win" with zero source edits = goalposts moved
-  const wt = mkdtempSync(join(tmpdir(), tmpPrefix(repo, 'promptwheel-src')));
+  const wt = mkdtempSync(join(tmpBase(repo), tmpPrefix(repo, 'promptwheel-src')));
   git(['worktree', 'add', '--quiet', '--detach', wt, base], repo);
   try {
     const env = bridgeEnv(repo, wt, cfg);
@@ -550,7 +563,7 @@ function judgeGaming(m, srcResult, threshold = 0.5) {
 // touching the real index or files, so a gate sees a file an agent just added.
 // Returns 'HEAD' when nothing changed.
 function workingSnapshot(repo) {
-  const idxDir = mkdtempSync(join(tmpdir(), tmpPrefix(repo, 'pw-idx')));
+  const idxDir = mkdtempSync(join(tmpBase(repo), tmpPrefix(repo, 'pw-idx')));
   const env = {
     ...process.env, GIT_INDEX_FILE: join(idxDir, 'index'),
     GIT_AUTHOR_NAME: 'promptwheel', GIT_AUTHOR_EMAIL: 'promptwheel@local',
@@ -589,7 +602,7 @@ function selfHeal(repo) {
       git(['worktree', 'list', '--porcelain'], repo)
         .split('\n').filter((l) => l.startsWith('worktree ')).map((l) => l.slice(9).trim()),
     );
-    const tmp = tmpdir(), now = Date.now(), mine = tmpOwnerTag(repo);
+    const tmp = tmpBase(repo), now = Date.now(), mine = tmpOwnerTag(repo);
     for (const name of readdirSync(tmp)) {
       const made = ENGINE_TMP.exec(name);
       if (!made) continue;   // not a name this engine generates (worktrees + temp-index dirs): never removed
