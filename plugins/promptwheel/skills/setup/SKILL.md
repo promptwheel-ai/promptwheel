@@ -1,7 +1,6 @@
 ---
 description: Initialize PromptWheel in this repository - detect the stack and write a starter promptwheel.config.json so the outcome gate can run. Use the first time PromptWheel is set up in a repo.
 arguments: "[--preset <name>] [--list]"
-allowed-tools: ["Bash(promptwheel:*)"]
 ---
 
 Set up PromptWheel for this repo.
