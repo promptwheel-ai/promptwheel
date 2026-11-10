@@ -893,14 +893,20 @@ const pwTmp = (tmp, d, args) => {
 };
 test('a read-only system temp folder (a sandboxed agent, a locked-down runner) does not stop the gate: it measures inside .git', () => {
   const ro = mkdtempSync(join(tmpdir(), 'pw-ro-')); chmodSync(ro, 0o555);
-  const d = tmpRepo([TODOS]);
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'a.js'), '// TODO one\n'); commitAll(d, 'base'); writeFileSync(join(d, 'a.js'), '// done\n'); commitAll(d, 'fix');
   const before = execFileSync('git', ['status', '--porcelain'], { cwd: d, encoding: 'utf8' }).trim();
   try {
-    const r = pwTmp(ro, d, ['run', '--no-record']);
-    assert.ok(!/EROFS|EACCES|mkdtemp/.test(r.out), r.out);
+    const r = pwTmp(ro, d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']);
+    assert.ok(!/EROFS|EACCES|mkdtemp|cannot write/.test(r.out), r.out); assert.match(r.out, /todos/, 'it measured');
     assert.ok(existsSync(join(d, '.git', 'promptwheel-tmp')), 'the clean copies went under .git');
     assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: d, encoding: 'utf8' }).trim(), before, 'git status shows nothing new');
   } finally { chmodSync(ro, 0o755); rmSync(ro, { recursive: true, force: true }); rmSync(d, { recursive: true, force: true }); }
+});
+test('a sandboxed shell where both the temp folder and .git are read-only gets one plain sentence, not a stack', () => {
+  const ro = mkdtempSync(join(tmpdir(), 'pw-ro2-')); chmodSync(ro, 0o555);
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'a.js'), '// TODO one\n'); commitAll(d, 'base'); writeFileSync(join(d, 'a.js'), '// done\n'); commitAll(d, 'fix'); const gd = join(d, '.git'); const pt = join(gd, 'promptwheel-tmp'); mkdirSync(pt); chmodSync(pt, 0o555);
+  try { const r = pwTmp(ro, d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']); assert.match(r.out, /this shell cannot write a temp folder or \.git/); assert.ok(!/at mkdtempSync/.test(r.out), 'no stack'); }
+  finally { chmodSync(ro, 0o755); chmodSync(pt, 0o755); rmSync(ro, { recursive: true, force: true }); rmSync(d, { recursive: true, force: true }); }
 });
 test('self-heal: a stale /tmp worktree from a crashed run is cleaned on the next run; an untagged dir is never removed', () => {
   const tmp = mkdtempSync(join(tmpdir(), 'pw-heal-'));

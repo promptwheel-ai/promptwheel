@@ -45,7 +45,10 @@ function tmpBase(repo) {
   try { rmSync(mkdtempSync(join(base, 'pw-probe-')), { recursive: true, force: true }); }
   catch {
     let gd = ''; try { gd = resolve(repo, execFileSync('git', ['-C', repo, 'rev-parse', '--git-common-dir'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()); } catch { /* */ }
-    if (gd) { base = join(gd, 'promptwheel-tmp'); try { mkdirSync(base, { recursive: true }); } catch { base = tmpdir(); } }
+    let ok = false;
+    if (gd) { const g = join(gd, 'promptwheel-tmp'); try { mkdirSync(g, { recursive: true }); rmSync(mkdtempSync(join(g, 'pw-probe-')), { recursive: true, force: true }); base = g; ok = true; } catch { /* */ } }
+    // a sandboxed shell (Claude Code's sandbox makes the temp folder and .git read-only): say so plainly, not with a stack
+    if (!ok) throw new Error('this shell cannot write a temp folder or .git (a sandboxed agent shell). Run the check outside the sandbox; under attach, the Stop hook checks each turn outside it.');
   }
   tmpBases.set(repo, base); return base;
 }
