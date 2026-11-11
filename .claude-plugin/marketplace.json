@@ -1,6 +1,6 @@
 {
   "name": "promptwheel-ai",
-  "owner": { "name": "Matthew Owens", "url": "https://github.com/promptwheel-ai" },
+  "owner": { "name": "CodeWheel", "url": "https://github.com/promptwheel-ai" },
   "plugins": [
     {
       "name": "promptwheel",

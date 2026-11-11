@@ -4,7 +4,7 @@
   "description": "A deterministic, zero-LLM check for your coding loop. It proves every change earned its win by re-running the result from the agent's source edits alone, so a green that came from editing the test reads GAMED. Thin wrapper around the promptwheel CLI.",
   "version": "0.1.16",
   "author": {
-    "name": "Matthew Owens"
+    "name": "CodeWheel"
   },
   "homepage": "https://promptwheel.com",
   "repository": "https://github.com/promptwheel-ai/promptwheel",
