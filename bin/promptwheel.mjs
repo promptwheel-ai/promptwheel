@@ -166,8 +166,12 @@ const neverRan = (samples) => { const c = exitCodes.get(samples) || []; return c
 // Why a metric's command failed, read from its output: a dependency the clean copy does not have reads differently
 // from tests that simply fail. A hint for the person, never part of a verdict.
 const MISSING_DEP = /Cannot find (?:module|package) ['"][^'"\n]+['"]|ERR_MODULE_NOT_FOUND[^\n]*|ModuleNotFoundError: [^\n]+|No module named [^\n]+|error TS2307: [^\n]+|(?:^|\n)[^\n:]*(?:sh|bash|zsh|dash)(?::\s*\d+)?:[^\n]*?: (?:command )?not found[^\n]*|(?:^|\n)\S+: command not found[^\n]*|can't find crate[^\n]*|cannot find package [^\n]+/i;
+// The line that names what is missing wins over a bare error code: a script that dies on a failed import prints the
+// source line `throw new ERR_MODULE_NOT_FOUND(` first, and the line with the file after it.
+const MISSING_NAMED = /Cannot find (?:module|package) ['"][^'"\n]+['"][^\n]*/i;
 function whyFailed(text) {
-  const m = String(text || '').replace(/\x1b\[[0-9;]*m/g, '').match(MISSING_DEP);
+  const t = String(text || '').replace(/\x1b\[[0-9;]*m/g, '');
+  const m = t.match(MISSING_NAMED) || t.match(MISSING_DEP);
   return m ? { cause: 'missing-dependency', detail: m[0].trim().slice(0, 200) } : { cause: 'failing' };
 }
 const failNotes = new WeakMap();   // samples -> why the last failing run failed
@@ -256,10 +260,28 @@ function linkModules(repo, wt, d) {
       // a tool's own state or cache folder (pnpm's task-run state, .cache, .vite) is written to, so each worktree gets
       // its own, made by the tool. The store (.pnpm) and the executables (.bin) are read, so they are linked.
       if (name.startsWith('.') && name !== '.bin' && name !== '.pnpm' && e.isDirectory()) continue;
+      if (name === '.bin' && e.isDirectory() && linkBin(repo, wt, join(src, name), join(dst, name))) continue;
       if (name.includes(sep)) mkdirSync(dirname(join(dst, name)), { recursive: true });
       symlinkSync(rel ? join(wt, rel) : join(src, name), join(dst, name));
     }
   } catch { /* best effort */ }
+}
+// .bin holds links to executables. One that points back into the repo is a workspace package's own tool, which a build
+// or a test may run (micromark's build runs micromark-build). Linked as one folder it ran from the working tree at
+// both refs, and in a fresh clone, where nothing is built yet, nothing could be measured. So such a folder is rebuilt
+// too, each tool linked on its own and a repo one pointed at the same path in the worktree. Returns false, and writes
+// nothing, when no entry points into the repo: the folder then keeps its single link.
+function linkBin(repo, wt, src, dst) {
+  let rels;
+  try {
+    rels = readdirSync(src).map((n) => {
+      try { const r = relative(repo, realpathSync(join(src, n))); return [n, r && !r.startsWith('..') && !isAbsolute(r) && !r.split(sep).includes('node_modules') ? r : null]; } catch { return [n, null]; }
+    });
+  } catch { return false; }
+  if (!rels.some(([, r]) => r)) return false;
+  mkdirSync(dst, { recursive: true });
+  for (const [n, r] of rels) { try { symlinkSync(r ? join(wt, r) : join(src, n), join(dst, n)); } catch { /* best effort, one tool at a time */ } }
+  return true;
 }
 function bridgeEnv(repo, wt, cfg) {
   let root = repo; try { root = realpathSync(repo); } catch { /* keep the path as given */ }

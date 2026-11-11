@@ -2505,6 +2505,40 @@ test('measure env: a regression in a sibling package is seen, not hidden by read
   assert.equal(rep.verdict, 'fail'); assert.equal(code, 1);
   rmSync(d, { recursive: true, force: true });
 });
+// found by replaying real commits (proof-bench/replay): micromark's build runs micromark-build, a workspace package of
+// its own, through node_modules/.bin. That folder was one link to the working tree's, so the tool ran from the working
+// tree at both refs, and in a fresh clone (nothing built there yet) no commit could be measured.
+test('measure env: a workspace package\'s own executable runs from the ref being measured, not from the working tree', () => {
+  const { d, put } = monoRepo();
+  put('packages/tool/package.json', '{"name":"tool","version":"1.0.0","bin":{"tool":"cli.js"}}');
+  put('packages/tool/cli.js', '#!/usr/bin/env node\nconsole.log(1)\n'); chmodSync(join(d, 'packages/tool/cli.js'), 0o755);
+  symlinkSync('../packages/tool', join(d, 'node_modules/tool'));
+  mkdirSync(join(d, 'node_modules/.bin'), { recursive: true }); symlinkSync('../tool/cli.js', join(d, 'node_modules/.bin/tool'));
+  // an outside tool beside it keeps working
+  put('node_modules/outside/cli.js', '#!/usr/bin/env node\nconsole.log(7)\n'); chmodSync(join(d, 'node_modules/outside/cli.js'), 0o755); symlinkSync('../outside/cli.js', join(d, 'node_modules/.bin/outside'));
+  put('promptwheel.config.json', JSON.stringify({ metrics: [{ name: 'tool_says', cmd: 'node_modules/.bin/tool', extract: 'number', direction: 'up' }, { name: 'outside_says', cmd: 'node_modules/.bin/outside', extract: 'number', direction: 'up' }] }));
+  commitAll(d, 'a tool that says 1');
+  put('packages/tool/cli.js', '#!/usr/bin/env node\nconsole.log(2)\n'); commitAll(d, 'the tool says 2');
+  const { rep } = runJson(d);
+  const m = rep.metrics.find((x) => x.name === 'tool_says');
+  assert.equal(m.before, 1, 'the base ref runs the base ref\'s tool, not the working tree\'s'); assert.equal(m.after, 2);
+  assert.equal(rep.metrics.find((x) => x.name === 'outside_says').after, 7, 'a tool from outside the repo still runs');
+  rmSync(d, { recursive: true, force: true });
+});
+// A LIMIT, pinned so it is known: an outside dependency lives in the real node_modules, and Node resolves what it
+// imports from its real folder. So a workspace package it imports is the working tree's copy, at both refs. micromark's
+// tests reach micromark itself this way, through mdast-util-from-markdown.
+test('LIMIT measure env: a dependency from outside the repo that imports a workspace package reads the working tree\'s copy, not the ref\'s', () => {
+  const { d, put } = monoRepo();
+  put('node_modules/outside/package.json', '{"name":"outside","version":"1.0.0","main":"index.js"}');
+  put('node_modules/outside/index.js', "module.exports=(a,b)=>require('@x/util').add(a,b)\n");   // an outside package that imports the sibling
+  put('promptwheel.config.json', JSON.stringify({ metrics: [{ name: 'through_outside', cmd: "node -e \"console.log(require('outside')(2,3))\"", extract: 'number', direction: 'up' }] }));
+  put('packages/util/index.js', 'exports.add=(a,b)=>a+b\n'); commitAll(d, 'add gives 5');
+  put('packages/util/index.js', 'exports.add=(a,b)=>a*b\n'); commitAll(d, 'add gives 6');
+  const m = runJson(d).rep.metrics.find((x) => x.name === 'through_outside');
+  assert.equal(m.before, 6, 'the base ref should read 5; through the outside package it reads the working tree (6)'); assert.equal(m.after, 6);
+  rmSync(d, { recursive: true, force: true });
+});
 test('measure env: a single-package repo keeps one link for node_modules; a workspaces repo gets its own folder, so a test cannot write into the real one', () => {
   const probe = [{ name: 'nm_is_link', cmd: '[ -L node_modules ] && echo 1 || echo 0', extract: 'number', direction: 'up' },
     { name: 'writes', cmd: 'touch node_modules/.made-by-a-test 2>/dev/null; echo 1', extract: 'number', direction: 'up' }];
@@ -2592,6 +2626,22 @@ test('run: a test metric that fails at both refs says whether a dependency is mi
   assert.equal(missing.inert, true); assert.equal(missing.cause, 'missing-dependency'); assert.match(missing.detail, /a-package-nobody-installed/);
   const red = mk("require('node:test').test('t', () => require('node:assert').equal(1, 2));\n");
   assert.equal(red.inert, true); assert.equal(red.cause, 'failing');
+});
+// A script that dies on a failed ES module import prints the source line `throw new ERR_MODULE_NOT_FOUND(` first and
+// the line that names the file after it. The hint is the line that names it: on micromark it read
+// "ERR_MODULE_NOT_FOUND(" and nothing else.
+test('run: the missing-dependency hint names the file, not the bare error code above it', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-esm-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x', version: '1.0.0', type: 'module', scripts: { test: 'node run.mjs' } }));
+  writeFileSync(join(d, 'run.mjs'), "import './not-here.mjs';\n"); commitAll(d, 'a');
+  writeFileSync(join(d, 'note.txt'), 'x'); commitAll(d, 'b');
+  const m = runJson(d).rep.metrics.find((x) => x.name === 'tests_pass');
+  assert.equal(m.cause, 'missing-dependency');
+  assert.match(m.detail, /^Cannot find module .*not-here\.mjs.* imported from .*run\.mjs/, m.detail);
+  rmSync(d, { recursive: true, force: true });
 });
 
 // ---- found by running real repos (proof-bench/field): tap prints every assertion when its output is a pipe, more than
