@@ -202,6 +202,12 @@ test('isNonSource: tests/config/grader/golden are non-source', () => {
     'jest.config.js', '.eslintrc.json', 'pytest.ini', 'conftest.py', 'src/foo_test.py'])
     assert.equal(isNonSource(p), true, p);
 });
+test('isNonSource: ava\'s test-*.js files and tsd type tests are non-source (a fixed test-release.js read as a source win, sendback bench 2026-11-10)', () => {
+  for (const p of ['test-release.js', 'test-utils.mjs', 'packages/a/test-foo.ts', 'index.test-d.ts', 'src/types.test-d.mts'])
+    assert.equal(isNonSource(p), true, p);
+  for (const p of ['latest-release.js', 'contest-entries.js', 'lib/protest-handler.ts', 'src/attest-x.mjs', 'index.d.ts'])
+    assert.equal(isNonSource(p), false, p);   // only a name that starts with test- (or tests-) at a path segment
+});
 test('isNonSource: real production source is NOT non-source', () => {
   for (const p of ['src/app.js', 'lib/handler.ts', 'index.mjs', 'latest.js', 'mytest.js', 'contest.py'])
     assert.equal(isNonSource(p), false, p);
