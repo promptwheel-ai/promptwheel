@@ -904,7 +904,31 @@ test('init: a Python stack auto-writes venv linkDirs + PYTHONPATH (so tests_pass
   const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
   assert.deepEqual(cfg.linkDirs, ['.venv']);
   assert.match(cfg.env.PYTHONPATH, /\{wt\}/);
+  // no install step: the venv is linked into each clean copy, so `pip install -e .` there re-pointed the developer's
+  // own editable install at a folder the check then deleted (6 of 8 real repos could no longer import their package)
+  assert.equal(cfg.setup, undefined, 'init writes no setup for a Python repo');
   rmSync(d, { recursive: true, force: true });
+});
+// The setup `init` wrote for Python until 0.8.7 ran pip in each clean copy against the linked venv. A config that
+// still holds that exact line must not run it. A stand-in pip on PATH says whether it was called.
+test('a config that still holds the old Python setup line does not run pip against the linked venv; another setup still runs', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-pysetup-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  const bin = mkdtempSync(join(tmpdir(), 'pw-pybin-')), mark = join(bin, 'called');
+  writeFileSync(join(bin, 'pip'), `#!/bin/sh\necho "$@" >> "${mark}"\n`, { mode: 0o755 });
+  const cfg = (setup) => writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, linkDirs: ['.venv'], env: { PYTHONPATH: '{wt}/src:{wt}' }, setup, metrics: [{ name: 'tests_pass', cmd: 'true', extract: 'exit', direction: 'pass', guard: true }] }));
+  cfg('pip install -e . --quiet 2>/dev/null || true');
+  writeFileSync(join(d, 'pyproject.toml'), '[project]\nname = "x"\n'); writeFileSync(join(d, '.gitignore'), '.promptwheel/\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'note.txt'), 'x'); commitAll(d, 'a change');
+  const run = () => { try { return execFileSync('node', [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json'], { cwd: d, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } }); } catch (e) { return `${e.stdout || ''}${e.stderr || ''}`; } };
+  assert.equal(reportOf(run()).verdict, 'pass');
+  assert.equal(existsSync(mark), false, 'the old line is left alone: pip was not run');
+  // a setup the person wrote is theirs and still runs
+  cfg('pip install -e . --no-deps'); commitAll(d, 'my own setup'); writeFileSync(join(d, 'note.txt'), 'y'); commitAll(d, 'another change');
+  run();
+  assert.equal(existsSync(mark), true, 'any other setup command runs as written');
+  rmSync(d, { recursive: true, force: true }); rmSync(bin, { recursive: true, force: true });
 });
 
 test('init: package.json WITHOUT a test script gets the self-describing placeholder', () => {

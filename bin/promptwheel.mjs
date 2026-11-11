@@ -273,12 +273,14 @@ function bridgeEnv(repo, wt, cfg) {
   if (!cfg.env) return process.env;
   return { ...process.env, ...Object.fromEntries(Object.entries(cfg.env).map(([k, v]) => [k, String(v).replaceAll('{wt}', () => wt)])) }; // fn replacement: a literal wt avoids $-pattern interpretation
 }
-// an optional per-ref build/install (e.g. `npm run build`, `pip install -e .`). Best-effort: a
+// an optional per-ref build (e.g. `npm run build`). Best-effort: a
 // failed setup just leaves the metric inert → INCONCLUSIVE (never a false green). Run by the
 // caller AFTER any source patch, so it builds the tree actually being measured.
 // Returns nothing when setup worked, or { exit, lastLine } when it did not, so the report can say so.
+// The Python line `init` wrote until 0.8.7. It is never run: see detectSetup. Any other setup runs as written.
+const OLD_PYTHON_SETUP = 'pip install -e . --quiet 2>/dev/null || true';
 function runSetup(wt, cfg, env) {
-  if (!cfg.setup) return undefined;
+  if (!cfg.setup || cfg.setup === OLD_PYTHON_SETUP) return undefined;
   try { execSync(cfg.setup, { cwd: wt, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000, maxBuffer: 1024 * 1024 * 1024 }); return undefined; }
   catch (e) {
     const lines = `${e.stdout || ''}\n${e.stderr || ''}`.replace(/\x1b\[[0-9;]*m/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
@@ -1158,7 +1160,10 @@ function detectSetup(repo, { has, read } = stackAt(repo)) {
     const pkg = JSON.parse(read('package.json'));
     if (pkg.scripts && pkg.scripts.build) return 'npm run build --if-present';   // TS/bundler tests that run against a built dir
   } catch { /* no or unparsable package.json */ }
-  if (has('pyproject.toml') || has('setup.py')) return 'pip install -e . --quiet 2>/dev/null || true';   // editable install so imports resolve the measured ref
+  // No install step for Python. The venv is linked into each clean copy (detectEnv), so `pip install -e .` there
+  // re-pointed the developer's own editable install at a folder the check then deleted: on 8 real repos, 6 could no
+  // longer import their own package after one check, and every verdict was the same without it. PYTHONPATH (detectEnv)
+  // already puts the measured source first.
   return undefined;
 }
 
