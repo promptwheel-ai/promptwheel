@@ -802,6 +802,9 @@ function gateWeakenings(baseGate, headMetrics) {
 // report.allowed. The check does not judge intent; it forces intent to be explicit. An UNdeclared
 // test-only win is still gamed. `--allow "<reason>"` (CLI) / `allow` (check) supplies the same for
 // a working-tree or CI run that has no commit message to carry the trailer.
+// One reason, one thing: when a reason can reach more than one, it lets through only what it names.
+// A reason names a thing when the thing's name stands in it as a whole word, in any case (`mandate:` is optional).
+const reasonNames = (reason, label) => new RegExp(`(^|[^A-Za-z0-9_-])${label.replace(/^mandate:/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_-])`, 'i').test(reason);
 function readAllowTrailer(repo, ref) {
   let msg = '';
   try { msg = execFileSync('git', ['log', '-1', '--format=%B', ref], { cwd: repo, encoding: 'utf8' }); } catch { return null; }
@@ -1002,50 +1005,45 @@ function gate(repo, opts) {
   // ref's contract is read too, so an agent cannot turn trailers back on in the change it is making.
   const trailersOff = () => !!process.env.PROMPTWHEEL_NO_ALLOW_TRAILER || cfg.allowTrailer === false || ((gateDefAtRef(repo, base) || {}).scalars || {}).allowTrailer === false;
   const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300), by: 'flag' } : (opts.working || trailersOff() ? null : readAllowTrailer(repo, head));
-  let allowed = null;
-  if (opts.detectGaming && allow) {
-    const gm = metrics.filter((m) => m.gamed === true);
-    const up = metrics.filter((m) => m.unprovable === true);
-    const gw = !!(gateInfo && gateInfo.weakened);
-    if (gm.length || up.length || gw) {
-      const names = [...new Set([...gm, ...up].map((m) => m.name))];
-      allowed = { reason: allow.reason, cleared: [...names, ...(gw ? ['gate'] : [])] };
-      for (const m of gm) { m.gamed = false; m.allowed = true; }
-      for (const m of up) { m.unprovable = false; m.allowed = true; }
-      if (gw) gateInfo.allowed = true;
-    }
-  }
-  // `allowable: true` on a guarded metric (the supply-chain counters: a new dependency or lifecycle
-  // script is sometimes the job) lets the same declared reason clear THAT metric's regression, so the
-  // change passes with the reason on the record instead of the guard being loosened to let it through.
-  // Never implicit: without a reason an allowable guard fails like any other, and the reason is recorded.
-  {
-    // `allowable: 'flag'` takes the reason from the --allow flag only, never from a commit trailer: an
-    // agent can write a trailer, so a guard meant to stop a compromised agent cannot be cleared by one.
-    const mode = new Map((cfg.metrics || []).filter((c) => c && c.allowable && c.name).map((c) => [c.name, c.allowable]));
-    const ga = metrics.filter((m) => m.guard && !m.ok && mode.has(m.name) && (mode.get(m.name) === true || !allow || allow.by === 'flag'));
-    const held = metrics.filter((m) => m.guard && !m.ok && mode.has(m.name) && !ga.includes(m));
-    for (const m of held) m.allowable = true;
-    if (ga.length && allow) {
-      allowed = allowed || { reason: allow.reason, cleared: [] };
-      for (const m of ga) { m.ok = true; m.allowed = true; allowed.cleared.push(m.name); }
-    } else for (const m of ga) m.allowable = true;   // failed, and a declared reason would clear it: say so in the report
-  }
   // mandates: a protected-path hard rule fails the gate no matter what the metrics say.
   // The base ref's mandates count too (resolved through `extends` by gateDefAtRef), so a change
   // cannot clear a mandate by deleting it in the same diff that violates it.
   const baseMandates = (gateInfo && gateInfo.baseMandates) || (!opts.detectGaming ? ((gateDefAtRef(repo, base) || {}).scalars || {}).mandates : null);
   let mandateViolations = checkMandates(repo, base, head, cfg, baseMandates);
-  // an allowable mandate (the lock file) changes only with a reason from the --allow flag, recorded
-  // like any other override; a commit trailer never clears one.
-  if (allow && allow.by === 'flag') {
-    const clear = mandateViolations.filter((v) => v.allowable);
-    if (clear.length) {
-      allowed = allowed || { reason: allow.reason, cleared: [] };
-      for (const v of clear) allowed.cleared.push(`mandate:${v.name}`);
-      mandateViolations = mandateViolations.filter((v) => !v.allowable);
-    }
+  // What a declared reason can let through in this run, each with the name a reason calls it by:
+  // - a gamed or unprovable win and a weakened gate ("gate"), by the flag or a trailer;
+  // - a guarded metric marked `allowable` (the supply-chain counters: a new dependency or lifecycle script is
+  //   sometimes the job), so the change passes with the reason on the record instead of the guard being loosened.
+  //   `allowable: 'flag'` takes the reason from the --allow flag only, never from a commit trailer: an agent can
+  //   write a trailer, so a guard meant to stop a compromised agent cannot be cleared by one;
+  // - an allowable mandate (the lock file, the contract, the hooks), by the flag only.
+  // Never implicit: without a reason each of these fails as usual, and the reason is recorded.
+  const mode = new Map((cfg.metrics || []).filter((c) => c && c.allowable && c.name).map((c) => [c.name, c.allowable]));
+  const gm = opts.detectGaming ? metrics.filter((m) => m.gamed === true) : [];
+  const up = opts.detectGaming ? metrics.filter((m) => m.unprovable === true) : [];
+  const gw = !!(opts.detectGaming && gateInfo && gateInfo.weakened);
+  const guards = metrics.filter((m) => m.guard && !m.ok && mode.has(m.name));
+  const soft = mandateViolations.filter((v) => v.allowable);
+  const allowable = [...new Set([...[...gm, ...up].map((m) => m.name), ...(gw ? ['gate'] : []), ...guards.map((m) => m.name), ...soft.map((v) => `mandate:${v.name}`)])];
+  let allowed = null;
+  if (allow) {
+    const byFlag = allow.by === 'flag';
+    // what THIS reason can reach: a trailer reaches less than the flag, and what it cannot reach does not count
+    const reach = new Set([...[...gm, ...up].map((m) => m.name), ...(gw ? ['gate'] : []), ...guards.filter((m) => byFlag || mode.get(m.name) === true).map((m) => m.name), ...(byFlag ? soft.map((v) => `mandate:${v.name}`) : [])]);
+    // One thing needs no name. More than one: the reason lets through only what it names, so a reason written
+    // about a config change does not also wave through a gamed test the person never looked at.
+    const takes = (label) => reach.has(label) && (reach.size < 2 || reasonNames(allow.reason, label));
+    const cleared = new Set();
+    for (const m of gm) if (takes(m.name)) { m.gamed = false; m.allowed = true; cleared.add(m.name); }
+    for (const m of up) if (takes(m.name)) { m.unprovable = false; m.allowed = true; cleared.add(m.name); }
+    if (gw && takes('gate')) { gateInfo.allowed = true; cleared.add('gate'); }
+    for (const m of guards) if (takes(m.name)) { m.ok = true; m.allowed = true; cleared.add(m.name); }
+    const lifted = soft.filter((v) => takes(`mandate:${v.name}`));
+    for (const v of lifted) cleared.add(`mandate:${v.name}`);
+    mandateViolations = mandateViolations.filter((v) => !lifted.includes(v));
+    if (reach.size) allowed = { reason: allow.reason, cleared: [...cleared] };
   }
+  for (const m of guards) if (!m.allowed) m.allowable = true;   // failed, and a declared reason would clear it: say so in the report
   const mandated = mandateViolations.length > 0;
   const verdict = deriveVerdict(metrics, gateInfo, mandated);
   const explained = explainMetrics(repo, metrics);
@@ -1056,6 +1054,7 @@ function gate(repo, opts) {
     ...(mandateViolations.length ? { mandates: mandateViolations } : {}),
     ...(gateInfo ? { gate: gateInfo } : {}),
     ...(allowed ? { allowed } : {}),
+    ...(allowable.length ? { allowable } : {}),
   };
   // a setup command that failed, at the ref it failed at: the usual reason a metric could not be measured
   const sb = setupFails.get(before), sa = setupFails.get(after);
@@ -1299,15 +1298,22 @@ function printHuman(r) {
   if (r.gate && r.gate.changed) console.log(`  ⚠ gate definition changed in this change (fingerprint ${r.gate.fingerprint.base} -> ${r.gate.fingerprint.head}): a metric, guard, evaluatorPath, mandate, or the setup, env or linked dirs they are measured with was added, removed or edited; review promptwheel.config.json as part of the diff`);
   const failReason = r.mandates ? ', a mandate was violated (a protected path changed)' : ', a guarded metric regressed (beyond noise)';
   console.log(`\n  VERDICT: ${r.verdict.toUpperCase()}${r.verdict === 'fail' ? failReason : r.verdict === 'gamed' ? ', a metric "improved" by editing the goalposts, not the source' : r.verdict === 'inconclusive' ? ', a guard is inert (measured nothing); a pass cannot be certified' : ''}`);
+  const how = allowFlag(r), each = allowNames(r) ? ' (more than one thing: a reason lets through only what it names)' : '';
+  const left = r.allowed ? (r.allowable || []).filter((l) => !r.allowed.cleared.includes(l)) : [];
   if (r.verdict === 'fail' && r.mandates) {
     const takes = r.mandates.filter((md) => md.allowable).map((md) => `"${md.name}"`);
-    if (takes.length) console.log(`  intentional? ${takes.join(', ')} ${takes.length > 1 ? 'accept' : 'accepts'} a person's declared reason: promptwheel run --allow "<reason>" passes with the reason on the record`);
+    if (takes.length && !left.length) console.log(`  intentional? ${takes.join(', ')} ${takes.length > 1 ? 'accept' : 'accepts'} a person's declared reason: promptwheel run ${how} passes with the reason on the record${each}`);
     if (takes.length < r.mandates.length) console.log(`  ${takes.length ? 'any other' : 'a'} mandate is a hard rule; if the change is truly intended, retire the mandate in promptwheel.config.json in a change of its own first (a tracked, tamper-evident change), do not work around it`);
-  } else if (r.verdict === 'fail' && r.metrics.some((m) => m.allowable)) console.log(`  intentional? this guard accepts a person's declared reason: promptwheel run --allow "<reason>" passes with the reason on the record (${r.metrics.filter((m) => m.allowable).map((m) => m.name).join(', ')})`);
+  } else if (r.verdict === 'fail' && r.metrics.some((m) => m.allowable) && !left.length) console.log(`  intentional? this guard accepts a person's declared reason: promptwheel run ${how} passes with the reason on the record${each || ` (${r.metrics.filter((m) => m.allowable).map((m) => m.name).join(', ')})`}`);
   else if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name)');
-  if (r.allowed) console.log(`  ✓ allowed: ${r.allowed.cleared.join(', ')} acknowledged as an intentional change, recorded (Promptwheel-Allow: ${r.allowed.reason})`);
+  if (r.allowed && r.allowed.cleared.length) console.log(`  ✓ allowed: ${r.allowed.cleared.join(', ')} acknowledged as an intentional change, recorded (Promptwheel-Allow: ${r.allowed.reason})`);
+  if (left.length) console.log(`  not let through: ${left.join(', ')}. A reason lets through only what it names when there is more than one thing. To accept them all: promptwheel run ${how}`);
   console.log('');
 }
+
+// The --allow flag as a person should type it for this report: with more than one thing to let through, each by name.
+const allowNames = (r) => ((r.allowable || []).length > 1 ? r.allowable.map((l) => l.replace(/^mandate:/, '')).join(', ') + ': ' : '');
+const allowFlag = (r) => `--allow "${allowNames(r)}<reason>"`;
 
 // PR-comment markdown (rendering lives in the tool so the GitHub Action stays thin)
 // What a person needs when a check speaks: what changed, in words, and how to accept it.
@@ -1352,14 +1358,15 @@ function renderMarkdown(r) {
     `\`${r.base} → ${r.head}\` · ${r.mode} mode${r.repeat > 1 ? ` · ×${r.repeat}` : ''}`,
     '',
     ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Protected path touched:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : md.edited ? ' (edited in this same change; the version before the change stays in force for the change that edits it)' : ''}`).join('\n'), ''] : []),
-    ...(r.explained ? [...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...(r.explained.some((x) => !x.noted && x.allowable) ? ['>', '> To accept this, comment `sawbuck-allow: <your reason>` on this PR and re-run the check.'] : []), ''] : []),
+    ...(r.explained ? [...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...(r.explained.some((x) => !x.noted && x.allowable) ? ['>', `> To accept this, comment \`sawbuck-allow: ${allowNames(r)}<your reason>\` on this PR and re-run the check.${allowNames(r) ? ' A reason lets through only what it names when there is more than one thing.' : ''}`] : []), ''] : []),
     '| metric | before | after | Δ | status | confidence |',
     '|---|--:|--:|--:|---|---|',
     rows,
     '',
     r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader, not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? (r.mandates ? '> ⛔ A protected path changed. This is a hard rule; no metric result clears it.' : '> ❌ A 🛡️ guarded metric regressed beyond the noise band.') : r.verdict === 'inconclusive' ? (r.metrics.some((m) => m.inert) && r.metrics.every((m) => !m.inert || m.ran === 'both') ? '> 🟡 A 🛡️ guarded check is **inert**, it fails before and after this change, so nothing was actually verified. Fix it before trusting a pass.' : '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.') : '> ✅ No guarded metric regressed.',
     ...(r.gate && r.gate.weakened ? ['', `> 🚩 **Gate weakened:** ${r.gate.weakened.map((w) => `\`${w.name}\` ${w.change === 'guard-removed' ? 'removed' : w.change === 'guard-edited' ? 'edited' : w.change === 'measurement-edited' ? 'measured another way (setup, env or linked dirs)' : 'disabled'} (would have ${wouldHave(w.status)} at head)`).join('; ')}. The pass was bought by changing the gate, not by earning it.`] : []),
-    ...(r.allowed ? ['', `> ✓ **Allowed:** \`${r.allowed.cleared.join('`, `')}\` cleared by a declared reason: ${r.allowed.reason}`] : []),
+    ...(r.allowed && r.allowed.cleared.length ? ['', `> ✓ **Allowed:** \`${r.allowed.cleared.join('`, `')}\` cleared by a declared reason: ${r.allowed.reason}`] : []),
+    ...(r.allowed && (r.allowable || []).some((l) => !r.allowed.cleared.includes(l)) ? ['', `> ✋ **Not let through:** \`${r.allowable.filter((l) => !r.allowed.cleared.includes(l)).join('`, `')}\`. A reason lets through only what it names when there is more than one thing. To accept them all, comment \`sawbuck-allow: ${allowNames(r)}<your reason>\`.`] : []),
     ...(r.gate && r.gate.changed ? ['', `> ⚠ **Gate definition changed** in this diff (fingerprint \`${r.gate.fingerprint.base}\` -> \`${r.gate.fingerprint.head}\`): a metric, guard, evaluatorPath, mandate, or the setup, env or linked dirs they are measured with was added, removed or edited. Review the config change with the code.`] : []),
     '',
     '<sub>🛡️ = guard · _prove every change moved a metric_ · [PromptWheel](https://github.com/promptwheel-ai/promptwheel)</sub>',
@@ -1521,6 +1528,8 @@ export function conformsToContract(report) {
       if (report.allowed.cleared !== undefined && !Array.isArray(report.allowed.cleared)) E('allowed.cleared must be an array');
     }
   }
+  // the optional list of what a declared reason can let through in this run, by name (report.allowable)
+  if (report.allowable !== undefined && !(Array.isArray(report.allowable) && report.allowable.length && report.allowable.every((x) => typeof x === 'string' && x))) E('allowable must be a non-empty array of names');
 
   // Honest-verdict rules that hold regardless of how a verdict is derived:
   // a clean pass cannot hide a failing guard, a gamed win, or a weakened gate; and a gamed
@@ -1613,7 +1622,7 @@ function dispatch() {
       '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
       '  promptwheel pr-allow < comments.json         print the newest `sawbuck-allow: <reason>` from a PR comment by someone with write access (the Action uses it)',
-      '  promptwheel run --allow "<reason>"           acknowledge an intentional test/config change (or a `Promptwheel-Allow: <reason>` commit trailer; `Sawbuck-Allow:` is an alias): recorded, not flagged GAMED',
+      '  promptwheel run --allow "<reason>"           acknowledge an intentional test/config change (or a `Promptwheel-Allow: <reason>` commit trailer; `Sawbuck-Allow:` is an alias): recorded, not flagged GAMED. With more than one thing to let through, the reason names each: --allow "tests_pass, contract-frozen: <reason>"',
       '',
       'Exit codes: 0 pass · 1 fail (a guarded metric regressed, or a mandate was violated) · 2 gamed · 3 inconclusive · 64 usage or config error (never a verdict).',
       'Integrate (library / conform / shell): see INTEGRATE.md. Import: `import { check } from \'promptwheel\'`.',

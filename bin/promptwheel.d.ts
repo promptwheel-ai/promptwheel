@@ -212,7 +212,7 @@ export interface GateRecord {
 
 export interface AllowedRecord {
   reason: string;
-  /** The metric names (and `'gate'`) the override cleared. */
+  /** The names the reason let through: metric names, `'gate'`, and `'mandate:<name>'`. Empty when the reason could reach more than one thing and named none of them. */
   cleared: string[];
 }
 
@@ -238,6 +238,8 @@ export interface Report {
   mandates?: MandateViolation[];
   gate?: GateRecord;
   allowed?: AllowedRecord;
+  /** What a declared reason can let through in this run, by name (metric names, `'gate'`, `'mandate:<name>'`). One thing needs no name; with more than one, a reason lets through only the ones it names as whole words. */
+  allowable?: string[];
   /** Present only when the `setup` command failed: at which ref, with what exit code, and its last output line. */
   setup?: { base?: SetupFailure; head?: SetupFailure };
   provenance: Provenance;

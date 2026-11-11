@@ -137,7 +137,7 @@ Returns the Section 2 verdict object (identical to `run --json`). Reproducible f
 | `auto` | boolean | `true` | with no config file and no `config` option, gate the auto-detected test command (zero-config); `false` throws instead |
 | `repeat` | number | `config.repeat ?? 1` | measurement repeats for the noise band |
 | `detectGaming` | boolean | `true` | run the Section 3 source-only re-proof |
-| `allow` | string | none | a declared override reason (the same as `--allow` / a `Promptwheel-Allow:` trailer): a would-be `gamed`, or an `unprovable` win (its source-only re-run could not be applied), reads `pass` with the reason recorded in `report.allowed` |
+| `allow` | string | none | a declared override reason (the same as `--allow` / a `Promptwheel-Allow:` trailer): a would-be `gamed`, or an `unprovable` win (its source-only re-run could not be applied), reads `pass` with the reason recorded in `report.allowed`. When it could let more than one thing through, it lets through only the ones it names (`report.allowable` lists the names) |
 
 Preconditions throw (they do not exit the host): not inside a git repository; `auto: false`
 with no `promptwheel.config.json` and no `config` option; a `config` with no non-empty

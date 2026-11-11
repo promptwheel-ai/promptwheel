@@ -30,17 +30,17 @@ clean git worktrees, so a pack that is not in git is absent at both refs and the
 - **lock_drift**: structural items the tree has that `promptwheel.lock.json` does not. `promptwheel lock` reads the repo once and writes its shape: dependencies, install scripts, workflows, modules, import edges between modules, routes, public entry points, and the network hosts the source names. It also records each script's body, native binaries, and what a module can do (network, process spawning, eval), so a new capability shows even when the host is built at runtime. Ordinary edits never touch it. A new route is locked but not counted by default (`node .promptwheel/packs/supply-chain/lock.mjs drift . --list` shows it). To hold new routes too, add `--routes` to the end of the `lock_drift` metric's `cmd` in `promptwheel.config.json`, so it reads `node .promptwheel/packs/supply-chain/lock.mjs drift . --routes`. The flag belongs to that script: `promptwheel lock` takes no flags and always writes routes into the lock. The config is a frozen path here, so that edit passes with `promptwheel run --allow "<reason>"`. On 1,403 commits across eight repositories this guard would have stopped 5.1%, about one in 20. JS and TS only for edges, routes, hosts and capabilities today.
 - **pins_changed**: a fingerprint of the resolved dependency tree, compared base to head, because a new version under an old name is how a worm arrives. It covers every package, version, source and integrity, not the file's bytes, so a release of your own project does not count. Any change needs a reason. Nothing is stored, so the lock does not change across updates and an approved update does not blind the next check. On the same commits this stopped 8.7%, dependency changes; use the CI path below for those.
 
-**On a pull request.** Someone with write access comments `sawbuck-allow: <reason>` and re-runs the check. `sawbuck contract` marks everyday guards `report: true`, so they note a change without failing until you tighten them; this preset on its own holds them all.
+**On a pull request.** Someone with write access comments `sawbuck-allow: <reason>` and re-runs the check. When more than one thing needs a reason, the comment names each one, and the check's own comment shows the line to copy. `sawbuck contract` marks everyday guards `report: true`, so they note a change without failing until you tighten them; this preset on its own holds them all.
 
 **Dependency updates in CI.** Give the reason from a step the agent cannot reach. Workflows are a frozen path, so an agent cannot edit this:
 
 ```yaml
 - uses: promptwheel-ai/promptwheel@<full commit sha>
   with:
-    allow: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'dependabot update, reviewed in this PR' || '' }}
+    allow: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'pins_changed: dependabot update, reviewed in this PR' || '' }}
 ```
 
-Check the PR author, not `github.actor`, which is whoever last triggered the run. Everything else still fails without a person's reason.
+Check the PR author, not `github.actor`, which is whoever last triggered the run. The reason names `pins_changed`, so it lets a version bump through and nothing else: an update that also adds an install script, a new dependency or a source outside the registry still fails. Everything else still fails without a person's reason.
 
 **What this does not catch.** A new destination reached through a module that already uses the network, when the address is assembled at runtime, reads as nothing new. The lock holds structure; it cannot follow a value.
 
@@ -54,8 +54,12 @@ whatever else the change did right. The count does not have to be zero.
 Sometimes adding a dependency is exactly what was asked. Say so, and the gate records it:
 
 ```bash
-promptwheel run --working --allow "needed for the CSV export (papaparse)"
+promptwheel run --working --allow "dependency_entries, lock_drift: needed for the CSV export (papaparse)"
 ```
+
+A new dependency moves more than one count. A reason that could let more than one thing through lets through
+only the ones it names, so one written about a dependency cannot also wave through a new install script. The
+check prints the line to copy.
 
 A commit trailer does not count here. The seven metrics carry `allowable: "flag"`, which means a
 reason from the `--allow` flag clears their guarded regression for that one run, with the reason

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.8.8 (2026-11-11): one reason, one thing
+
+- **A reason lets through only what it names when there is more than one thing.** Before, one `--allow "<reason>"` cleared everything a reason can clear in that run. An outside report found the cost: a pull request comment written about a config change also waved through a gamed test in the same change. Now one thing still needs no name. When a reason could let more than one through (a gamed test and an edited contract, a new dependency and the lock), it lets through only the ones it names, as whole words: `--allow "tests_pass, contract-frozen: the spec changed"`. What it does not name still fails.
+- **The report says what a reason can let through.** `allowable` lists the names (metric names, `gate`, `mandate:<name>`). The terminal and the pull request comment print the line to copy, and say what a reason did not let through. `allowed.cleared` can be empty when a reason named none of several.
+- **What a reason cannot reach does not count.** A commit trailer cannot clear a flag-only guard or rule, so a trailer on a change that also touches one of those is still one thing, and naming a flag-only rule in a trailer still does not clear it.
+- **The dependency-update recipe names `pins_changed`.** In the supply-chain pack's README the CI reason is now `pins_changed: dependabot update, reviewed in this PR`. A version bump passes; a bump that also adds an install script fails. Tested.
+- This changes behavior for anyone who cleared several things with one unnamed reason. The check prints the new line.
+
+## 0.8.7 (2026-11-11): Rust workspaces
+
+- **A Rust workspace is tested with `cargo test --workspace`.** Plain `cargo test` at a workspace root ran 446 of ripgrep's 1246 tests and 321 of regex's 1410.
+
+## 0.8.6 (2026-11-11): more test names read as tests
+
+- **ava's `test-*.js` files and tsd type tests are tests.** A fixed `test-release.js` had read as a source win. `*-test.js` and `*_test.js` (node --test) are tests too.
+- **Test names and test configs of more runners are non-source:** Bun, Cypress, .NET, PHPUnit, XCTest, ExUnit, Dart, Go testdata, Rust benches, mocha, RSpec and coverage gates. Hyphen test names count outside `src/`, `lib/` and `scripts/` only: checked against 18,091 real files, where the first rule swept production code and this one swept none.
+
+## 0.8.5 (2026-11-10)
+
+- **A test that prints an HTTP "Not found" is not a missing dependency.** Only a shell's command-not-found is.
+
+## 0.8.4 (2026-11-10)
+
+- **A shell that can write neither a temp folder nor `.git`** (a sandboxed agent shell) gets one plain sentence, not a stack trace.
+
+## 0.8.3 (2026-11-10)
+
+- **A read-only system temp folder does not stop the gate.** Where it is read-only (Claude Code's sandbox, a locked-down runner), the gate makes its clean copies inside the repo's `.git`.
+
 ## 0.8.2 (2026-11-06): what a field report found on a real monorepo
 
 An outside report ran 0.7.16 on a private npm-workspaces monorepo. These are the engine findings from it, and one more from running twelve real repos afterwards.

@@ -67,6 +67,18 @@ test('renderMarkdown: includes verdict, metric, delta', () => {
   assert.match(md, /PASS/); assert.match(md, /todos/); assert.match(md, /-2/);
 });
 
+test('renderMarkdown: with more than one thing to accept, the comment to copy names each, and a reason that named too few says what was not let through', () => {
+  const base = { base: 'a', head: 'b', mode: 'refs', repeat: 1, verdict: 'fail',
+    metrics: [{ name: 'dependency_entries', guard: true, before: 1, after: 2, delta: 1, status: 'regressed', confidence: 'high', ok: false, allowable: true }],
+    explained: [{ metric: 'dependency_entries', noted: false, what: 'a new dependency', allowable: true }] };
+  assert.match(renderMarkdown({ ...base, allowable: ['dependency_entries'] }), /comment `sawbuck-allow: <your reason>` on this PR/, 'one thing: no name needed');
+  const two = renderMarkdown({ ...base, allowable: ['dependency_entries', 'mandate:lock-frozen'], allowed: { reason: 'dependency_entries: needed', cleared: ['dependency_entries'] } });
+  assert.match(two, /comment `sawbuck-allow: dependency_entries, lock-frozen: <your reason>` on this PR/);
+  assert.match(two, /\*\*Allowed:\*\* `dependency_entries`/); assert.match(two, /\*\*Not let through:\*\* `mandate:lock-frozen`/);
+  const none = renderMarkdown({ ...base, allowable: ['dependency_entries', 'mandate:lock-frozen'], allowed: { reason: 'looks fine', cleared: [] } });
+  assert.doesNotMatch(none, /\*\*Allowed:\*\*/); assert.match(none, /\*\*Not let through:\*\* `dependency_entries`, `mandate:lock-frozen`/);
+});
+
 // ------------------------------------------------------------- integration helpers
 function tmpRepo(metrics) {
   const d = mkdtempSync(join(tmpdir(), 'pw-test-'));
@@ -586,7 +598,10 @@ test('lock: an agent cannot launder a change by updating the lock; a person can,
   commitAll(d, 'add evil and relock\n\nPromptwheel-Allow: an agent approving itself');
   r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
   assert.equal(r.code, 1, 'a trailer clears neither the mandate nor the guards');
+  // a dependency and the lock are two things: a reason that names neither lets neither through
   r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', '--allow', 'reviewed: needed for X']);
+  assert.equal(r.code, 1, r.out); assert.deepEqual(JSON.parse(r.out).allowable, ['dependency_entries', 'mandate:lock-frozen']);
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', '--allow', 'dependency_entries, lock-frozen: reviewed, needed for X']);
   assert.equal(r.code, 0, r.out);
   assert.ok(JSON.parse(r.out).allowed.cleared.includes('mandate:lock-frozen'));
 });
@@ -657,7 +672,7 @@ test('supply-chain gate: a lifecycle script, a dependency or a non-registry lock
   assert.equal(r.code, 1, r.out); assert.equal(r.rep.verdict, 'fail');
   assert.equal(metric(r.rep, 'lifecycle_scripts').ok, false);
   assert.equal(metric(r.rep, 'lifecycle_scripts').allowable, true, 'the report says a declared reason would clear it');
-  assert.match(pw(d, ['run', '--working', '--no-record']).out, /--allow "<reason>"/, 'and the human hint names --allow, not guard:false');
+  assert.match(pw(d, ['run', '--working', '--no-record']).out, /--allow "lifecycle_scripts, unpinned_execution, lock_drift: <reason>"/, 'and the human hint names --allow, not guard:false, with each guard the reason has to name');
   reset();
 
   // a dependency: fails without a reason, passes with one, the reason on the record
@@ -665,8 +680,10 @@ test('supply-chain gate: a lifecycle script, a dependency or a non-registry lock
   r = run();
   assert.equal(r.code, 1, r.out); assert.equal(metric(r.rep, 'dependency_entries').ok, false);
   r = run('--allow', 'needed for the CSV export (papaparse)');
+  assert.equal(r.code, 1, 'two guards, and the reason names neither'); assert.deepEqual(r.rep.allowed.cleared, []);
+  r = run('--allow', 'dependency_entries, lock_drift: needed for the CSV export (papaparse)');
   assert.equal(r.code, 0, r.out); assert.equal(r.rep.verdict, 'pass');
-  assert.deepEqual(r.rep.allowed, { reason: 'needed for the CSV export (papaparse)', cleared: ['dependency_entries', 'lock_drift'] });
+  assert.deepEqual(r.rep.allowed, { reason: 'dependency_entries, lock_drift: needed for the CSV export (papaparse)', cleared: ['dependency_entries', 'lock_drift'] });
   assert.equal(metric(r.rep, 'dependency_entries').ok, true); assert.equal(metric(r.rep, 'dependency_entries').allowed, true);
   assert.equal(metric(r.rep, 'dependency_entries').allowable, undefined, 'cleared, so no longer flagged as awaiting a reason');
   // an agent can write a commit trailer, so a trailer never clears these guards: only the --allow flag does
@@ -674,7 +691,7 @@ test('supply-chain gate: a lifecycle script, a dependency or a non-registry lock
   const rr = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']);
   assert.equal(rr.code, 1, rr.out);
   assert.equal(JSON.parse(rr.out).allowed, undefined);
-  const rf = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', '--allow', 'a person read it']);
+  const rf = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', '--allow', 'dependency_entries and lock_drift: a person read it']);
   assert.equal(rf.code, 0, rf.out);
   g(['reset', '-q', '--hard', 'HEAD~1']);
 
@@ -1507,6 +1524,65 @@ test('Promptwheel-Allow: the --allow / allow option overrides for a committed or
   assert.equal(r.allowed.reason, 'the spec changed to 8');
   rmSync(d, { recursive: true, force: true });
 });
+// One reason, more than one thing. From an outside report: a reason written about a config change also waved through a
+// gamed test in the same change. Now a reason lets through only what it names when there is more than one thing.
+function twoThings(over = {}) {
+  const d = mkdtempSync(join(tmpdir(), 'pw-two-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, ...over,
+    metrics: [{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }],
+    mandates: [{ name: 'notes-frozen', paths: ['NOTES.md'], allowable: 'flag', reason: 'a person changes the notes' }] }));
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');   // BUG
+  writeFileSync(join(d, 'calc.test.mjs'), CALC(2)); writeFileSync(join(d, 'NOTES.md'), 'as it was\n'); commitAll(d, 'base: red');
+  writeFileSync(join(d, 'calc.test.mjs'), CALC(8)); writeFileSync(join(d, 'NOTES.md'), 'changed\n');   // a gamed test and a protected path, one change
+  return d;
+}
+test('--allow: one reason does not let two things through unless it names each; naming one lets that one through', () => {
+  const d = twoThings(); commitAll(d, 'edit the test and the notes');
+  const run = (reason) => { const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', ...(reason ? ['--allow', reason] : [])]); return { code: r.code, rep: reportOf(r.out) }; };
+  const both = ['tests_pass', 'mandate:notes-frozen'];
+  let r = run();
+  assert.notEqual(r.code, 0); assert.deepEqual(r.rep.allowable, both, 'the report names what a reason could let through');
+  assert.equal(r.rep.allowed, undefined);
+  // the report's own case: a reason about the notes, and the gamed test rides along
+  r = run('the notes were out of date');
+  assert.notEqual(r.code, 0, 'a reason that names neither lets neither through');
+  assert.deepEqual(r.rep.allowed, { reason: 'the notes were out of date', cleared: [] }); assert.deepEqual(r.rep.allowable, both);
+  assert.equal(r.rep.metrics[0].gamed, true); assert.ok(r.rep.mandates.some((m) => m.name === 'notes-frozen'));
+  assert.equal(conformsToContract(r.rep).ok, true, conformsToContract(r.rep).errors.join('; '));
+  const text = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--allow', 'the notes were out of date']).out;
+  assert.match(text, /--allow "tests_pass, notes-frozen: <reason>"/, 'the line to copy names each one');
+  assert.doesNotMatch(text, /✓ allowed/);
+  // naming one lets that one through, and the other still stands
+  r = run('notes-frozen: the notes were out of date');
+  assert.equal(r.rep.verdict, 'gamed'); assert.deepEqual(r.rep.allowed.cleared, ['mandate:notes-frozen']); assert.equal(r.rep.mandates, undefined);
+  r = run('tests_pass: the spec changed to 8');
+  assert.equal(r.rep.verdict, 'fail'); assert.deepEqual(r.rep.allowed.cleared, ['tests_pass']); assert.equal(r.rep.metrics[0].allowed, true);
+  assert.ok(r.rep.mandates.some((m) => m.name === 'notes-frozen'));
+  // a name is a whole word: tests_passing is not tests_pass
+  r = run('tests_passing again, notes-frozen-ish');
+  assert.deepEqual(r.rep.allowed.cleared, []);
+  // naming each lets each through, in any case, with or without the mandate: prefix
+  for (const reason of ['tests_pass, notes-frozen: the spec changed and the notes follow', 'TESTS_PASS and mandate:notes-frozen, reviewed']) {
+    r = run(reason);
+    assert.equal(r.code, 0, reason); assert.equal(r.rep.verdict, 'pass'); assert.deepEqual(r.rep.allowed.cleared, both);
+    assert.equal(conformsToContract(r.rep).ok, true, conformsToContract(r.rep).errors.join('; '));
+  }
+  rmSync(d, { recursive: true, force: true });
+});
+test('--allow: what a reason cannot clear does not count toward more than one thing (a trailer and a flag-only rule)', () => {
+  const d = twoThings(); commitAll(d, 'edit the test and the notes\n\nPromptwheel-Allow: the spec changed to 8');
+  const r = reportOf(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']).out);
+  assert.deepEqual(r.allowed, { reason: 'the spec changed to 8', cleared: ['tests_pass'] }, 'the trailer can clear only the test, so it is one thing and needs no name');
+  assert.equal(r.verdict, 'fail', 'the flag-only rule still stands'); assert.deepEqual(r.allowable, ['tests_pass', 'mandate:notes-frozen']);
+  // a trailer that names the flag-only rule still cannot clear it: an agent can write a trailer
+  execFileSync('git', ['commit', '-q', '--amend', '-m', 'edit the test and the notes\n\nPromptwheel-Allow: tests_pass, notes-frozen: approving myself'], { cwd: d });
+  const r2 = reportOf(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']).out);
+  assert.deepEqual(r2.allowed.cleared, ['tests_pass']); assert.equal(r2.verdict, 'fail'); assert.ok(r2.mandates.some((m) => m.name === 'notes-frozen'));
+  rmSync(d, { recursive: true, force: true });
+});
 test('Sawbuck-Allow (alias): covers an intentional test DELETE (not just an edit)', () => {
   const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test *.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
   writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');
@@ -2157,6 +2233,33 @@ test('setup: a base config that extends a file outside the repository is not com
   assert.equal(r.rep.gate.changed, undefined, 'the inherited setup and env are the same at both refs');
   assert.equal(r.rep.gate.weakened, undefined, JSON.stringify(r.rep.gate));
   rmSync(root, { recursive: true, force: true });
+});
+
+test('supply-chain: the dependency-update reason names pins_changed, so a version bump passes and a bump that also adds an install script does not', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-bump-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  const pkg = { name: 'demo', scripts: { test: 'node -e 0' }, dependencies: { 'left-pad': '^1' } };
+  const lock = (v) => ({ lockfileVersion: 3, packages: { '': { name: 'demo' }, 'node_modules/left-pad': { version: v, resolved: `https://registry.npmjs.org/left-pad/-/left-pad-${v}.tgz`, integrity: `sha512-${v}` } } });
+  const write = (p, v) => { writeFileSync(join(d, 'package.json'), JSON.stringify(p, null, 2) + '\n'); writeFileSync(join(d, 'package-lock.json'), JSON.stringify(lock(v), null, 2) + '\n'); };
+  write(pkg, '1.3.0'); commitAll(d, 'base');
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0); commitAll(d, 'the contract');
+  const REASON = 'pins_changed: dependabot update, reviewed in this PR';   // the line in packs/supply-chain/README.md
+  assert.ok(readFileSync(join(dirname(ENGINE), '..', 'packs', 'supply-chain', 'README.md'), 'utf8').includes(`'${REASON}'`), 'the README still gives this reason');
+  const run = (...extra) => { const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', ...extra]); return { code: r.code, rep: reportOf(r.out) }; };
+  // a plain version bump moves the fingerprint and nothing else
+  write(pkg, '1.3.1'); commitAll(d, 'bump left-pad');
+  let r = run();
+  assert.equal(r.code, 1); assert.deepEqual(r.rep.allowable, ['pins_changed'], 'a version bump is one thing');
+  r = run('--allow', REASON);
+  assert.equal(r.code, 0, JSON.stringify(r.rep.allowed)); assert.deepEqual(r.rep.allowed.cleared, ['pins_changed']);
+  // the same bump with an install script riding along: the reason covers the bump only
+  write({ ...pkg, scripts: { ...pkg.scripts, postinstall: 'node setup.js' } }, '1.3.2'); commitAll(d, 'bump left-pad again');
+  r = run('--allow', REASON);
+  assert.equal(r.code, 1, 'the install script is not waved through'); assert.deepEqual(r.rep.allowed.cleared, ['pins_changed']);
+  assert.equal(r.rep.metrics.find((m) => m.name === 'lifecycle_scripts').ok, false);
+  assert.ok(r.rep.allowable.includes('lifecycle_scripts'));
+  rmSync(d, { recursive: true, force: true });
 });
 
 test('supply-chain: a person can accept a hooks change with --allow; a trailer cannot, and a workflow stays frozen either way', () => {
