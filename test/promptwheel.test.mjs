@@ -12,6 +12,11 @@ import { createHash } from 'node:crypto';
 import { realpathSync, chmodSync } from 'node:fs';
 
 const ENGINE = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'promptwheel.mjs');
+// every temp repo this file makes, and every clean copy the engine makes for them, goes under one folder that is
+// removed at exit: a run used to leave about 19 folders in the system temp folder
+const TMP_ROOT = mkdtempSync(join(tmpdir(), 'pw-suite-'));
+process.env.TMPDIR = TMP_ROOT;
+process.on('exit', () => rmSync(TMP_ROOT, { recursive: true, force: true }));
 
 // ---------------------------------------------------------------- unit: extract
 test('extract: number = last number in output', () => assert.equal(extract('errors 3, then 7\n', 0), 7));
