@@ -203,10 +203,23 @@ test('isNonSource: tests/config/grader/golden are non-source', () => {
     assert.equal(isNonSource(p), true, p);
 });
 test('isNonSource: ava\'s and node --test\'s test-*.js, *-test.js, *_test.js files and tsd type tests are non-source (a fixed test-release.js read as a source win, sendback bench 2026-11-10)', () => {
-  for (const p of ['test-release.js', 'test-utils.mjs', 'packages/a/test-foo.ts', 'index.test-d.ts', 'src/types.test-d.mts', 'lib/parse-test.js', 'lib/parse_test.mjs'])
+  for (const p of ['test-release.js', 'test-utils.mjs', 'packages/a/test-foo.ts', 'index.test-d.ts', 'src/types.test-d.mts', 'parse-test.js', 'e2e-checks/login-spec.js', 'lib/parse_test.mjs', 'src/foo_test.ts'])
     assert.equal(isNonSource(p), true, p);
-  for (const p of ['latest-release.js', 'contest-entries.js', 'lib/protest-handler.ts', 'src/attest-x.mjs', 'index.d.ts', 'lib/latest.js', 'src/contest.mjs'])
+  for (const p of ['latest-release.js', 'contest-entries.js', 'lib/protest-handler.ts', 'src/attest-x.mjs', 'index.d.ts', 'lib/latest.js', 'src/contest.mjs',
+    // production code named after tests, found in real repos (2026-11-10): hyphen names under src/, lib/ or scripts/ stay source
+    'packages/cli/src/lib/test-patterns.ts', 'packages/cli/src/commands/generate-test.ts', 'packages/collector/src/files/test-file.ts', 'lib/auth/test-auth.ts', 'scripts/test-psi.ts', 'scripts/smoke-test.mjs'])
     assert.equal(isNonSource(p), false, p);   // only a name that starts with test- (or tests-) at a path segment
+});
+test('isNonSource: the default test names and test configs of Bun, Cypress, .NET, PHPUnit, XCTest, ExUnit, Dart, Go, Rust, mocha, RSpec and coverage tools are non-source', () => {
+  for (const p of ['src/a_spec.ts', 'src/login.cy.js', 'cypress/e2e/a.cy.ts', 'pkg/testdata/in.json', 'benches/b.rs',
+    'MyApp.Tests/FooTests.cs', 'src/FooTest.cs', 'MyApp.Tests.csproj', 'src/FooTest.php', 'phpunit.xml', 'phpunit.xml.dist',
+    'FooTests.swift', 'Sources/App/FooTests.swift', 'lib/a_test.exs', 'lib/a_test.dart', 'integration_test/app_test.dart',
+    '.mocharc.yml', '.mocharc.json', '.rspec', 'vitest.workspace.ts', 'src/setupTests.ts',
+    '.nycrc', '.nycrc.json', '.c8rc.json', 'codecov.yml', '.coveragerc'])
+    assert.equal(isNonSource(p), true, p);
+  for (const p of ['src/latest.cs', 'src/Contest.php', 'Sources/Protest.swift', 'src/benchmark.rs', 'src/testdataset.py', 'MyApp/Program.cs',
+    'lib/inspect.ex', 'lib/latest.dart', 'src/cyclic.ts', 'src/Request.cs', 'src/Manifest.swift'])
+    assert.equal(isNonSource(p), false, p);   // look-alike production names stay source
 });
 test('isNonSource: real production source is NOT non-source', () => {
   for (const p of ['src/app.js', 'lib/handler.ts', 'index.mjs', 'latest.js', 'mytest.js', 'contest.py'])

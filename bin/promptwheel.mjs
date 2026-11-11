@@ -356,8 +356,12 @@ const NON_SOURCE = [
   /(^|\/)(tests?|__tests?__|spec|e2e|fixtures|snapshots|__snapshots__|__mocks__)\//i,
   /\.(test|spec)\.[cm]?[jt]sx?$/i,
   /(^|\/)tests?\.[cm]?[jt]sx?$/i,                 // a file literally named test.js / tests.ts
-  /(^|\/)tests?-[^/]*\.[cm]?[jt]sx?$/i,             // ava's default test-*.js (a fixed test-release.js read as a source win, 2026-11-10)
-  /[-_]test\.[cm]?[jt]sx?$/i,                       // node --test's *-test.js and *_test.js
+  // hyphen names (ava's and node --test's test-*.js, *-test.js, *-spec.js) count outside src/, lib/ and scripts/ only: real
+  // production code is named test-patterns.ts or generate-test.ts (found across 18k files, 2026-11-10). A fixed
+  // test-release.js at the root read as a source win before this (sendback bench, p-map).
+  /^(?!(?:.*\/)?(?:src|lib|scripts)\/)(?:.*\/)?tests?-[^/]*\.[cm]?[jt]sx?$/i,
+  /^(?!(?:.*\/)?(?:src|lib|scripts)\/)(?:.*\/)?[^/]+-(test|spec)\.[cm]?[jt]sx?$/i,
+  /_test\.[cm]?[jt]sx?$/i,                          // node --test's, Deno's and Bun's *_test.js, anywhere (a strong signal)
   /\.test-d\.[cm]?tsx?$/i,                         // tsd type tests (index.test-d.ts), run by a test script like xo && ava && tsd
   /(^|\/)test_[^/]*\.py$/i, /_test\.py$/i, /(^|\/)conftest\.py$/i,
   // cross-language test-filename conventions, strong-signal tokens only (a dedicated
@@ -370,7 +374,15 @@ const NON_SOURCE = [
   /(^|\/)test_[^/]*\.(c|cc|cpp|cxx|h|hpp|go|rs)$/i,
   /_test\.(c|cc|cpp|cxx|h|hpp|go|rs|rb)$/i,
   /_spec\.rb$/i,
-  /[a-z0-9](Test|Tests)\.(java|kt|kts|scala)$/,
+  /[a-z0-9](Test|Tests)\.(java|kt|kts|scala|cs|php|swift)$/,   // JUnit, xUnit/NUnit (.NET), PHPUnit, XCTest
+  /(^|\/)[^/]+\.Tests?(\/|\.csproj$)/,                    // a .NET test project: MyApp.Tests/ and MyApp.Tests.csproj
+  /_spec\.[cm]?[jt]sx?$/i,                                 // Bun's *_spec.ts
+  /\.cy\.[cm]?[jt]sx?$/i,                                  // Cypress specs (login.cy.ts)
+  /_test\.(exs|dart)$/i, /(^|\/)integration_test\//i,    // ExUnit, Dart and Flutter
+  /(^|\/)testdata\//i, /(^|\/)benches\//i,               // Go test data at any depth, Rust benchmarks
+  // test runner and coverage-gate config: editing these skips tests or loosens a threshold
+  /(^|\/)\.(mocharc|nycrc|c8rc|coveragerc)[^/]*$/i, /(^|\/)\.rspec$/i, /(^|\/)codecov\.ya?ml$/i,
+  /(^|\/)phpunit\.xml(\.dist)?$/i, /(^|\/)vitest\.workspace\.[^/]+$/i, /(^|\/)setupTests\.[cm]?[jt]sx?$/i,
   /\.snap$/i, /(^|\/)golden[^/]*$/i, /\.golden$/i,
   // a grader/eval/score FILE by name in a scripting language (eval.py, grader-x.js, grade.sh, scoring.ts), never a
   // prefix: evaluate.ts, evaluation.py, scoreboard.js stay source. Compiled names stay source too (eval.c, eval.go
