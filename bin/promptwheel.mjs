@@ -1135,7 +1135,9 @@ const PRESETS = {
 
 function detectTestCmd(repo, { has, read } = stackAt(repo)) {
   if (has('go.mod')) return 'go test ./...';
-  if (has('Cargo.toml')) return 'cargo test';
+  // a workspace root that is also a package tests only that package under plain `cargo test` (446 of ripgrep's 1246
+  // tests, 321 of regex's 1410, measured 2026-11-11): --workspace runs every member's tests
+  if (has('Cargo.toml')) { let t = ''; try { t = read('Cargo.toml'); } catch {} return /^\s*\[workspace\]/m.test(t) ? 'cargo test --workspace' : 'cargo test'; }
   // the venv is not tracked: it is looked for on disk whichever ref the stack is read from
   if (has('pyproject.toml') || has('setup.py') || has('pytest.ini')) return existsSync(join(repo, '.venv/bin/pytest')) ? '.venv/bin/pytest -q' : 'pytest -q';
   // only trust `npm test` when a test script actually exists, otherwise the metric can

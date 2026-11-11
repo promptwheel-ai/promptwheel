@@ -372,6 +372,18 @@ test('run --working: SEES newly added untracked files (the dominant agent action
 });
 
 // --------------------------------------------------------------- R4: init + presets
+test('init: a Rust workspace is tested with --workspace (plain cargo test ran 446 of ripgrep\'s 1246 tests, 321 of regex\'s 1410); a single crate keeps cargo test', () => {
+  const tomls = { crate: '[package]\nname = "a"\nversion = "0.1.0"\n', rootpkg: '[package]\nname = "a"\nversion = "0.1.0"\n\n[workspace]\nmembers = ["crates/*"]\n', virtual: '[workspace]\nmembers = ["crates/*"]\n' };
+  const want = { crate: 'cargo test', rootpkg: 'cargo test --workspace', virtual: 'cargo test --workspace' };
+  for (const [k, toml] of Object.entries(tomls)) {
+    const d = mkdtempSync(join(tmpdir(), 'pw-cargo-')); const g = (a) => execFileSync('git', a, { cwd: d });
+    g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+    writeFileSync(join(d, 'Cargo.toml'), toml); commitAll(d, 'base');
+    assert.equal(pw(d, ['init']).code, 0, k);
+    assert.equal(JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).metrics.find((m) => m.name === 'tests_pass').cmd, want[k], k);
+    rmSync(d, { recursive: true, force: true });
+  }
+});
 test('init: writes a starter config for the stack, refuses overwrite without --force', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-init-'));
   const g = (a) => execFileSync('git', a, { cwd: d });
