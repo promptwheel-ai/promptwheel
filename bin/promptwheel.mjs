@@ -357,6 +357,7 @@ const NON_SOURCE = [
   /\.(test|spec)\.[cm]?[jt]sx?$/i,
   /(^|\/)tests?\.[cm]?[jt]sx?$/i,                 // a file literally named test.js / tests.ts
   /(^|\/)tests?-[^/]*\.[cm]?[jt]sx?$/i,             // ava's default test-*.js (a fixed test-release.js read as a source win, 2026-11-10)
+  /[-_]test\.[cm]?[jt]sx?$/i,                       // node --test's *-test.js and *_test.js
   /\.test-d\.[cm]?tsx?$/i,                         // tsd type tests (index.test-d.ts), run by a test script like xo && ava && tsd
   /(^|\/)test_[^/]*\.py$/i, /_test\.py$/i, /(^|\/)conftest\.py$/i,
   // cross-language test-filename conventions, strong-signal tokens only (a dedicated
