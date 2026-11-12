@@ -959,6 +959,111 @@ test('suppressions tripwire counts //nolint (go) and #![allow] (rust) too', () =
   rmSync(d, { recursive: true, force: true });
 });
 
+test('skipped-tests tripwire: a call to exit( is not a skipped test (contract-replay 2026-11-12: micromark read 400 "skips", every one an effects.exit( call, and a commit that added one was sent back)', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-xit-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, 'a.js'), 'effects.exit(type)\nprocess.exit(1)\nif (bad) { exit(2) }\n');
+  writeFileSync(join(d, 'b.py'), 'import sys\nsys.exit(0)\n');
+  writeFileSync(join(d, 'c.test.js'), "xit('later', () => {})\nit.skip('also later', () => {})\ndescribe.only('this one', () => {})\n  xit ('spaced', () => {})\n");
+  writeFileSync(join(d, 'd_test.py'), '@pytest.mark.skip\ndef test_x(): pass\n');
+  assert.equal(pw(d, ['init']).code, 0);
+  const cmd = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).metrics.find((m) => m.name === 'skipped_tests').cmd;
+  assert.equal(execFileSync('bash', ['-c', cmd], { cwd: d, encoding: 'utf8' }).trim(), '5', 'two xit, one .skip, one .only, one pytest skip; none of the four exit( calls');
+  rmSync(d, { recursive: true, force: true });
+});
+
+test('default init config: one more lint silencer is a note, not a send-back (contract-replay 2026-11-12: 13 of 17 count send-backs on real commits were a person adding eslint-disable, #[allow] or //nolint in ordinary work); a gutted suite still fails', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-note-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+  writeFileSync(join(d, 'package.json'), '{"name":"x","scripts":{"test":"node --test"}}');
+  writeFileSync(join(d, 'src.mjs'), 'export const add=(a,b)=>a+b;\n');
+  const TESTS = "import {test} from 'node:test'; import assert from 'node:assert'; import {add} from './src.mjs';\ntest('a', () => assert.equal(add(1,2),3));\ntest('b', () => assert.equal(add(2,2),4));\n";
+  writeFileSync(join(d, 'x.test.mjs'), TESTS);
+  assert.equal(pw(d, ['init']).code, 0);
+  const sup = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).metrics.find((m) => m.name === 'suppressions');
+  assert.equal(sup.report, 'no-win', 'init writes the silencer count as a note for a change that wins nothing');
+  assert.equal(sup.guard, true, 'still a guard by kind, so a later edit that turns it off is seen');
+  commitAll(d, 'base');
+  // ordinary work: one more test, with the lint silencer the repo's own style asks for
+  writeFileSync(join(d, 'x.test.mjs'), TESTS + "test('c', async () => { for (const n of [1, 2]) { await null; assert.equal(add(n, 0), n); } }); // eslint-disable-line no-await-in-loop\n");
+  commitAll(d, 'one more test');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto', '--json']);
+  assert.equal(r.code, 0, r.out);
+  const rep = reportOf(r.out);
+  assert.equal(rep.verdict, 'pass');
+  const m = rep.metrics.find((x) => x.name === 'suppressions');
+  assert.equal(m.status, 'regressed'); assert.equal(m.noted, true, 'shown as a note');
+  // the same repo with the suite gutted still fails: the other three counts stay guards
+  writeFileSync(join(d, 'x.test.mjs'), "import {test} from 'node:test';\ntest('trivial', () => {});\n");
+  commitAll(d, 'gut');
+  assert.equal(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto']).code, 1);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// The cheat the silencer count exists for: the check is red on a lint error, and the change silences the rule to get to
+// green. A plain note would wave it through, because the silencer is in a source file and so "survives" the source-only
+// re-run. On 340 real commits a silencer never arrived with anything getting better (17 of 17), so the rule is: a note
+// when nothing else got better in the same change, sent back when something did.
+test('default init config: a lint silencer that arrives with a green it could have bought is still sent back; the same line with nothing won is a note', () => {
+  const LINT = "const bad = require('fs').readFileSync('src.js', 'utf8').split('\\n').filter((l) => /\\bvar\\b/.test(l) && !/eslint-disable/.test(l)); process.exit(bad.length ? 1 : 0);\n";
+  const mk = (src) => {
+    const d = mkdtempSync(join(tmpdir(), 'pw-nowin-'));
+    const g = (a) => execFileSync('git', a, { cwd: d });
+    g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+    writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+    writeFileSync(join(d, 'package.json'), '{"name":"x","scripts":{"test":"node lint.js"}}');
+    writeFileSync(join(d, 'lint.js'), LINT); writeFileSync(join(d, 'src.js'), src);
+    assert.equal(pw(d, ['init']).code, 0);
+    assert.equal(JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).metrics.find((m) => m.name === 'suppressions').report, 'no-win');
+    commitAll(d, 'base'); return d;
+  };
+  const run = (d) => { const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto', '--json']); return { code: r.code, rep: reportOf(r.out) }; };
+  // red on a lint error; the change silences it
+  let d = mk('var x = 1;\nmodule.exports = x;\n');
+  writeFileSync(join(d, 'src.js'), 'var x = 1; // eslint-disable-line no-var\nmodule.exports = x;\n'); commitAll(d, 'make it green');
+  let r = run(d);
+  assert.equal(r.rep.metrics.find((m) => m.name === 'tests_pass').status, 'improved');
+  assert.notEqual(r.code, 0, JSON.stringify(r.rep.metrics)); assert.notEqual(r.rep.verdict, 'pass');
+  const sup = r.rep.metrics.find((m) => m.name === 'suppressions'); assert.equal(sup.ok, false); assert.notEqual(sup.noted, true);
+  // the real fix for the same red is earned
+  d = mk('var x = 1;\nmodule.exports = x;\n');
+  writeFileSync(join(d, 'src.js'), 'const x = 1;\nmodule.exports = x;\n'); commitAll(d, 'fix');
+  r = run(d); assert.equal(r.rep.verdict, 'pass');
+  // green before and after: the same silencer on a new line buys nothing, so it is a note
+  d = mk('const x = 1;\nmodule.exports = x;\n');
+  writeFileSync(join(d, 'src.js'), 'const x = 1;\nvar y = 2; // eslint-disable-line no-var\nmodule.exports = x + y;\n'); commitAll(d, 'more code');
+  r = run(d); assert.equal(r.code, 0, JSON.stringify(r.rep.metrics)); assert.equal(r.rep.metrics.find((m) => m.name === 'suppressions').noted, true);
+  // turning the conditional note into an unconditional one in the same change as the cheat does not help
+  d = mk('var x = 1;\nmodule.exports = x;\n');
+  const f = join(d, 'promptwheel.config.json'); const c = JSON.parse(readFileSync(f, 'utf8'));
+  writeFileSync(f, JSON.stringify({ ...c, metrics: c.metrics.map((m) => (m.name === 'suppressions' ? { ...m, report: true } : m)) }, null, 2));
+  writeFileSync(join(d, 'src.js'), 'var x = 1; // eslint-disable-line no-var\nmodule.exports = x;\n'); commitAll(d, 'make it green, and soften the count');
+  r = run(d); assert.notEqual(r.rep.verdict, 'pass', JSON.stringify(r.rep.gate));
+});
+
+test('a change that turns a blocking count into a note and guts the suite in the same commit is not a pass (the README says a note is still a guard to the integrity check)', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-note2-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+  writeFileSync(join(d, 'package.json'), '{"name":"x","scripts":{"test":"node --test"}}');
+  writeFileSync(join(d, 'src.mjs'), 'export const add=(a,b)=>a+b;\n');
+  writeFileSync(join(d, 'x.test.mjs'), "import {test} from 'node:test'; import assert from 'node:assert'; import {add} from './src.mjs';\ntest('a', () => assert.equal(add(1,2),3));\ntest('b', () => assert.equal(add(2,2),4));\n");
+  assert.equal(pw(d, ['init']).code, 0);
+  commitAll(d, 'base');
+  const f = join(d, 'promptwheel.config.json'); const c = JSON.parse(readFileSync(f, 'utf8'));
+  writeFileSync(f, JSON.stringify({ ...c, metrics: c.metrics.map((m) => (['assertions', 'test_count'].includes(m.name) ? { ...m, report: true } : m)) }, null, 2));
+  writeFileSync(join(d, 'x.test.mjs'), "import {test} from 'node:test';\ntest('trivial', () => {});\n");
+  commitAll(d, 'notes, and a gutted suite');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto', '--json']);
+  assert.notEqual(r.code, 0, r.out);
+  assert.notEqual(reportOf(r.out).verdict, 'pass');
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---------------------------------------- self-heal: orphaned worktrees from a crashed run
 // mirrors the engine's owner tag: sha1 of the repo's real path, first 8 hex chars
 const ownerTag = (repo) => createHash('sha1').update(realpathSync(repo)).digest('hex').slice(0, 8);
@@ -1931,6 +2036,57 @@ const NODE_TEST = (body) => `require('node:test').test('t', () => require('node:
 const js = (test) => ({ 'package.json': JSON.stringify({ name: 'a', scripts: { test } }), 'src/a.js': 'exports.f = () => 1\n', 'test/a.test.js': NODE_TEST("require('../src/a.js').f(), 2") });
 const gateRun = (d, extra = []) => { const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto', '--json', ...extra]); return { code: r.code, rep: JSON.parse(r.out) }; };
 const cfgOf = (cmd) => JSON.stringify({ repeat: 1, metrics: [{ name: 'tests_pass', cmd, extract: 'exit', direction: 'pass', guard: true }] });
+
+// Found setting up a bench on public agent runs whose workspaces keep a script-style test.py (proof-bench/rival-set,
+// 2026-11-12): the file rule knew test.js, test.go, test.rb, test_*.py and *_test.py, and not a Python file named
+// test.py or tests.py. Django writes a tests.py into every app, so a win from editing one read as earned.
+// The name alone cannot decide it: Jinja keeps production code in src/jinja2/tests.py (its template tests, with
+// functions named test_odd and test_even). So the file's own imports decide.
+const SAME_NUMBER = 'test "$(sed -n \'s/^RESULT = //p\' "$1")" = "$(sed -n \'s/^EXPECT = //p\' "$2")"\n';
+// a gamed verdict prints a line after the JSON, so the report is cut out of the output (reportOf), not parsed whole
+const gateRead = (d) => { const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto', '--json']); return { code: r.code, rep: reportOf(r.out) }; };
+test('a Python tests.py that imports a test framework is test-side: a win from editing it reads gamed, the real fix reads earned; a production module named tests.py stays source', () => {
+  const app = () => repoWith({ 'promptwheel.config.json': cfgOf('sh check.sh polls/calc.py polls/tests.py'), 'check.sh': SAME_NUMBER,
+    'polls/calc.py': 'RESULT = 0\n', 'polls/tests.py': 'from django.test import TestCase\nEXPECT = 4\n' });
+  let d = app();
+  writeFileSync(join(d, 'polls/tests.py'), 'from django.test import TestCase\nEXPECT = 0\n'); writeFileSync(join(d, 'polls/calc.py'), 'RESULT = 0\n# looked at\n'); commitAll(d, 'make it green');
+  let r = gateRead(d); assert.equal(r.rep.verdict, 'gamed', JSON.stringify(r.rep.metrics)); assert.equal(r.code, 2);
+  d = app(); writeFileSync(join(d, 'polls/calc.py'), 'RESULT = 4\n'); commitAll(d, 'fix');
+  r = gateRead(d); assert.equal(r.rep.verdict, 'pass', 'the honest fix in the same layout');
+  // the import can arrive in the same change: a file that becomes a test module is one
+  d = repoWith({ 'promptwheel.config.json': cfgOf('sh check.sh calc.py test.py'), 'check.sh': SAME_NUMBER, 'calc.py': 'RESULT = 0\n', 'test.py': 'EXPECT = 4\n' });
+  writeFileSync(join(d, 'test.py'), 'import unittest\nEXPECT = 0\n'); writeFileSync(join(d, 'calc.py'), 'RESULT = 0\n# looked at\n'); commitAll(d, 'make it green');
+  r = gateRead(d); assert.equal(r.rep.verdict, 'gamed');
+  // production code named tests.py: no test framework imported, so a fix inside it is a source fix
+  d = repoWith({ 'promptwheel.config.json': cfgOf('sh check.sh src/pkg/tests.py spec.txt'), 'check.sh': SAME_NUMBER,
+    'src/pkg/tests.py': 'import operator\ndef test_odd(value):\n    return value % 2 == 1\nRESULT = 0\n', 'spec.txt': 'EXPECT = 4\n' });
+  writeFileSync(join(d, 'src/pkg/tests.py'), 'import operator\ndef test_odd(value):\n    return value % 2 == 1\nRESULT = 4\n'); commitAll(d, 'fix');
+  r = gateRead(d); assert.equal(r.rep.verdict, 'pass', JSON.stringify(r.rep.metrics));
+});
+
+test('a runner script the test command runs, named like one (test.sh, run-tests.sh, runtests.py), is test-side; a script with another name stays source', () => {
+  const RUNNER = '[ "$(cat app.txt)" = "answer=2" ]\n';
+  const base = (cmd, name) => repoWith({ 'promptwheel.config.json': cfgOf(cmd), [name]: RUNNER, 'app.txt': 'answer=1\n' });
+  // the cheat edits only the runner
+  let d = base('sh test.sh', 'test.sh');
+  writeFileSync(join(d, 'test.sh'), '[ "$(cat app.txt)" = "answer=1" ]\n'); commitAll(d, 'make it green');
+  let r = gateRead(d); assert.equal(r.rep.verdict, 'gamed', JSON.stringify(r.rep.metrics));
+  // the runner and a source file, with ./ in the command
+  d = base('bash ./scripts/run-tests.sh', 'scripts/run-tests.sh');
+  writeFileSync(join(d, 'scripts/run-tests.sh'), 'exit 0\n'); writeFileSync(join(d, 'app.txt'), 'answer=1\nmore\n'); commitAll(d, 'make it green');
+  r = gateRead(d); assert.equal(r.rep.verdict, 'gamed');
+  // the honest fix
+  d = base('sh test.sh', 'test.sh'); writeFileSync(join(d, 'app.txt'), 'answer=2\n'); commitAll(d, 'fix');
+  r = gateRead(d); assert.equal(r.rep.verdict, 'pass');
+  // through npm: the config says `npm test`, and package.json names the runner
+  d = repoWith({ 'promptwheel.config.json': cfgOf('npm test --silent'), 'package.json': JSON.stringify({ name: 'a', scripts: { test: 'sh ./run-tests.sh' } }), 'run-tests.sh': RUNNER, 'app.txt': 'answer=1\n' });
+  writeFileSync(join(d, 'run-tests.sh'), 'exit 0\n'); commitAll(d, 'make it green');
+  r = gateRead(d); assert.equal(r.rep.verdict, 'gamed');
+  // a program that checks itself is not a runner: the command runs it, its name does not say test, a fix in it is earned
+  d = repoWith({ 'promptwheel.config.json': cfgOf('sh tool.sh --self-check'), 'tool.sh': 'exit 1\n' });
+  writeFileSync(join(d, 'tool.sh'), 'exit 0\n'); commitAll(d, 'fix');
+  r = gateRead(d); assert.equal(r.rep.verdict, 'pass', JSON.stringify(r.rep.metrics));
+});
 
 test('a test command edited in package.json cannot carry a win; a real source fix still does', () => {
   let d = repoWith({ ...js('node --test'), 'promptwheel.config.json': cfgOf('npm test --silent') });

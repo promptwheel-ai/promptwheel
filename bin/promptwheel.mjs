@@ -499,9 +499,52 @@ function checkMandates(repo, base, head, cfg, baseMandates) {
 // split the agent's changed files into production-source vs test/config/grader/golden.
 // `isEval` is the repo's opt-in evaluator-path matcher, treated as non-source alongside
 // the built-in classifier, so a cheat that only edits a declared gate file is caught.
-function changedSourcePaths(repo, base, head, isEval = () => false) {
+// Two kinds of test-side file a path pattern cannot name, so the repo itself is asked (found 2026-11-12 on workspaces that
+// keep a script-style test.py; both read as source before, so a win from editing them read as earned):
+// 1. A Python file named test.py or tests.py. Django writes a tests.py into every app; Jinja keeps production code in
+//    src/jinja2/tests.py (its template tests, with functions named test_odd). The name cannot tell them apart, so the
+//    file's own imports decide, at the base or at the head: a test framework means a test module.
+const showQuiet = (repo, ref, p) => { try { return execFileSync('git', ['show', `${ref}:${p}`], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024 }); } catch { return null; } };   // null: not at this ref
+const PY_TEST_NAME = /(^|\/)tests?\.py$/i;
+const PY_TEST_IMPORT = /^[ \t]*(?:import|from)[ \t]+(?:unittest|pytest|nose2?|hypothesis|doctest|testtools|django\.test|rest_framework\.test|twisted\.trial)\b/m;
+function pyTestModule(repo, base, head, p) {
+  if (!PY_TEST_NAME.test(p)) return false;
+  return [base, head].some((ref) => PY_TEST_IMPORT.test(showQuiet(repo, ref, p) || ''));
+}
+// 2. A script a guard's own command runs, named like a test runner (test.sh, tests.py, runtests.py, run-tests.sh): it is
+//    the measure, not the thing measured. Read from the guards at both ends of the change, and from the base's
+//    package.json test script when the command goes through npm. Only the script that is run counts, not what is handed
+//    to it (`python -m doctest src/pkg/tests.py` names a production file), and the name must say test:
+//    `node src/cli.js --self-test` runs the product, and a fix in it is a source fix.
+const RUNNER_NAME = /^(?:run[-_]?)?tests?(?:[-_.][\w.-]*)?\.(?:py|sh|bash|zsh|[cm]?[jt]s|rb|pl|php|lua)$/i;
+const INTERPRETER = /^(?:sh|bash|zsh|dash|ksh|python[\d.]*|pypy[\d.]*|node|nodejs|deno|bun|tsx|ts-node|ruby|perl|php|lua[\d.]*)$/;
+function scriptRun(simple) {   // the script one simple command runs, or null
+  const words = simple.trim().split(/\s+/).map((w) => w.replace(/^['"]|['"]$/g, '')).filter(Boolean);
+  while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) words.shift();   // FOO=bar before the command
+  if (!words.length) return null;
+  let i = 0;
+  if (INTERPRETER.test(words[0].split('/').pop())) {
+    i = 1;
+    if (words[1] === 'run' && /^(deno|bun)$/.test(words[0].split('/').pop())) i = 2;
+    for (; i < words.length && words[i].startsWith('-'); i++) if (/^-(m|c|e|-eval|-print|p)$/.test(words[i])) return null;   // a module or inline code, not a script
+  }
+  const f = (words[i] || '').replace(/^\.\//, '');
+  return f && !f.startsWith('-') && !f.startsWith('/') && !f.split('/').includes('..') ? f : null;
+}
+function runnerScripts(repo, base, cfg) {
+  const cmds = (cfg && Array.isArray(cfg.metrics) ? cfg.metrics : []).filter((m) => m && m.guard === true && typeof m.cmd === 'string').map((m) => m.cmd);
+  try { const pkg = JSON.parse(showQuiet(repo, base, 'package.json') || 'null'); if (pkg && pkg.scripts && typeof pkg.scripts.test === 'string') cmds.push(pkg.scripts.test); } catch { /* a package.json that does not parse names no runner */ }
+  const out = new Set();
+  for (const cmd of cmds) for (const simple of cmd.split(/&&|\|\||[;|\n(){}]/)) {
+    const f = scriptRun(simple);
+    if (f && RUNNER_NAME.test(f.split('/').pop())) out.add(f);
+  }
+  return out;
+}
+function changedSourcePaths(repo, base, head, isEval = () => false, cfg = null) {
   const all = git(['diff', '--name-only', '--no-renames', base, head], repo).split('\n').filter(Boolean);
-  const nonSrc = (p) => isNonSource(p) || isEval(p);
+  const runners = cfg ? runnerScripts(repo, base, cfg) : new Set();
+  const nonSrc = (p) => isNonSource(p) || isEval(p) || runners.has(p) || pyTestModule(repo, base, head, p);
   return { source: all.filter((p) => !nonSrc(p)), nonSource: all.filter(nonSrc) };
 }
 
@@ -539,10 +582,10 @@ function holdGoalposts(repo, base, wt, source) {
   }
 }
 
-function measureSourceOnlyAll(repo, base, head, defs, cfg, repeat) {
+function measureSourceOnlyAll(repo, base, head, defs, cfg, repeat, guardsFrom = cfg) {
   const out = {};
   if (!defs.length) return out;
-  const { source } = changedSourcePaths(repo, base, head, evaluatorMatcher(cfg));
+  const { source } = changedSourcePaths(repo, base, head, evaluatorMatcher(cfg), guardsFrom);
   if (!source.length) { for (const m of defs) out[m.name] = { samples: [], hadSourceChange: false }; return out; } // a "win" with zero source edits = goalposts moved
   const wt = mkdtempSync(join(tmpBase(repo), tmpPrefix(repo, 'promptwheel-src')));
   git(['worktree', 'add', '--quiet', '--detach', wt, base], repo);
@@ -748,7 +791,10 @@ function zeroConfigGate(repo, ref) {
 // how a metric is measured and judged: change any of these on a guard and it is a different guard
 // what init writes when it finds no test command. It guards nothing, so replacing it is setup, not a weakened gate.
 const PLACEHOLDER_TEST = 'echo "set your test command in promptwheel.config.json" && false';
-const measuredBy = (m) => JSON.stringify([m.cmd ?? null, m.extract ?? 'number', m.direction || 'up', m.exact === true, m.report === true]);
+// `report`: true = its regression is a note; 'no-win' = a note only when the change won nothing (see winsNothing); else a guard
+const reportMode = (m) => (m.report === true ? true : m.report === 'no-win' ? 'no-win' : false);
+const winsNothing = (evaluated) => !evaluated.some((x) => x.status === 'improved' && !x.tripwire);   // a tripwire going up is not a win
+const measuredBy = (m) => JSON.stringify([m.cmd ?? null, m.extract ?? 'number', m.direction || 'up', m.exact === true, reportMode(m)]);
 // an order-independent SHA-256 (truncated) fingerprint of a gate definition, for the audit record
 function gateFingerprint(metricsList, scalars) {
   const norm = {
@@ -814,7 +860,7 @@ function gateWeakenings(baseGate, headMetrics) {
     const hm = head.get(bm.name);
     if (!hm) weak.push({ name: bm.name, change: 'guard-removed', def: bm });
     else if (hm.guard !== true) weak.push({ name: bm.name, change: 'guard-disabled', def: bm });
-    else if (!bm.report && bm.cmd !== PLACEHOLDER_TEST && measuredBy(hm) !== measuredBy(bm)) weak.push({ name: bm.name, change: 'guard-edited', def: bm });
+    else if (bm.report !== true && bm.cmd !== PLACEHOLDER_TEST && measuredBy(hm) !== measuredBy(bm)) weak.push({ name: bm.name, change: 'guard-edited', def: bm });
   }
   return weak;
 }
@@ -870,6 +916,8 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
   const asInit = !!bs && baseGate.zeroConfig && measuredWith({ ...bs, setup: baseGate.initSetup }) === measuredWith(cfg);
   const measureChanged = !!bs && !asInit && measuredWith(bs) !== measuredWith(cfg);
   const baseRun = measureChanged ? { ...cfg, ...measureOf(bs) } : cfg;   // the head gate, run with the base setup, env and linked dirs
+  // runner scripts are read from the guards at both ends, so a change cannot un-name its runner in the commit that edits it
+  const guards = { metrics: [...(cfg.metrics || []), ...(baseGate ? [...baseGate.metrics.values()] : [])] };
   const toProve = [];
   for (const m of metrics) {
     if (m.status !== 'improved') continue;
@@ -877,7 +925,7 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
     if (gamingCheckOff(cm, baseGate)) continue;   // tripwire / test-side guards aren't re-proven from source (their gain legitimately lives in test files)
     toProve.push(cm);
   }
-  const srcResults = measureSourceOnlyAll(repo, base, head, toProve, baseRun, repeat);   // one patched checkout for all of them
+  const srcResults = measureSourceOnlyAll(repo, base, head, toProve, baseRun, repeat, guards);   // one patched checkout for all of them
   for (const cm of toProve) {
     const m = metrics.find((x) => x.name === cm.name);
     const j = judgeGaming(m, srcResults[cm.name], gamingThresholdFor(cm, cfg, baseGate));
@@ -887,11 +935,11 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
   // A green that stays green proves nothing about the tests. When a change edits the source and the tests
   // together, run the old tests on the new source: if they fail, say so. Only a note, never a verdict: an
   // intended API change does this too, and no deterministic check can tell the two apart.
-  const split = changedSourcePaths(repo, base, head, evaluatorMatcher(cfg));
+  const split = changedSourcePaths(repo, base, head, evaluatorMatcher(cfg), guards);
   if (split.source.length && split.nonSource.length) {
     const held = metrics.filter((m) => m.status === 'unchanged' && m.direction === 'pass' && m.after === 1 && !m.tripwire);
     const defs = held.map((m) => cfg.metrics.find((c) => c.name === m.name)).filter(Boolean);
-    const res = measureSourceOnlyAll(repo, base, head, defs, baseRun, repeat);
+    const res = measureSourceOnlyAll(repo, base, head, defs, baseRun, repeat, guards);
     for (const m of held) { const r = res[m.name]; if (r && r.samples && r.samples.length && median(r.samples) !== 1) m.heldByTestEdit = true; }
   }
   // a file declared as a goalpost before this change still is one for this change: dropping the declaration in the
@@ -910,7 +958,7 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
   const weak = gateWeakenings(baseGate, cfg.metrics);
   // the setup, env or linked dirs changed: every guard the base had is measured again the way it was measured before
   if (measureChanged) for (const bm of baseGate.metrics.values()) {
-    if (bm.guard === true && !bm.report && bm.cmd !== PLACEHOLDER_TEST && !weak.some((w) => w.name === bm.name)) weak.push({ name: bm.name, change: 'measurement-edited', def: bm });
+    if (bm.guard === true && bm.report !== true && bm.cmd !== PLACEHOLDER_TEST && !weak.some((w) => w.name === bm.name)) weak.push({ name: bm.name, change: 'measurement-edited', def: bm });
   }
   const weakened = [];
   if (weak.length) {
@@ -922,7 +970,8 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
       const ev = evaluate(w.def, b[w.name], a[w.name], repeat);
       evs.set(w.name, ev);
       // an edited guard that still fails under its old definition was turned green by the edit, not the code
-      let hidden = !ev.ok || (w.change === 'guard-edited' && ev.inert);
+      const noteByOldRule = w.def.report === 'no-win' && ev.status === 'regressed' && winsNothing(metrics);
+      let hidden = (!ev.ok && !noteByOldRule) || (w.change === 'guard-edited' && ev.inert);
       // a guard measured another way counts only when the new measurement hides it: it fails the old way and reads fine the new way
       if (w.change === 'measurement-edited') { const hm = metrics.find((x) => x.name === w.name); hidden = (!ev.ok || !!ev.inert) && !!hm && hm.ok && !hm.inert; }
       if (hidden) weakened.push({ name: w.name, change: w.change, status: ev.inert ? 'failed' : ev.status });
@@ -931,7 +980,7 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
     // change does not skip the source-only re-run
     const won = weak.filter((w) => w.def.gamingCheck !== false && !weakened.some((x) => x.name === w.name) && evs.get(w.name).status === 'improved');
     if (won.length) {
-      const src = measureSourceOnlyAll(repo, base, head, won.map((w) => w.def), baseRun, repeat);
+      const src = measureSourceOnlyAll(repo, base, head, won.map((w) => w.def), baseRun, repeat, guards);
       for (const w of won) {
         const j = judgeGaming({ name: w.name, direction: w.def.direction || 'up', guard: true, ...evs.get(w.name) }, src[w.name], w.def.gamingThreshold ?? (bs && bs.gamingThreshold) ?? 0.5);
         if (j.gamed) weakened.push({ name: w.name, change: w.change, status: 'gamed' });
@@ -1006,7 +1055,7 @@ function gate(repo, opts) {
     const ev = evaluate(m, before[m.name], after[m.name], repeat);
     if (ev.status === 'unmeasurable' && ev.before == null && ev.after != null && adopted(m.name)) { ev.ok = true; ev.adopted = true; }
     // a `report` guard tells you and does not fail: a contract can start by watching and tighten later
-    if (m.report && !ev.ok && ev.status === 'regressed') { ev.ok = true; ev.noted = true; }
+    if (m.report === true && !ev.ok && ev.status === 'regressed') { ev.ok = true; ev.noted = true; }
     // an inert guard: did its command run and fail, or never run? `ran` says where it ran (absent: at neither ref)
     if (ev.inert && m.cmd !== PLACEHOLDER_TEST) {
       const nb = neverRan(before[m.name]), na = neverRan(after[m.name]);
@@ -1016,6 +1065,13 @@ function gate(repo, opts) {
     }
     return { name: m.name, direction: m.direction || 'up', guard: !!m.guard, ...(gamingCheckOff(m, baseGate) ? { tripwire: true } : {}), ...ev };
   });
+  // `report: "no-win"`: a count that got worse is a note when the change won nothing, and stays a failure when it arrives
+  // beside something that got better. One more lint silencer in ordinary work is a note (17 of 17 on real commits,
+  // proof-bench/contract-replay); a silencer that turns a red lint step green is the trade the count exists to catch.
+  if (winsNothing(metrics)) for (const x of metrics) {
+    const def = cfg.metrics.find((c) => c.name === x.name);
+    if (def && def.report === 'no-win' && !x.ok && x.status === 'regressed') { x.ok = true; x.noted = true; }
+  }
   // Section 3 (gaming detection), on by default: mutates `metrics` and yields the gate record
   const gateInfo = opts.detectGaming ? detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) : null;
   // declared override: a Promptwheel-Allow trailer (or --allow) acknowledges an intentional
@@ -1118,8 +1174,10 @@ const PRESETS = {
     metrics: [
       { name: 'tests_pass', cmd: '__TESTCMD__', extract: 'exit', direction: 'pass', guard: true },
       { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
-      { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|xit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
-      { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa|# ?nosec|//nolint|#!?\\[allow\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
+      { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|\\bxit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
+      // a note when the change wins nothing (report: 'no-win'): on 340 real commits a blocking silencer count sent back 13 for a person adding
+      // eslint-disable, #[allow] or //nolint in ordinary work, and in none of the 17 where it rose did anything else get better. Beside a win it still fails.
+      { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa|# ?nosec|//nolint|#!?\\[allow\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, report: 'no-win', gamingCheck: false },
       { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert|\\bt\\.(is|deepEqual|throws|truthy|falsy|not|ok) ?\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
     ] },
   'no-ai-tells': { desc: 'opt-in: fail the gate if the em-dash count rises (an AI writing tell); some projects use them on purpose, so it is not a default',
