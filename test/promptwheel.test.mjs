@@ -76,9 +76,9 @@ test('renderMarkdown: with more than one thing to accept, the comment to copy na
   const base = { base: 'a', head: 'b', mode: 'refs', repeat: 1, verdict: 'fail',
     metrics: [{ name: 'dependency_entries', guard: true, before: 1, after: 2, delta: 1, status: 'regressed', confidence: 'high', ok: false, allowable: true }],
     explained: [{ metric: 'dependency_entries', noted: false, what: 'a new dependency', allowable: true }] };
-  assert.match(renderMarkdown({ ...base, allowable: ['dependency_entries'] }), /comment `sawbuck-allow: <your reason>` on this PR/, 'one thing: no name needed');
+  assert.match(renderMarkdown({ ...base, allowable: ['dependency_entries'] }), /who did not open this PR comments `sawbuck-allow: <their reason>` on it/, 'one thing: no name needed');
   const two = renderMarkdown({ ...base, allowable: ['dependency_entries', 'mandate:lock-frozen'], allowed: { reason: 'dependency_entries: needed', cleared: ['dependency_entries'] } });
-  assert.match(two, /comment `sawbuck-allow: dependency_entries, lock-frozen: <your reason>` on this PR/);
+  assert.match(two, /who did not open this PR comments `sawbuck-allow: dependency_entries, lock-frozen: <their reason>` on it/);
   assert.match(two, /\*\*Allowed:\*\* `dependency_entries`/); assert.match(two, /\*\*Not let through:\*\* `mandate:lock-frozen`/);
   const none = renderMarkdown({ ...base, allowable: ['dependency_entries', 'mandate:lock-frozen'], allowed: { reason: 'looks fine', cleared: [] } });
   assert.doesNotMatch(none, /\*\*Allowed:\*\*/); assert.match(none, /\*\*Not let through:\*\* `dependency_entries`, `mandate:lock-frozen`/);
@@ -2577,6 +2577,64 @@ test('pr-allow: reads every page gh prints (one comment per line), so the newest
   assert.equal(prAllow(''), '');
   const action = readFileSync(join(dirname(ENGINE), '..', 'action.yml'), 'utf8');
   assert.match(action, /gh api --paginate "repos\/\$REPO\/issues\/\$PR\/comments\?per_page=100" --jq '\.\[\]'/, 'the Action reads every page, not the oldest 100');
+});
+
+// 0.8.10: who may let a pull request through. Until now the newest `sawbuck-allow:` comment from any account of type
+// User with write access counted, the account that opened the pull request included. A coding agent run from a
+// service account (a GitHub machine user: a User, with a token that writes pull requests) opens its pull requests
+// from that account, and the check's own comment spells out the words to post. Run with the Action's own steps
+// (proof-bench/pr-shapes, 2026-11-14): the opener's comment let a gamed green through, and let a pull request that
+// rewrote its own contract through. The opener's own comment no longer counts, unless the contract on the BASE
+// branch says a repo with one person in it wants that.
+test('approval on a PR: the account that opened it does not count, in any letter case; another person does', () => {
+  const c = (body, login, assoc = 'COLLABORATOR', type = 'User') => ({ body, author_association: assoc, user: { type, login } });
+  const opener = { author: 'acme-agent-svc' };
+  assert.equal(allowFromComments([c('sawbuck-allow: it is fine', 'acme-agent-svc')], opener), '', 'the opener');
+  assert.equal(allowFromComments([c('sawbuck-allow: it is fine', 'Acme-Agent-SVC')], opener), '', 'the opener, in another letter case');
+  assert.equal(allowFromComments([c('sawbuck-allow: I looked', 'pat', 'MEMBER')], opener), 'I looked (approved by pat)', 'another person');
+  assert.equal(allowFromComments([c('sawbuck-allow: I looked', 'pat', 'MEMBER'), c('sawbuck-allow: it is fine', 'acme-agent-svc')], opener), 'I looked (approved by pat)', 'a newer comment from the opener does not hide a person\'s');
+  assert.equal(allowFromComments([c('sawbuck-allow: it is fine', 'acme-agent-svc'), c('sawbuck-allow: I looked', 'pat', 'MEMBER')], opener), 'I looked (approved by pat)');
+  assert.equal(allowFromComments([c('sawbuck-allow: it is fine', 'acme-agent-svc')], { ...opener, allowFromAuthor: true }), 'it is fine (approved by acme-agent-svc)', 'where the base contract says the opener may');
+  assert.equal(allowFromComments([c('sawbuck-allow: it is fine', 'acme-agent-svc')]), 'it is fine (approved by acme-agent-svc)', 'with no opener named, as before (a caller that does not know who opened it)');
+  assert.equal(allowFromComments([c('sawbuck-allow: x', 'some-app[bot]', 'NONE', 'Bot')], opener), '', 'a bot still never counts');
+});
+test('pr-allow --author: the contract on the base branch decides whether the opener counts; the branch cannot say so for itself', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'true', extract: 'exit', direction: 'pass', guard: true }]); commitAll(d, 'base');
+  const base = rev(d);
+  const mine = JSON.stringify({ body: 'sawbuck-allow: it is fine', author_association: 'COLLABORATOR', user: { type: 'User', login: 'acme-agent-svc' } });
+  const theirs = JSON.stringify({ body: 'sawbuck-allow: I looked', author_association: 'MEMBER', user: { type: 'User', login: 'pat' } });
+  const note = join(d, '..', `note-${Date.now()}.md`);
+  const prAllow = (input, ...a) => { try { return execFileSync('node', [ENGINE, 'pr-allow', ...a], { cwd: d, input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }); } catch (e) { return `EXIT ${e.status}`; } };
+  assert.equal(prAllow(mine + '\n', '--author', 'acme-agent-svc', '--base', base, '--note', note), '', 'the opener, and the base contract is silent');
+  const said = readFileSync(note, 'utf8'); assert.match(said, /acme-agent-svc/); assert.match(said, /opened/); assert.match(said, /allowFromAuthor/, 'the note says what was not counted, why, and the setting for a repo with one person in it');
+  assert.equal(prAllow(theirs + '\n' + mine + '\n', '--author', 'acme-agent-svc', '--base', base, '--note', note), 'I looked (approved by pat)');
+  assert.equal(readFileSync(note, 'utf8'), '', 'nothing to explain when a person let it through');
+  // the branch adds the setting: the base still decides
+  const cfgPath = join(d, 'promptwheel.config.json'); const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+  writeFileSync(cfgPath, JSON.stringify({ ...cfg, allowFromAuthor: true })); commitAll(d, 'let the opener approve');
+  assert.equal(prAllow(mine + '\n', '--author', 'acme-agent-svc', '--base', base), '', 'added in the same change, it does not count for that change');
+  // once it is on the base, it counts
+  assert.equal(prAllow(mine + '\n', '--author', 'acme-agent-svc', '--base', rev(d)), 'it is fine (approved by acme-agent-svc)');
+  // and the change that adds it shows as a change to the gate
+  const r = pw(d, ['run', '--base', base, '--head', 'HEAD', '--no-record', '--no-auto', '--json']); assert.equal(JSON.parse(r.out).gate.changed, true, 'adding the setting is a change to the gate, and the report says so');
+  // no --author: as before
+  assert.equal(prAllow(mine + '\n'), 'it is fine (approved by acme-agent-svc)');
+});
+test('the Action hands pr-allow the account that opened the pull request and the base commit, and posts its note', () => {
+  const action = readFileSync(join(dirname(ENGINE), '..', 'action.yml'), 'utf8');
+  assert.match(action, /OPENER: \$\{\{ github\.event\.pull_request\.user\.login \}\}/, 'the opener comes from GitHub, in the environment, not typed into the script');
+  assert.match(action, /pr-allow --author "\$OPENER" --base "\$BASE" --note "\$RUNNER_TEMP\/promptwheel-allow-note\.md"/);
+  assert.match(action, /promptwheel-allow-note\.md" >> "\$RUNNER_TEMP\/promptwheel\.md"/, 'what was not counted is in the comment the check posts');
+});
+test('the report tells a reader who may accept it: someone with write access who did not open the pull request', () => {
+  const d = repoWith({ 'package.json': JSON.stringify({ name: 'a' }) });
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0); commitAll(d, 'sign');
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'a', scripts: { postinstall: 'x' } })); commitAll(d, 'script');
+  const md = (extra = []) => pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto', '--markdown', ...extra]).out;
+  assert.match(md(), /To accept this, someone with write access who did not open this PR comments `sawbuck-allow: [^`]*<their reason>` on it, and the check is run again\./);
+  // a reason that names one of two things: the line about what was not let through says the same about who
+  assert.match(md(['--allow', 'lifecycle_scripts: we need it']), /To accept them all, someone with write access who did not open this PR comments `sawbuck-allow: [^`]*<their reason>`\./);
+  assert.doesNotMatch(md(), /<your reason>/, 'the reader of the comment may be the one who opened it');
 });
 
 test('--allow on a gamed commit: the JSON and the PR comment both carry the reason and what it cleared', () => {

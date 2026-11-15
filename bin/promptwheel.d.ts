@@ -355,5 +355,8 @@ export declare function judgeGaming(
 /** Truncated SHA-256 of the verdict content (everything but `provenance`), the reproducible half of the receipt. */
 export declare function verdictFingerprint(report: Pick<Report, 'verdict'> & Partial<Pick<Report, 'metrics' | 'gate'>>): string;
 
-/** The newest `sawbuck-allow: <reason>` comment from someone with write access, or ''. */
-export declare function allowFromComments(comments: unknown[]): string;
+/** The newest `sawbuck-allow: <reason>` comment from someone with write access, or ''. With `author` (the account that
+ *  opened the pull request) its own comment does not count, unless `allowFromAuthor` is true (the base contract's key). */
+export declare function allowFromComments(comments: unknown[], opts?: { author?: string; allowFromAuthor?: boolean }): string;
+/** The same, with the login whose comment was left out because it opened the pull request (`skipped`, '' if none). */
+export declare function allowDecision(comments: unknown[], opts?: { author?: string; allowFromAuthor?: boolean }): { reason: string; skipped: string };

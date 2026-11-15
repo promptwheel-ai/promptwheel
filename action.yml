@@ -34,7 +34,8 @@ runs:
         node-version: '20'
 
     # Runs straight from this action's own checkout: no npm install, no build.
-    # a person's approval on the PR: the newest `sawbuck-allow: <reason>` comment from someone with write access.
+    # a person's approval on the PR: the newest `sawbuck-allow: <reason>` comment from someone with write access
+    # who did not open the PR. The opener counts only where the contract on the base branch says so.
     # The endpoint lists oldest first, so every page is read: one call would stop at the oldest 100.
     - id: approval
       if: ${{ inputs.allow == '' && github.event_name == 'pull_request' }}
@@ -43,8 +44,10 @@ runs:
         GH_TOKEN: ${{ github.token }}
         REPO: ${{ github.repository }}
         PR: ${{ github.event.pull_request.number }}
+        OPENER: ${{ github.event.pull_request.user.login }}
+        BASE: ${{ inputs.base }}
       run: |
-        reason=$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" --jq '.[]' 2>/dev/null | node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" pr-allow 2>/dev/null || true)
+        reason=$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" --jq '.[]' 2>/dev/null | node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" pr-allow --author "$OPENER" --base "$BASE" --note "$RUNNER_TEMP/promptwheel-allow-note.md" 2>/dev/null || true)
         { echo 'allow<<SAWBUCK_ALLOW_END'; printf '%s\n' "$reason"; echo 'SAWBUCK_ALLOW_END'; } >> "$GITHUB_OUTPUT"
 
     - id: gate
@@ -57,6 +60,8 @@ runs:
           --base "${{ inputs.base }}" --head HEAD --repeat "${{ inputs.repeat }}" --markdown ${ALLOW:+--allow "$ALLOW"} \
           > "$RUNNER_TEMP/promptwheel.md"
         echo "exit=$?" >> "$GITHUB_OUTPUT"
+        # an approval that was not counted because it came from the account that opened the PR: said in the comment
+        if [ -s "$RUNNER_TEMP/promptwheel-allow-note.md" ]; then cat "$RUNNER_TEMP/promptwheel-allow-note.md" >> "$RUNNER_TEMP/promptwheel.md"; fi
         cat "$RUNNER_TEMP/promptwheel.md" >> "$GITHUB_STEP_SUMMARY"
 
     - if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}

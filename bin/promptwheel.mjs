@@ -102,13 +102,13 @@ function resolveConfig(p, repo, seen) {
       const base = resolveConfig(bp, repo, seen);
       for (const m of base.metrics) byName.set(m.name, m);
       for (const md of (base.mandates || [])) if (md && md.name) mandatesByName.set(md.name, md);
-      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer']) if (base[k] !== undefined) scalars[k] = base[k];
+      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer', 'allowFromAuthor']) if (base[k] !== undefined) scalars[k] = base[k];
     }
     for (const m of (cfg.metrics || [])) {
       byName.set(m.name, m);
     }
     for (const md of (cfg.mandates || [])) if (md && md.name) mandatesByName.set(md.name, md);
-    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
+    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer', 'allowFromAuthor']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
     return { ...scalars, metrics: [...byName.values()], mandates: [...mandatesByName.values()] };
   } finally {
     seen.delete(abs); // only ACTIVE ancestors are a cycle, a diamond (a base reached two ways) is fine
@@ -731,7 +731,7 @@ function warnEditableInstall(repo) {
 // guarded metric in the very diff it "passes". We resolve the gate as of BASE too and, if a
 // guard was dropped, re-measure it under its BASE definition; the pass only reads GAMED when
 // that guard WOULD HAVE FAILED at head (a real regression hidden by moving the goalposts).
-const GATE_SCALARS = ['gamingThreshold', 'evaluatorPaths', 'allowTrailer', 'setup', 'env', 'linkDirs', 'linkNodeModules'];
+const GATE_SCALARS = ['gamingThreshold', 'evaluatorPaths', 'allowTrailer', 'allowFromAuthor', 'setup', 'env', 'linkDirs', 'linkNodeModules'];
 // what runs or shapes every measurement besides the metric's own command. A setup can rewrite a test and an
 // env var can skip one, so these are part of the gate: fingerprinted, and held at their base values for the
 // change that edits them (see detectGamingPass).
@@ -806,6 +806,9 @@ function gateFingerprint(metricsList, scalars) {
     evaluatorPaths: Array.isArray(scalars.evaluatorPaths) ? [...scalars.evaluatorPaths].sort() : [],
     measuredWith: measuredWith(scalars),
     mandates: Array.isArray(scalars.mandates) ? scalars.mandates.map((m) => ({ name: String(m.name || ''), paths: [...(Array.isArray(m.paths) ? m.paths : [])].sort() })).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) : [],
+    // who may let a pull request through is part of the gate. Only `true` is written, so a contract without the
+    // key keeps the fingerprint it had before 0.8.10.
+    ...(scalars.allowFromAuthor === true ? { allowFromAuthor: true } : {}),
   };
   return createHash('sha256').update(JSON.stringify(norm)).digest('hex').slice(0, 16);
 }
@@ -1418,16 +1421,26 @@ function explainMetrics(repo, metrics) {
   return hit.map((m) => ({ metric: m.name, noted: !!m.noted, what: PLAIN[m.name] || m.name, ...(m.name === 'lock_drift' && items.length ? { items } : {}), ...(m.allowable ? { allowable: true } : {}) }));
 }
 // A reason a person left on a pull request. The newest `sawbuck-allow: <reason>` comment from someone with write
-// access wins. A bot never counts. An agent signed in as that person can still post one: the record shows it.
-export function allowFromComments(comments) {
+// access wins. A bot never counts. Since 0.8.10 neither does the account that opened the pull request (`author`),
+// in any letter case: a coding agent run from a service account, which GitHub calls a User, opens its pull requests
+// from that account and can post the comment, and the report spells out the words. The opener counts only where
+// the contract on the base branch says so (`allowFromAuthor`, for a repo with one person in it). With no opener
+// named the old rule holds, for a caller that does not know who opened it. An agent signed in as another person
+// can still post one: the record shows who.
+export function allowDecision(comments, opts = {}) {
   const trusted = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+  const opener = String((opts && opts.author) || '').trim().toLowerCase();
+  let skipped = '';
   for (const c of [...(comments || [])].reverse()) {
     if (!c || !c.user || c.user.type !== 'User' || !trusted.has(c.author_association)) continue;
     const m = String(c.body || '').match(/^\s*sawbuck-allow:[ \t]*(\S.*?)[ \t]*$/m);
-    if (m) return `${m[1].slice(0, 280)} (approved by ${String(c.user.login).slice(0, 39)})`;
+    if (!m) continue;
+    if (opener && !(opts && opts.allowFromAuthor === true) && String(c.user.login || '').toLowerCase() === opener) { skipped = skipped || String(c.user.login).slice(0, 39); continue; }
+    return { reason: `${m[1].slice(0, 280)} (approved by ${String(c.user.login).slice(0, 39)})`, skipped: '' };
   }
-  return '';
+  return { reason: '', skipped };
 }
+export function allowFromComments(comments, opts) { return allowDecision(comments, opts).reason; }
 
 function renderMarkdown(r) {
   const icon = r.verdict === 'pass' ? '✅' : r.verdict === 'gamed' ? '🚩' : r.verdict === 'inconclusive' ? '🟡' : '❌';
@@ -1443,7 +1456,7 @@ function renderMarkdown(r) {
     `\`${r.base} → ${r.head}\` · ${r.mode} mode${r.repeat > 1 ? ` · ×${r.repeat}` : ''}`,
     '',
     ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Protected path touched:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : md.edited ? ' (edited in this same change; the version before the change stays in force for the change that edits it)' : ''}`).join('\n'), ''] : []),
-    ...(r.explained ? [...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...(r.explained.some((x) => !x.noted && x.allowable) ? ['>', `> To accept this, comment \`sawbuck-allow: ${allowNames(r)}<your reason>\` on this PR and re-run the check.${allowNames(r) ? ' A reason lets through only what it names when there is more than one thing.' : ''}`] : []), ''] : []),
+    ...(r.explained ? [...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...(r.explained.some((x) => !x.noted && x.allowable) ? ['>', `> To accept this, someone with write access who did not open this PR comments \`sawbuck-allow: ${allowNames(r)}<their reason>\` on it, and the check is run again.${allowNames(r) ? ' A reason lets through only what it names when there is more than one thing.' : ''}`] : []), ''] : []),
     '| metric | before | after | Δ | status | confidence |',
     '|---|--:|--:|--:|---|---|',
     rows,
@@ -1451,7 +1464,7 @@ function renderMarkdown(r) {
     r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader, not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? (r.mandates ? '> ⛔ A protected path changed. This is a hard rule; no metric result clears it.' : '> ❌ A 🛡️ guarded metric regressed beyond the noise band.') : r.verdict === 'inconclusive' ? (r.metrics.some((m) => m.inert) && r.metrics.every((m) => !m.inert || m.ran === 'both') ? '> 🟡 A 🛡️ guarded check is **inert**, it fails before and after this change, so nothing was actually verified. Fix it before trusting a pass.' : '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.') : '> ✅ No guarded metric regressed.',
     ...(r.gate && r.gate.weakened ? ['', `> 🚩 **Gate weakened:** ${r.gate.weakened.map((w) => `\`${w.name}\` ${w.change === 'guard-removed' ? 'removed' : w.change === 'guard-edited' ? 'edited' : w.change === 'measurement-edited' ? 'measured another way (setup, env or linked dirs)' : 'disabled'} (would have ${wouldHave(w.status)} at head)`).join('; ')}. The pass was bought by changing the gate, not by earning it.`] : []),
     ...(r.allowed && r.allowed.cleared.length ? ['', `> ✓ **Allowed:** \`${r.allowed.cleared.join('`, `')}\` cleared by a declared reason: ${r.allowed.reason}`] : []),
-    ...(r.allowed && (r.allowable || []).some((l) => !r.allowed.cleared.includes(l)) ? ['', `> ✋ **Not let through:** \`${r.allowable.filter((l) => !r.allowed.cleared.includes(l)).join('`, `')}\`. A reason lets through only what it names when there is more than one thing. To accept them all, comment \`sawbuck-allow: ${allowNames(r)}<your reason>\`.`] : []),
+    ...(r.allowed && (r.allowable || []).some((l) => !r.allowed.cleared.includes(l)) ? ['', `> ✋ **Not let through:** \`${r.allowable.filter((l) => !r.allowed.cleared.includes(l)).join('`, `')}\`. A reason lets through only what it names when there is more than one thing. To accept them all, someone with write access who did not open this PR comments \`sawbuck-allow: ${allowNames(r)}<their reason>\`.`] : []),
     ...(r.gate && r.gate.changed ? ['', `> ⚠ **Gate definition changed** in this diff (fingerprint \`${r.gate.fingerprint.base}\` -> \`${r.gate.fingerprint.head}\`): a metric, guard, evaluatorPath, mandate, or the setup, env or linked dirs they are measured with was added, removed or edited. Review the config change with the code.`] : []),
     '',
     '<sub>🛡️ = guard · _prove every change moved a metric_ · [PromptWheel](https://github.com/promptwheel-ai/promptwheel)</sub>',
@@ -1667,12 +1680,21 @@ function checkFlags(cmd, argv) {
 
 // read PR comments on stdin: a JSON array, or one comment per line as `gh api --paginate --jq '.[]'` prints every
 // page. Streamed: readFileSync(0) corrupted the heap on Node 24.22 reading a live paginated gh pipe.
-async function prAllow() {
+// --author <login>: the account that opened the pull request; its own comment does not count, unless the contract at
+// --base <ref> holds "allowFromAuthor": true (read from that commit, so a pull request cannot say so for itself).
+// --note <file>: when the only approval was the opener's, one line saying so, for the comment the check posts.
+async function prAllow(argv = []) {
+  const val = (f) => { const i = argv.indexOf(f); return i > -1 && argv[i + 1] !== undefined && !String(argv[i + 1]).startsWith('--') ? String(argv[i + 1]) : ''; };
+  const author = val('--author'), base = val('--base'), note = val('--note');
   let t = ''; process.stdin.setEncoding('utf8');
   for await (const chunk of process.stdin) t += chunk;
   t = t.trim(); let c = [];
   try { c = [].concat(JSON.parse(t || '[]')); } catch { try { c = t.split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { /* unreadable, no approval */ } }
-  process.stdout.write(allowFromComments(c));
+  let own = false;
+  if (author && base) { try { own = ((gateDefAtRef(process.cwd(), base) || {}).scalars || {}).allowFromAuthor === true; } catch { /* no contract at the base: the opener does not count */ } }
+  const d = allowDecision(c, { author, allowFromAuthor: own });
+  if (note) { try { writeFileSync(note, d.skipped && !d.reason ? `\n> ✋ **Not counted:** a \`sawbuck-allow:\` comment from \`${d.skipped}\`, the account that opened this pull request. Whoever opened a pull request cannot let it through. Someone else with write access can. In a repo with one person in it, set \`"allowFromAuthor": true\` in \`promptwheel.config.json\` on the base branch; a pull request cannot turn that on for itself.\n` : ''); } catch { /* the note is a courtesy */ } }
+  process.stdout.write(d.reason);
 }
 
 // write or refresh the architecture lock from the tree as it stands. A person runs this: the lock file is
@@ -1689,7 +1711,7 @@ function dispatch() {
   const cmd = (rest.includes('--help') || rest.includes('-h')) ? 'help' : first;   // `promptwheel run --help` is a help request, not a gate run
   if (cmd in COMMAND_FLAGS) checkFlags(cmd, rest);
   if (cmd === 'run') run(rest);
-  else if (cmd === 'pr-allow') return prAllow();
+  else if (cmd === 'pr-allow') return prAllow(rest);
   else if (cmd === 'init') init(rest);
   else if (cmd === 'lock') return lock(rest);
   else {
@@ -1706,7 +1728,8 @@ function dispatch() {
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',
       '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
-      '  promptwheel pr-allow < comments.json         print the newest `sawbuck-allow: <reason>` from a PR comment by someone with write access (the Action uses it)',
+      '  promptwheel pr-allow < comments.json         print the newest `sawbuck-allow: <reason>` from a PR comment by someone with write access (the Action uses it;',
+      '                                               --author <login> leaves out the account that opened the PR, unless the contract at --base <ref> says "allowFromAuthor": true)',
       '  promptwheel run --allow "<reason>"           acknowledge an intentional test/config change (or a `Promptwheel-Allow: <reason>` commit trailer; `Sawbuck-Allow:` is an alias): recorded, not flagged GAMED. With more than one thing to let through, the reason names each: --allow "tests_pass, contract-frozen: <reason>"',
       '',
       'Exit codes: 0 pass · 1 fail (a guarded metric regressed, or a mandate was violated) · 2 gamed · 3 inconclusive · 64 usage or config error (never a verdict).',

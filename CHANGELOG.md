@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.10 (2026-11-14): on a pull request, the account that opened it cannot let it through
+
+The Action took a person's yes from the newest `sawbuck-allow: <reason>` comment by any account of type User with write access. It did not ask whether that account had opened the pull request. A coding agent run from a service account (a GitHub machine user is a User, and its token writes pull requests) opens its pull requests from that account, and the check's own comment spells out the words to post. Run with the Action's own steps on the published 0.8.9: the opener's comment let a gamed green through, and let a pull request that rewrote its own contract through.
+
+- **The opener's own comment does not count.** `pr-allow --author <login>` leaves out the account that opened the pull request, in any letter case. A newer comment from the opener does not hide an older one from another person. The Action passes the opener from GitHub's own event, in the environment.
+- **A repo with one person in it says so in the contract.** `"allowFromAuthor": true` in `promptwheel.config.json` lets the opener count. It is read at the base ref (`pr-allow --base <ref>`), so a pull request cannot turn it on for itself, and the change that adds it shows as a change to the gate. Contracts without the key keep the fingerprint they had.
+- **The check's comment says what was not counted.** When the only approval is the opener's, the comment on the pull request says so, why, and names the setting. The lines that tell a reader how to accept a change now say who: someone with write access who did not open the pull request.
+- **This changes what a solo owner's own comment does.** If you open your own pull requests and approve them with a comment, add `"allowFromAuthor": true` to the contract on your default branch. With that key an agent signed in as you can post the comment, as before.
+- **Not changed:** a bot never counts; `allowFromComments(comments)` with no opener named reads as before, for a caller that does not know who opened it.
+- **Not run:** a real pull request on GitHub. The Action's shell steps were run as written, with a stand-in for `gh`.
+
 ## 0.8.9 (2026-11-12): what the counts ask about on real commits; a Python `tests.py` and a runner script are test-side
 
 Found two ways the same night, each change with a test seen failing first. The config `init` writes was read on 340 real commits by people, each against its parent (it had only ever been read on agent runs). And a bench on public agent runs keeps its tests in a script named `test.py`, which the file rule did not know.
