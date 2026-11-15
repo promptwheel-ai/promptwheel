@@ -78,13 +78,13 @@ metrics say, and a mandate deleted or narrowed in the same change that violates 
 
 | mandate | paths | why |
 | --- | --- | --- |
-| workflows-frozen | `.github/workflows/**` | workflows run with the repository's secrets |
 | registry-config-frozen | `.npmrc`, `.yarnrc`, `.yarnrc.yml` | where packages come from and where tokens go |
 | build-images-frozen | `Dockerfile*`, `docker-compose*` | what runs at build and deploy time |
 | publish-scripts-frozen | `scripts/release*`, `scripts/publish*` | the publish path is how a compromise spreads |
 | codeowners-frozen | `CODEOWNERS` | review ownership is set by people |
 | scanner-frozen | `.promptwheel/packs/**` | the scanners are not edited by the change they read |
 | contract-frozen | `promptwheel.config.json`, `sawbuck.config.json` | the contract changes with a reason from a person (`--allow`) |
+| workflows-frozen | `.github/workflows/**` | workflows run with the repository's secrets; they change with a reason from a person (`--allow`) |
 | lock-frozen | `promptwheel.lock.json` | the lock changes with a reason from a person (`--allow`) |
 | hooks-frozen | `.claude/settings.json`, `.claude/settings.local.json`, `.sawbuck/**` | the hooks change with a reason from a person (`--allow`) |
 
@@ -92,9 +92,15 @@ The contract itself (`promptwheel.config.json`, `sawbuck.config.json`) is frozen
 `evaluatorPaths` entry. A change to it needs `--allow "<reason>"` from a person. Without that, a change that
 only weakens a rule would pass, and the next change would be judged by the weakened contract.
 
-`--allow` clears only three of these: `contract-frozen`, `lock-frozen` and `hooks-frozen` (so a team can commit
-shared hooks to a repo that already has its rules). A commit trailer clears none. Every other frozen path stays
-frozen, even with `--allow`. To change one, a person first retires its mandate in a change of its own
+`--allow` clears four of these: `contract-frozen`, `lock-frozen`, `hooks-frozen` (so a team can commit shared
+hooks to a repo that already has its rules) and, since 0.8.10, `workflows-frozen`. A workflow change is ordinary
+upkeep: on 340 real commits from 17 public repos, 65 were sent back for a protected path, 64 of those for a
+workflow, and 20 changed only an action's version. A rule with no way through but deleting it teaches people to
+delete it. A new workflow file is also a change to the repo's shape, so its reason names `lock_drift` too; the
+check prints the line to copy. On a pull request the reason comes from someone with write access who did not open it. A commit
+trailer clears none. A contract written before 0.8.10 holds its own copy of `workflows-frozen` without the key,
+and an update does not change it: add `"allowable": "flag"` to that rule to get the same (an edit to the
+contract, so it takes `--allow`). Every other frozen path stays frozen, even with `--allow`. To change one, a person first retires its mandate in a change of its own
 (it edits the contract, so it needs `--allow`), then makes the change, then puts the mandate back the
 same way.
 

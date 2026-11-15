@@ -1200,7 +1200,9 @@ const PRESETS = {
     evaluatorPaths: ['promptwheel.config.json', 'sawbuck.config.json'],
     mandates: [
       { name: 'contract-frozen', paths: ['promptwheel.config.json', 'sawbuck.config.json'], allowable: 'flag', reason: 'the contract changes with a reason from a person (--allow), never as a side effect of a change' },
-      { name: 'workflows-frozen', paths: ['.github/workflows/**'], reason: 'workflows run with the repository secrets; change them in a separate, reviewed change' },
+      // a workflow change is ordinary upkeep (64 of the 65 protected-path send-backs on 340 real commits, 20 of them only an
+      // action's version): a rule with no way through but deleting it teaches people to delete it. So it takes a reason.
+      { name: 'workflows-frozen', paths: ['.github/workflows/**'], allowable: 'flag', reason: 'workflows run with the repository secrets; they change with a reason from a person (--allow), never as a side effect of a change' },
       { name: 'registry-config-frozen', paths: ['.npmrc', '.yarnrc', '.yarnrc.yml'], reason: 'registry and token configuration decides where packages come from and where credentials go' },
       { name: 'build-images-frozen', paths: ['Dockerfile*', 'docker-compose*'], reason: 'what runs at build and deploy time is not an agent decision' },
       { name: 'publish-scripts-frozen', paths: ['scripts/release*', 'scripts/publish*'], reason: 'the publish path is how a compromise spreads' },

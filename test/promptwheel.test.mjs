@@ -731,6 +731,32 @@ test('supply-chain gate: a lifecycle script, a dependency or a non-registry lock
   rmSync(d, { recursive: true, force: true });
 });
 
+// A workflow change is ordinary upkeep (an action version bump, a new job): on 17 real repos 61 of 320 commits by
+// people touched a protected path, nearly all of them a workflow. A rule with no way through but deleting the rule
+// teaches people to delete the rule. So it takes a person's reason, like the contract's own file: by the flag, and on
+// a pull request by a comment from someone who did not open it. Never by a commit message.
+test('the preset: a workflow change takes a reason from a person, by the flag; a trailer does not clear it; the registry file stays frozen', () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-wf-'));
+  const g = (a) => execFileSync('git', a, { cwd: d, stdio: 'ignore' });
+  g(['init', '-q']); g(['config', 'user.email', 'a@b.c']); g(['config', 'user.name', 'a']);
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'a', scripts: { test: 'node -e 0' } }));
+  mkdirSync(join(d, '.github/workflows'), { recursive: true }); writeFileSync(join(d, '.github/workflows/ci.yml'), 'name: ci\non: push\njobs: {}\n'); commitAll(d, 'base');
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0); commitAll(d, 'sign');
+  const rule = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).mandates.find((m) => m.name === 'workflows-frozen');
+  assert.equal(rule.allowable, 'flag', 'written into the contract, where a person can read it'); assert.match(rule.reason, /with a reason from a person \(--allow\)/);
+  const run = (...extra) => { const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json', ...extra]); return { code: r.code, rep: JSON.parse(r.out.slice(r.out.indexOf('{'))) }; };
+  writeFileSync(join(d, '.github/workflows/ci.yml'), 'name: ci\non: push\njobs: { a: { runs-on: ubuntu-latest, steps: [] } }\n'); commitAll(d, 'ci: a job');
+  let r = run(); assert.equal(r.code, 1, 'with no reason it fails as before'); assert.equal(r.rep.mandates[0].name, 'workflows-frozen');
+  assert.ok((r.rep.allowable || []).includes('mandate:workflows-frozen'), 'and the report says a reason would clear it');
+  r = run('--allow', 'the CI job, reviewed'); assert.equal(r.code, 0, JSON.stringify(r.rep.allowed));
+  assert.ok(r.rep.allowed.cleared.includes('mandate:workflows-frozen')); assert.match(r.rep.allowed.reason, /the CI job, reviewed/, 'the reason is on the record');
+  g(['commit', '-q', '--amend', '-m', 'ci: a job\n\nPromptwheel-Allow: the CI job, reviewed']);
+  assert.equal(run().code, 1, 'a commit message is not a person: a trailer does not clear a workflow change');
+  writeFileSync(join(d, '.npmrc'), 'registry=https://example.invalid/\n'); commitAll(d, 'npmrc');
+  r = run('--allow', 'registry-config-frozen: I want this'); assert.equal(r.code, 1, 'where packages come from keeps no way through but retiring its rule'); assert.equal(r.rep.mandates[0].name, 'registry-config-frozen');
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---------------------- the newcomer's first cheat: gut the tests, metric stays flat
 test('default init config: weakening the suite (flat metric) FAILS via tripwires', () => {
   const d = mkdtempSync(join(tmpdir(), 'pw-gut-'));
@@ -823,6 +849,7 @@ test('run: the hint on a protected path says how to accept it: --allow for a rul
   execFileSync('git', ['init', '-q'], { cwd: d });
   execFileSync('git', ['config', 'user.email', 't@t'], { cwd: d }); execFileSync('git', ['config', 'user.name', 't'], { cwd: d });
   writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x' }));
+  mkdirSync(join(d, '.github/workflows'), { recursive: true }); writeFileSync(join(d, '.github/workflows/x.yml'), 'on: push\n');
   assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0);
   commitAll(d, 'contract');
   const f = join(d, 'promptwheel.config.json');
@@ -832,8 +859,24 @@ test('run: the hint on a protected path says how to accept it: --allow for a rul
   assert.match(r.out, /"contract-frozen" accepts a person's declared reason: promptwheel run --allow "<reason>"/);
   assert.doesNotMatch(r.out, /retire the mandate/, 'the config is the protected path: "retire it in the config" is no way out');
   assert.equal(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--allow', 'more repeats']).code, 0);
-  mkdirSync(join(d, '.github/workflows'), { recursive: true }); writeFileSync(join(d, '.github/workflows/x.yml'), 'on: push\n');
+  // a workflow change takes a reason too, since 0.8.10
+  writeFileSync(join(d, '.github/workflows/x.yml'), 'on: [push, pull_request]\n');
+  commitAll(d, 'edit a workflow');
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /"workflows-frozen" accepts a person's declared reason: promptwheel run --allow "<reason>"/);
+  assert.doesNotMatch(r.out, /retire the mandate/);
+  // a NEW workflow file is also a change to the repo's shape, so its reason names both, and the hint gives the line
+  writeFileSync(join(d, '.github/workflows/y.yml'), 'on: workflow_dispatch\n');
   commitAll(d, 'add a workflow');
+  r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /"workflows-frozen" accepts a person's declared reason: promptwheel run --allow "lock_drift, workflows-frozen: <reason>"/);
+  assert.equal(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--allow', 'a manual job']).code, 1, 'one reason, one thing');
+  assert.equal(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--allow', 'lock_drift, workflows-frozen: a manual job']).code, 0);
+  // where packages come from does not
+  writeFileSync(join(d, '.npmrc'), 'registry=https://example.invalid/\n');
+  commitAll(d, 'point at another registry');
   r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /a mandate is a hard rule; if the change is truly intended, retire the mandate/);
