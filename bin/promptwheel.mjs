@@ -23,6 +23,29 @@ import { fileURLToPath } from 'node:url';
 // helpers
 // ---------------------------------------------------------------------------
 const git = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+// File names from git, NUL-separated (the caller's command must take -z). Read as lines, a name that holds a byte
+// above 127, a double quote, a backslash or a tab comes back inside quotes with the bytes escaped
+// ("src/a\303\261adir.js", git's core.quotePath), and that string is no file: it matches no protected path and no
+// pathspec, so an honest fix in such a file read "gamed" and a new workflow with such a name was no protected path.
+const gitNames = (args, cwd) => execFileSync('git', [...args, '-z'], { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).split('\0').filter(Boolean);
+// The engine's own throwaway checkouts run none of the person's git hooks. `git worktree add` fires post-checkout,
+// from the repo's hooks folder or the person's global one (core.hooksPath): a hook that rebuilds tags or installs
+// packages ran in every throwaway copy, and one that exits 1 on a detached HEAD made the add fail after the checkout
+// was made, so no check could run and each try left a worktree behind. CI has no such hooks either; what a checkout
+// needs before it can be measured is the contract's "setup".
+function addWorktree(repo, wt, ref) {
+  try { git(['-c', 'core.hooksPath=/dev/null', 'worktree', 'add', '--quiet', '--detach', wt, ref], repo); }
+  catch (e) {
+    try { git(['worktree', 'remove', '--force', wt], repo); } catch { /* it was never registered */ }
+    try { rmSync(wt, { recursive: true, force: true }); } catch { /* best effort */ }
+    throw e;
+  }
+}
+// The source-only patch is read by `git apply`, so it has to read the same on every machine. A plain `git diff` obeys
+// the person's own settings: diff.noprefix (no a/ b/), diff.external or GIT_EXTERNAL_DIFF (a side-by-side tool, or one
+// that is not installed), color.ui=always, a text converter, diff.context=0. Each made a patch that did not apply.
+// The win then read "inconclusive", and an inconclusive turn is not sent back.
+const PATCH_FLAGS = ['--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '--full-index', '--src-prefix=a/', '--dst-prefix=b/', '-U3', '--submodule=short'];
 const median = (xs) => {
   const a = xs.filter((x) => x != null).slice().sort((p, q) => p - q);
   if (!a.length) return null;
@@ -314,7 +337,7 @@ const setupFails = new WeakMap();   // a measureAt result -> how its setup faile
 // measure every metric `repeat` times at a ref, in a throwaway worktree (never touches your tree)
 function measureAt(repo, ref, cfg, repeat) {
   const wt = mkdtempSync(join(tmpBase(repo), tmpPrefix(repo, 'promptwheel')));
-  git(['worktree', 'add', '--quiet', '--detach', wt, ref], repo);
+  addWorktree(repo, wt, ref);
   try {
     const env = bridgeEnv(repo, wt, cfg);
     const setupFailed = runSetup(wt, cfg, env);
@@ -475,7 +498,7 @@ function checkMandates(repo, base, head, cfg, baseMandates) {
   const mandates = [...headList.filter((m) => m && baseNames.has(m.name)), ...kept];
   if (!mandates.length) return [];
   let changed = [];
-  try { changed = git(['diff', '--name-only', '--no-renames', base, head], repo).split('\n').filter(Boolean); } catch { return []; }   // --no-renames: a move out of a protected path also touches it
+  try { changed = gitNames(['diff', '--name-only', '--no-renames', base, head], repo); } catch { return []; }   // --no-renames: a move out of a protected path also touches it
   const out = [];
   for (const m of mandates) {
     const pats = (Array.isArray(m.paths) ? m.paths : []).filter((s) => typeof s === 'string' && s.trim());
@@ -542,7 +565,7 @@ function runnerScripts(repo, base, cfg) {
   return out;
 }
 function changedSourcePaths(repo, base, head, isEval = () => false, cfg = null) {
-  const all = git(['diff', '--name-only', '--no-renames', base, head], repo).split('\n').filter(Boolean);
+  const all = gitNames(['diff', '--name-only', '--no-renames', base, head], repo);
   const runners = cfg ? runnerScripts(repo, base, cfg) : new Set();
   const nonSrc = (p) => isNonSource(p) || isEval(p) || runners.has(p) || pyTestModule(repo, base, head, p);
   return { source: all.filter((p) => !nonSrc(p)), nonSource: all.filter(nonSrc) };
@@ -588,13 +611,13 @@ function measureSourceOnlyAll(repo, base, head, defs, cfg, repeat, guardsFrom = 
   const { source } = changedSourcePaths(repo, base, head, evaluatorMatcher(cfg), guardsFrom);
   if (!source.length) { for (const m of defs) out[m.name] = { samples: [], hadSourceChange: false }; return out; } // a "win" with zero source edits = goalposts moved
   const wt = mkdtempSync(join(tmpBase(repo), tmpPrefix(repo, 'promptwheel-src')));
-  git(['worktree', 'add', '--quiet', '--detach', wt, base], repo);
+  addWorktree(repo, wt, base);
   try {
     const env = bridgeEnv(repo, wt, cfg);
     // --binary so a binary source file (an image, a model blob under src/) travels in the patch; without
     // it git prints "Binary files differ", the apply fails, and a win the source never earned would
     // read as unprovable. Untrimmed: a binary hunk ends in a blank line the apply needs.
-    const patch = execFileSync('git', ['diff', '--binary', base, head, '--', ...source], { cwd: repo, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+    const patch = execFileSync('git', ['diff', '--binary', ...PATCH_FLAGS, base, head, '--', ...source], { cwd: repo, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
     if (patch.trim()) {
       // stdio stderr 'ignore': git apply --3way prints "Applied patch ... cleanly" to stderr; that
       // is noise on an otherwise-quiet run (and corrupts --json for callers that fold in stderr).
@@ -834,7 +857,7 @@ function blobHashAt(repo, ref, path) {
 function changedEvaluatorPaths(repo, base, head, cfg) {
   const isEval = evaluatorMatcher(cfg);
   let changed = [];
-  try { changed = git(['diff', '--name-only', '--no-renames', base, head], repo).split('\n').filter(Boolean).filter(isEval); }
+  try { changed = gitNames(['diff', '--name-only', '--no-renames', base, head], repo).filter(isEval); }
   catch { return []; }
   return changed.map((p) => ({ path: p, base: blobHashAt(repo, base, p), head: blobHashAt(repo, head, p) }))
     .filter((e) => e.base !== e.head);
@@ -880,7 +903,7 @@ function gateWeakenings(baseGate, headMetrics) {
 const reasonNames = (reason, label) => new RegExp(`(^|[^A-Za-z0-9_-])${label.replace(/^mandate:/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_-])`, 'i').test(reason);
 function readAllowTrailer(repo, ref) {
   let msg = '';
-  try { msg = execFileSync('git', ['log', '-1', '--format=%B', ref], { cwd: repo, encoding: 'utf8' }); } catch { return null; }
+  try { msg = execFileSync('git', ['log', '-1', '--no-show-signature', '--format=%B', ref], { cwd: repo, encoding: 'utf8' }); } catch { return null; }
   const m = msg.match(/^[ \t]*(?:Promptwheel-Allow|Sawbuck-Allow)[ \t]*:[ \t]*(\S.*?)[ \t]*$/im);
   return m && m[1].trim() ? { reason: m[1].trim().slice(0, 300) } : null;
 }

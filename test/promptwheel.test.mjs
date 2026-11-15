@@ -2954,3 +2954,71 @@ test('a test that prints an HTTP "Not found" is not read as a missing dependency
   for (const t of ['sh: 1: jest: not found', '/bin/sh: 1: vitest: not found', 'bash: tsc: command not found', "Error: Cannot find module 'left-pad'"]) assert.ok(MISSING_DEP.test(t), t);
 });
 
+
+// ---------------------- a person's own git settings, and file names git quotes
+// Every suite and every release check ran with a blank git config, so the engine had never met a ~/.gitconfig with a
+// line in it. Found 2026-11-15 on the published 0.8.9 (proof-bench/own-git): with diff.noprefix, an outside diff tool,
+// colour forced on or no context lines, the source-only patch did not apply. An honest fix then read "inconclusive",
+// and a gamed win with a source file touched was not sent back. A setting in the repo's own config reads the same to git.
+const ownGitRepo = (settings = [], src = 'calc.mjs', tst = 'calc.test.mjs') => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: `node --test "${tst}" 2>&1`, extract: 'exit', direction: 'pass', guard: true }]);
+  for (const [k, v] of settings) execFileSync('git', ['config', k, v], { cwd: d });
+  for (const f of [src, tst]) mkdirSync(join(d, dirname(f)), { recursive: true });
+  const up = dirname(tst) === '.' ? './' : '../'.repeat(tst.split('/').length - 1);
+  const testOf = (want) => `import { test } from 'node:test'; import assert from 'node:assert'; import { sub } from '${up}${src}'; test('sub', () => assert.strictEqual(sub(5, 3), ${want}));\n`;
+  writeFileSync(join(d, src), 'export const sub = (a, b) => a + b;\n');   // the bug: it should be a - b
+  writeFileSync(join(d, tst), testOf(2)); commitAll(d, 'base: red test, buggy source');
+  return {
+    d,
+    fix: () => { writeFileSync(join(d, src), 'export const sub = (a, b) => a - b;\n'); commitAll(d, 'fix the source'); },
+    game: () => { writeFileSync(join(d, tst), testOf(8)); writeFileSync(join(d, src), 'export const sub = (a, b) => a + b;\nexport const twice = (a) => a * 2;\n'); commitAll(d, 'edit the test to pass, and touch the source'); },
+    report: () => check({ repo: d, base: 'HEAD~1', head: 'HEAD' }),
+  };
+};
+for (const [k, v] of [['diff.noprefix', 'true'], ['diff.mnemonicPrefix', 'true'], ['color.ui', 'always'], ['color.diff', 'always'], ['diff.context', '0'], ['diff.external', 'no-such-diff-tool'], ['diff.renames', 'copies'], ['core.abbrev', '4']]) {
+  test(`own git: with ${k}=${v} an honest fix reads pass, and a gamed win that also touches a source file reads gamed`, () => {
+    const a = ownGitRepo([[k, v]]); a.fix(); assert.equal(a.report().verdict, 'pass', 'the honest fix');
+    const b = ownGitRepo([[k, v]]); b.game(); assert.equal(b.report().verdict, 'gamed', 'the gamed win');
+    rmSync(a.d, { recursive: true, force: true }); rmSync(b.d, { recursive: true, force: true });
+  });
+}
+// Git prints a name that holds a byte above 127, a double quote, a backslash or a tab inside quotes with the bytes
+// escaped ("src/a\303\261adir.mjs") unless it is asked for the names NUL-separated. Read as a line, that string is no
+// file: it matched no pathspec, so the source-only patch was empty and an honest fix in such a file read "gamed".
+test('own git: a file name with a byte above 127 in it: an honest fix reads pass, a gamed win reads gamed, and the report names the file as it is on disk', () => {
+  const a = ownGitRepo([], 'src/añadir.mjs', 'test/añadir.test.mjs'); a.fix();
+  const ra = a.report(); assert.equal(ra.verdict, 'pass', 'an honest fix in src/añadir.mjs');
+  const b = ownGitRepo([], 'src/añadir.mjs', 'test/añadir.test.mjs'); b.game();
+  const rb = b.report(); assert.equal(rb.verdict, 'gamed', 'a gamed win on test/añadir.test.mjs');
+  assert.doesNotMatch(JSON.stringify(rb), /\\\\303|\\\\261/, 'no escaped bytes in the report');
+  rmSync(a.d, { recursive: true, force: true }); rmSync(b.d, { recursive: true, force: true });
+});
+test('own git: a new workflow file is a protected path whatever its name holds (a byte above 127, a double quote, a tab)', { skip: process.platform === 'win32' && 'a double quote and a tab are not file-name characters on Windows' }, () => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-wfname-'));
+  const g = (a) => execFileSync('git', a, { cwd: d, stdio: 'ignore' });
+  g(['init', '-q']); g(['config', 'user.email', 'a@b.c']); g(['config', 'user.name', 'a']);
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'a', scripts: { test: 'node -e 0' } }));
+  mkdirSync(join(d, '.github/workflows'), { recursive: true }); writeFileSync(join(d, '.github/workflows/ci.yml'), 'name: ci\non: push\njobs: {}\n'); commitAll(d, 'base');
+  assert.equal(pw(d, ['init', '--preset', 'supply-chain', '--no-agent-block']).code, 0); commitAll(d, 'sign');
+  const run = () => { const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json']); return { code: r.code, rep: JSON.parse(r.out.slice(r.out.indexOf('{'))) }; };
+  for (const name of ['plain.yml', 'añadir.yml', 'it"s.yml', 'a\tb.yml']) {
+    writeFileSync(join(d, '.github/workflows', name), 'name: x\non: push\njobs: {}\n'); commitAll(d, `a new workflow: ${JSON.stringify(name)}`);
+    const r = run();
+    assert.equal(r.code, 1, `a new workflow named ${JSON.stringify(name)} fails with no reason`);
+    assert.ok((r.rep.mandates || []).some((m) => m.name === 'workflows-frozen'), `and it is the workflow rule that says so, for ${JSON.stringify(name)}: ${JSON.stringify(r.rep.mandates)}`);
+  }
+  rmSync(d, { recursive: true, force: true });
+});
+// A person's git hooks are for the person's own checkouts. The engine's throwaway worktrees ran them (post-checkout
+// fires on `git worktree add`), six times a check; one that exits 1 on a detached HEAD stopped every check ("could
+// not run"), so a gamed commit was not sent back, and each try left a worktree behind in the repo.
+test('own git: the engine\'s throwaway checkouts run none of the person\'s git hooks, so a post-checkout hook that fails does not stop the check, and no worktree is left behind', { skip: process.platform === 'win32' }, () => {
+  const a = ownGitRepo();
+  const hooks = mkdtempSync(join(tmpdir(), 'pw-hooks-'));
+  writeFileSync(join(hooks, 'post-checkout'), `#!/bin/sh\necho ran >> "${hooks}/log"\nexit 1\n`); chmodSync(join(hooks, 'post-checkout'), 0o755);
+  execFileSync('git', ['config', 'core.hooksPath', hooks], { cwd: a.d });
+  a.game(); assert.equal(a.report().verdict, 'gamed', 'the check ran, and read the gamed win');
+  assert.ok(!existsSync(join(hooks, 'log')), 'the hook did not run in a checkout the engine made');
+  assert.equal(execFileSync('git', ['worktree', 'list'], { cwd: a.d, encoding: 'utf8' }).trim().split('\n').length, 1, 'no worktree is left in the repo');
+  rmSync(a.d, { recursive: true, force: true }); rmSync(hooks, { recursive: true, force: true });
+});
