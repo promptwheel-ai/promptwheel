@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.11 (2026-11-15): your own git settings do not change a verdict
+
+Every test and release check of this engine ran under a blank git config. A person has a `~/.gitconfig`. Run under one (the published 0.8.9 and 0.8.10, 29 settings, git 2.25 to 2.52), four things read wrong, and one of them needed no setting at all.
+
+- **A file name is read as it is on disk.** Git prints a name that holds a byte above 127, a double quote, a backslash or a tab inside quotes, with the bytes escaped. Read as a line, that string matched no file. An honest fix in `src/añadir.js` read "gamed", and a new workflow file named `añadir.yml` was no protected path. Names are now read NUL-separated. This is git's default, so it happened to everyone with such a file.
+- **The source-only patch is made the same way on every machine.** With `diff.noprefix`, an outside diff tool (`diff.external`), colour forced on (`color.ui=always`) or `diff.context=0`, the patch was one `git apply` refuses. An honest fix then read "inconclusive", and a gamed win that also touched a source file read "inconclusive" too, which is not sent back. The patch now names its own format.
+- **The throwaway checkouts run none of your git hooks.** `git worktree add` fires `post-checkout`, from the repo's hooks or your global ones (`core.hooksPath`). One that exits 1 on a detached HEAD stopped every check ("could not run") and left a worktree behind each time. **This changes behaviour** for a repo that leaned on a `post-checkout` hook to prepare the checkout being measured: put that step in `setup`.
+- **A commit message is read with no signature check.** With `log.showSignature`, git starts gpg once for each commit a log shows.
+- **Not changed:** a verdict under a blank config. `core.autocrlf`, a global ignore file, `safe.directory` and your filters are still obeyed, as they must be.
+- **Not run:** a Mac or Windows, Git LFS, submodules.
+
 ## 0.8.10 (2026-11-14): on a pull request, the account that opened it cannot let it through
 
 The Action took a person's yes from the newest `sawbuck-allow: <reason>` comment by any account of type User with write access. It did not ask whether that account had opened the pull request. A coding agent run from a service account (a GitHub machine user is a User, and its token writes pull requests) opens its pull requests from that account, and the check's own comment spells out the words to post. Run with the Action's own steps on the published 0.8.9: the opener's comment let a gamed green through, and let a pull request that rewrote its own contract through.
