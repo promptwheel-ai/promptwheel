@@ -355,6 +355,10 @@ export declare function judgeGaming(
 /** Truncated SHA-256 of the verdict content (everything but `provenance`), the reproducible half of the receipt. */
 export declare function verdictFingerprint(report: Pick<Report, 'verdict'> & Partial<Pick<Report, 'metrics' | 'gate'>>): string;
 
+/** A note when the environment sets a variable that can change which tests run (PYTEST_ADDOPTS, PYTEST_PLUGINS, a
+ *  preload in NODE_OPTIONS) and the contract's own `env` (`declared`) does not set it; null when none is set. */
+export declare function environmentNote(env?: Record<string, string | undefined>, declared?: Record<string, unknown> | null): { metric: 'environment'; noted: true; what: string; items: string[] } | null;
+
 /** The newest `sawbuck-allow: <reason>` comment from someone with write access, or ''. With `author` (the account that
  *  opened the pull request) its own comment does not count, unless `allowFromAuthor` is true (the base contract's key). */
 export declare function allowFromComments(comments: unknown[], opts?: { author?: string; allowFromAuthor?: boolean }): string;

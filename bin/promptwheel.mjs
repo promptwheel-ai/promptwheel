@@ -1129,9 +1129,12 @@ function gate(repo, opts) {
   for (const m of guards) if (!m.allowed) m.allowable = true;   // failed, and a declared reason would clear it: say so in the report
   const mandated = mandateViolations.length > 0;
   const verdict = deriveVerdict(metrics, gateInfo, mandated);
-  const explained = explainMetrics(repo, metrics);
+  // what was measured in words, and one thing no diff shows: a variable in this environment that can change which
+  // tests run (environmentNote). A variable the contract's own `env` sets is declared there and not noted.
+  const envNote = environmentNote(process.env, cfg.env);
+  const explained = [...(explainMetrics(repo, metrics) || []), ...(envNote ? [envNote] : [])];
   const report = {
-    ...(explained ? { explained } : {}),
+    ...(explained.length ? { explained } : {}),
     base: short(repo, base), head: short(repo, head), repeat, mode: opts.working ? 'working' : 'refs',
     verdict, metrics,
     ...(mandateViolations.length ? { mandates: mandateViolations } : {}),
@@ -1379,6 +1382,7 @@ function printHuman(r) {
     else if (m.inert) console.log(`      ⚠ "${m.name}" ${m.ran ? `ran and failed at the ${m.ran} ref and did not run at the other` : 'never ran (same value at both refs)'}: its command needs a build/deps first, or is not your real test command. Fix: promptwheel init, or set setup/linkDirs in promptwheel.config.json`);
     if (m.gamed === true) console.log(`      🚩 GAMED, ${m.gamingReason}`);
   }
+  for (const x of r.explained || []) if (x.metric === 'environment') console.log(`  ℹ note: ${x.what}: ${x.items.join(', ')}`);
   if (r.setup) { const at = Object.keys(r.setup), f = r.setup[at[0]]; console.log(`  ⚠ setup failed (exit ${f.exit}) at the ${at.join(' and ')} ref${at.length > 1 ? 's' : ''}${f.lastLine ? ': ' + f.lastLine : ''}`); }
   if (r.gate && r.gate.weakened) for (const w of r.gate.weakened) console.log(w.change === 'measurement-edited'
     ? `  🚩 GATE WEAKENED, how the guard "${w.name}" is measured (setup, env or linked dirs) was edited in this change, and measured the way it was before it would have ${wouldHave(w.status)} at head (goalpost moved, not earned)`
@@ -1411,6 +1415,20 @@ const PLAIN = {
   pins_changed: 'resolved dependency versions changed', tests_pass: 'tests stopped passing', test_count: 'fewer tests', skipped_tests: 'more skipped tests',
   suppressions: 'more silenced checks', assertions: 'fewer assertions',
 };
+// What the measurement borrows from the machine it runs on and no diff shows: a variable that can change which tests
+// run, or load code into every one of them. Measured 2026-11-11 (proof-bench/outside-git): a PYTEST_ADDOPTS that
+// deselects the red test and a preload in NODE_OPTIONS each read pass while a fresh install was red. Removing them
+// could break a setup that needs them, so the check runs as it is told and says so. A NODE_OPTIONS that loads no file
+// (a memory limit, say) is not one.
+const ENV_NOTED = [
+  ['PYTEST_ADDOPTS', (v) => !!v.trim()],
+  ['PYTEST_PLUGINS', (v) => !!v.trim()],
+  ['NODE_OPTIONS', (v) => /(^|\s)(-r|--require|--import|--loader|--experimental-loader)(\s|=)/.test(v)],
+];
+export function environmentNote(env = process.env, declared = null) {
+  const set = ENV_NOTED.filter(([k, hit]) => typeof env[k] === 'string' && hit(env[k]) && !(declared && Object.prototype.hasOwnProperty.call(declared, k))).map(([k]) => k);
+  return set.length ? { metric: 'environment', noted: true, what: 'the environment this ran in can change which tests run, or load code into them', items: set } : null;
+}
 function explainMetrics(repo, metrics) {
   const hit = metrics.filter((m) => m.noted || (m.guard && !m.ok));
   if (!hit.length) return null;

@@ -10,6 +10,7 @@ The Action took a person's yes from the newest `sawbuck-allow: <reason>` comment
 - **This changes what a solo owner's own comment does.** If you open your own pull requests and approve them with a comment, add `"allowFromAuthor": true` to the contract on your default branch. With that key an agent signed in as you can post the comment, as before.
 - **Not changed:** a bot never counts; `allowFromComments(comments)` with no opener named reads as before, for a caller that does not know who opened it.
 - **Not run:** a real pull request on GitHub. The Action's shell steps were run as written, with a stand-in for `gh`.
+- **The report says when the environment can change which tests run.** `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`, or a preload in `NODE_OPTIONS`, set in the shell the check runs in and not in the contract's own `env`: a note in the JSON (`explained`, metric `environment`), the PR comment and the plain report. Owed since 2026-11-11, when a deselecting `PYTEST_ADDOPTS` and a preload each read pass while a fresh install was red. A note, never a verdict, and nothing is removed from the environment.
 
 ## 0.8.9 (2026-11-12): what the counts ask about on real commits; a Python `tests.py` and a runner script are test-side
 

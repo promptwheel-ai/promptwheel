@@ -2637,6 +2637,31 @@ test('the report tells a reader who may accept it: someone with write access who
   assert.doesNotMatch(md(), /<your reason>/, 'the reader of the comment may be the one who opened it');
 });
 
+// What the check borrows from the machine it runs on and no diff shows. Measured 2026-11-11 (proof-bench/outside-git): a
+// `PYTEST_ADDOPTS` that deselects the red test, and a preload in `NODE_OPTIONS` that forces a pass, each read pass while
+// a fresh install was red. Removing them could break a setup that needs them, so the check runs as it is told and says
+// so: a note, never a verdict. A variable the contract's own `env` sets is declared, and is not noted.
+test('a variable in the environment that can change which tests run is said, as a note and never a verdict', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'true', extract: 'exit', direction: 'pass', guard: true }]);
+  writeFileSync(join(d, 'preload.js'), ''); commitAll(d, 'base'); writeFileSync(join(d, 'x.txt'), '1'); commitAll(d, 'a change');
+  const clean = { ...process.env }; for (const k of ['PYTEST_ADDOPTS', 'PYTEST_PLUGINS', 'NODE_OPTIONS']) delete clean[k];
+  const run = (env, ...extra) => execFileSync('node', [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto', ...extra], { cwd: d, encoding: 'utf8', env: { ...clean, ...env } });
+  const rep = (env) => JSON.parse(run(env, '--json'));
+  const note = (r) => (r.explained || []).find((x) => x.metric === 'environment');
+  assert.equal(note(rep({})), undefined, 'nothing set, nothing said');
+  let r = rep({ PYTEST_ADDOPTS: '--deselect tests/test_a.py::test_red' });
+  assert.equal(r.verdict, 'pass', 'a note, never a verdict'); assert.equal(note(r).noted, true); assert.deepEqual(note(r).items, ['PYTEST_ADDOPTS']);
+  assert.deepEqual(note(rep({ PYTEST_PLUGINS: 'always_green' })).items, ['PYTEST_PLUGINS']);
+  assert.equal(note(rep({ NODE_OPTIONS: '--max-old-space-size=4096' })), undefined, 'a NODE_OPTIONS that loads nothing is not one');
+  assert.deepEqual(note(rep({ NODE_OPTIONS: '--require ./preload.js' })).items, ['NODE_OPTIONS'], 'a preload is');
+  assert.deepEqual(note(rep({ NODE_OPTIONS: '--max-old-space-size=4096 --import=./preload.js', PYTEST_ADDOPTS: '-k fast' })).items, ['PYTEST_ADDOPTS', 'NODE_OPTIONS']);
+  assert.match(run({ PYTEST_ADDOPTS: '-k fast' }, '--markdown'), /ℹ️ \*\*Note:\*\* the environment this ran in can change which tests run, or load code into them: `PYTEST_ADDOPTS`/);
+  assert.match(run({ PYTEST_ADDOPTS: '-k fast' }), /note: the environment this ran in can change which tests run, or load code into them: PYTEST_ADDOPTS/, 'and in the plain report');
+  // declared in the contract's own env: part of the gate, on the record, not a surprise
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, env: { PYTEST_ADDOPTS: '-q' }, metrics: [{ name: 'tests_pass', cmd: 'true', extract: 'exit', direction: 'pass', guard: true }] })); commitAll(d, 'the contract sets it'); writeFileSync(join(d, 'x.txt'), '2'); commitAll(d, 'another change');
+  assert.equal(note(rep({ PYTEST_ADDOPTS: '-k fast' })), undefined, 'a variable the contract itself sets is not noted');
+});
+
 test('--allow on a gamed commit: the JSON and the PR comment both carry the reason and what it cleared', () => {
   const d = tmpRepo([{ name: 'tests_pass', cmd: 'sh test/a.sh', extract: 'exit', direction: 'pass', guard: true }]);
   mkdirSync(join(d, 'test'));
