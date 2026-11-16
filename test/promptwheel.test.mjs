@@ -3022,3 +3022,59 @@ test('own git: the engine\'s throwaway checkouts run none of the person\'s git h
   assert.equal(execFileSync('git', ['worktree', 'list'], { cwd: a.d, encoding: 'utf8' }).trim().split('\n').length, 1, 'no worktree is left in the repo');
   rmSync(a.d, { recursive: true, force: true }); rmSync(hooks, { recursive: true, force: true });
 });
+
+// ---------------------------------------------------- the report names the goalposts a change moved (gate.goalposts)
+// What the source-only re-run does not take from a change: tests, graders, config, declared evaluator paths, the
+// runner a guard names, and the test keys of a package.json or pyproject.toml. A caller that holds a gamed verdict over
+// a span until it is earned (Sawbuck, at the end of a turn) could not tell "the test was put back and the suite is red
+// as before" from "the test is still edited and the suite is red": both read inconclusive, and the first was sent back
+// turn after turn (proof-bench/beside-guard, 2026-11-16). With no goalpost moved the source-only tree IS the head
+// tree, so nothing over that span can read gamed.
+test('gate.goalposts: names the test a gamed win edited, and is empty once the test is put back with a source edit left in', () => {
+  const d = gamedRepo(); commitAll(d, 'make it green');
+  let r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'gamed'); assert.deepEqual(r.gate.goalposts, ['calc.test.mjs']);
+  const base = rev(d, 'HEAD~1');
+  writeFileSync(join(d, 'calc.test.mjs'), CALC(2)); writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a * b;\n');
+  commitAll(d, 'put the test back; a try at the source that does not fix it');
+  r = check({ repo: d, base, head: 'HEAD' });
+  assert.equal(r.verdict, 'inconclusive', JSON.stringify(r.metrics));
+  assert.deepEqual(r.gate.goalposts, [], 'only source changed over the span');
+  assert.equal(conformsToContract(r).ok, true, conformsToContract(r).errors.join('; '));
+  rmSync(d, { recursive: true, force: true });
+});
+test('gate.goalposts: a test command changed inside package.json is a goalpost, and a dependency added there is not', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
+  const pkg = (o) => writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'a', version: '1.0.0', scripts: { test: 'node --test' }, dependencies: {}, ...o }, null, 2) + '\n');
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a - b;\n'); writeFileSync(join(d, 'calc.test.mjs'), CALC(2)); pkg({}); commitAll(d, 'base');
+  pkg({ dependencies: { leftpad: '1.0.0' } }); commitAll(d, 'a dependency');
+  assert.deepEqual(check({ repo: d, base: 'HEAD~1', head: 'HEAD' }).gate.goalposts, [], 'package.json changed, its test keys did not');
+  pkg({ dependencies: { leftpad: '1.0.0' }, scripts: { test: 'true' } }); commitAll(d, 'the test command');
+  assert.deepEqual(check({ repo: d, base: 'HEAD~1', head: 'HEAD' }).gate.goalposts, ['package.json']);
+  rmSync(d, { recursive: true, force: true });
+});
+test('gate.goalposts: the contract file, a declared evaluator path and a pyproject test table are goalposts; a plain source file is not', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...cfg, evaluatorPaths: ['budget.json'] }));
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a - b;\n'); writeFileSync(join(d, 'calc.test.mjs'), CALC(2));
+  writeFileSync(join(d, 'budget.json'), '{"max":0}\n'); writeFileSync(join(d, 'pyproject.toml'), '[project]\nname = "a"\n\n[tool.pytest.ini_options]\naddopts = ""\n');
+  commitAll(d, 'base');
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a - b; // tidy\n'); commitAll(d, 'source only');
+  assert.deepEqual(check({ repo: d, base: 'HEAD~1', head: 'HEAD' }).gate.goalposts, []);
+  writeFileSync(join(d, 'budget.json'), '{"max":5}\n');
+  writeFileSync(join(d, 'pyproject.toml'), '[project]\nname = "a"\n\n[tool.pytest.ini_options]\naddopts = "-k mul"\n');
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...cfg, evaluatorPaths: ['budget.json'], repeat: 1 }));
+  commitAll(d, 'three goalposts');
+  assert.deepEqual(check({ repo: d, base: 'HEAD~1', head: 'HEAD' }).gate.goalposts, ['budget.json', 'promptwheel.config.json', 'pyproject.toml']);
+  rmSync(d, { recursive: true, force: true });
+});
+test('gate.goalposts: a report whose goalposts are empty is never gamed, on every fixture of this kind; and with detection off the report does not say', () => {
+  const d = gamedRepo(); commitAll(d, 'make it green');
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a - b;\n'); commitAll(d, 'the real fix, on top of the edited test');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.deepEqual(r.gate.goalposts, []); assert.ok(!r.metrics.some((m) => m.gamed === true), 'nothing gamed where no goalpost moved');
+  assert.equal(check({ repo: d, base: 'HEAD~1', head: 'HEAD', detectGaming: false }).gate, undefined, 'no gate record, so no goalposts, when detection is off');
+  assert.equal(conformsToContract({ ...r, gate: { ...r.gate, goalposts: 'calc.test.mjs' } }).ok, false, 'goalposts must be an array of paths');
+  rmSync(d, { recursive: true, force: true });
+});

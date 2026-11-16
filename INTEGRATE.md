@@ -74,7 +74,11 @@ is read) at base and head, sets `gate.changed: true` when they differ, and lists
 (`change: guard-edited`, such as `cmd: "true"`; `change: measurement-edited`, a new `setup`, `env`
 or `linkDirs`) to hide a regression; a non-empty `gate.weakened` forces `gamed`, so an agent
 cannot pass by disabling the guard it is judged by. A change that adds the first config is
-compared with the zero-config gate (the detected test command). `allowed` (optional) is `{ reason, cleared }` when a declared
+compared with the zero-config gate (the detected test command). `gate.goalposts` (0.8.12 on) lists the
+changed paths the source-only re-run does not take from the change: tests, graders, config, declared
+`evaluatorPaths`, a runner script a guard names, and a `package.json` or `pyproject.toml` whose test
+keys changed. Empty means the source-only tree is the head tree, so nothing over that span can read
+`gamed`; a caller that holds a gamed verdict over a span reads it to see that the test was put back. `allowed` (optional) is `{ reason, cleared }` when a declared
 reason turned a would-be `gamed`, `fail` or `inconclusive` into `pass`: `cleared` names each metric,
 `gate`, or `mandate:<name>` it cleared, and each cleared metric carries `allowed: true` and keeps its
 `gamingReason`, so a consumer can say what was allowed and why it would have failed.

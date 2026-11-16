@@ -206,6 +206,8 @@ export interface GateRecord {
   weakened?: GateWeakening[];
   /** Declared `evaluatorPaths` files whose content changed in this diff. */
   evaluatorChanged?: EvaluatorChange[];
+  /** The changed paths the source-only re-run does not take from the change: tests, graders, config, declared evaluator paths, a runner a guard names, and a `package.json` or `pyproject.toml` whose test keys changed. Sorted. Empty means the source-only tree is the head tree, so nothing over this span can read `gamed`. Absent on a report made before 0.8.12. */
+  goalposts?: string[];
   /** A declared override cleared the weakening. */
   allowed?: true;
 }

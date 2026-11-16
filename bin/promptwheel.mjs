@@ -605,6 +605,20 @@ function holdGoalposts(repo, base, wt, source) {
   }
 }
 
+// The question holdGoalposts answers by rewriting, asked without rewriting: did this change move the test keys of a
+// manifest it edits? A new file has no base to hold. A manifest that does not parse cannot be said to hold still.
+function manifestTestKeysMoved(repo, base, head, p) {
+  const name = p.split('/').pop();
+  if (name !== 'package.json' && name !== 'pyproject.toml') return false;
+  const before = showQuiet(repo, base, p); if (before == null) return false;
+  const after = showQuiet(repo, head, p); if (after == null) return true;   // deleted, and its test command with it
+  try {
+    if (name === 'package.json') { const a = JSON.parse(before), b = JSON.parse(after); return JS_TEST_KEYS.some((k) => JSON.stringify(a[k]) !== JSON.stringify(b[k])); }
+    const held = (t) => tomlTables(t).filter(([h]) => h && PY_TEST_TABLE.test(h)).map(([, l]) => l.join('\n')).join('\n');
+    return held(before) !== held(after);
+  } catch { return true; }
+}
+
 function measureSourceOnlyAll(repo, base, head, defs, cfg, repeat, guardsFrom = cfg) {
   const out = {};
   if (!defs.length) return out;
@@ -981,6 +995,12 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
       m.gamingReason = `a declared evaluatorPath gate file changed in this diff (${evalChanged.map((e) => e.path).join(', ')}); a win alongside a goalpost edit is gamed by declaration`;
     }
   }
+  // What this change moved that the source-only re-run does not take from it: every non-source path (a test, a
+  // grader, a config, a runner a guard names), a declared evaluator path, and a manifest whose test keys changed.
+  // Empty means the source-only tree IS the head tree, so nothing over this span can read gamed. A caller that holds a
+  // gamed verdict over a span until it is earned reads this to tell "the test was put back" from "nothing could be
+  // measured": both are inconclusive when the suite is red at both ends.
+  const goalposts = [...new Set([...split.nonSource, ...evalChanged.map((e) => e.path), ...split.source.filter((p) => manifestTestKeysMoved(repo, base, head, p))])].sort();
   const weak = gateWeakenings(baseGate, cfg.metrics);
   // the setup, env or linked dirs changed: every guard the base had is measured again the way it was measured before
   if (measureChanged) for (const bm of baseGate.metrics.values()) {
@@ -1021,6 +1041,7 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
     ...(fpBase && fpBase !== fpHead ? { changed: true } : {}),
     ...(weakened.length ? { weakened } : {}),
     ...(evalChanged.length ? { evaluatorChanged: evalChanged } : {}),
+    goalposts,
   };
   // hand the base ref's mandates to gate() (not part of the record) so checkMandates can hold a
   // change to a mandate it deleted in the same diff.
@@ -1658,6 +1679,7 @@ export function conformsToContract(report) {
       if (report.gate.fingerprint !== undefined && (typeof report.gate.fingerprint !== 'object' || report.gate.fingerprint === null)) E('gate.fingerprint must be an object { base, head }');
       if (report.gate.changed !== undefined && typeof report.gate.changed !== 'boolean') E('gate.changed must be a boolean');
       if (report.gate.weakened !== undefined && !Array.isArray(report.gate.weakened)) E('gate.weakened must be an array');
+      if (report.gate.goalposts !== undefined && !(Array.isArray(report.gate.goalposts) && report.gate.goalposts.every((x) => typeof x === 'string' && x))) E('gate.goalposts must be an array of paths');
     }
   }
 
