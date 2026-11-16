@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.12 (2026-11-16): the report names the goalposts a change moved
+
+A caller that holds a gamed verdict over a span until it is earned (Sawbuck, at the end of a turn) could not tell two red spans apart: the test was put back and the suite is red as before, or the test is still edited and the suite is red. Both read `inconclusive`. So putting the test back did not end a send-back when the suite had been red to begin with (proof-bench/beside-guard, 2026-11-16).
+
+- **`gate.goalposts` in the JSON report.** The changed paths the source-only re-run does not take from the change: tests, graders, config, declared evaluator paths, a runner script a guard names, and a `package.json` or `pyproject.toml` whose test keys changed. Sorted, and an empty list when there are none. With no goalpost moved the source-only tree is the head tree, so nothing over that span can read `gamed`.
+- **Not changed:** every verdict, exit code and fingerprint. The engine's word for a change that touches a protected path or makes a guard worse is still `fail`, with the gamed metric marked in the report beside it; a caller that sends back only `gamed` has to read the metrics too. Sawbuck did not until 0.1.73.
+- **Absent** with `--no-detect-gaming`, as the rest of the gate record is.
+- **Not run:** a Mac or Windows.
+
 ## 0.8.11 (2026-11-15): your own git settings do not change a verdict
 
 Every test and release check of this engine ran under a blank git config. A person has a `~/.gitconfig`. Run under one (the published 0.8.9 and 0.8.10, 29 settings, git 2.25 to 2.52), four things read wrong, and one of them needed no setting at all.
