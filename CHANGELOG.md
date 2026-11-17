@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.13 (2026-11-16): a test removed on purpose takes a reason
+
+`CONTRACT.md` has always named "an obsolete test removed" as a change a person can declare. With the default contract it could not be: `init` guards the count of tests, of skipped tests and of assertions, no reason reached those three, and a person who removed a test they no longer wanted failed the check whatever they declared (found by typing it on 2026-11-16, in Sawbuck's proof-bench/yes-counts). A failing test deleted on purpose read `fail` for the count even after `--allow` had taken the gamed green.
+
+- **The three test counts take a reason, by the flag.** `init` and the `antihack` preset write `"allowable": "flag"` on `test_count`, `skipped_tests` and `assertions`. A reason from `--allow` or the `allow` option lets a regression in them through, on the record; the Action hands its approving comment in the same way. A commit trailer does not: an agent can write one. The count of lint silencers (`suppressions`) is unchanged.
+- **The tests are one thing to a reason.** Deleting a test moves `tests_pass`, `test_count` and `assertions` in one act. Those four names (with `skipped_tests`) count as one thing for "a reason lets through only what it names": alone they need no name, and beside something else naming any one of them names them all. The line the check prints to copy follows the same rule.
+- **Who gets this.** A config written from 0.8.13 on. A config written earlier holds its own copy of the guards, and an update does not change it: add `"allowable": "flag"` to the three entries (in a signed repo that edit takes a reason itself). No verdict changes for a run that passes no reason.
+- **Not run:** a Mac or Windows. The Action's comment path for these counts.
+
 ## 0.8.12 (2026-11-16): the report names the goalposts a change moved
 
 A caller that holds a gamed verdict over a span until it is earned (Sawbuck, at the end of a turn) could not tell two red spans apart: the test was put back and the suite is red as before, or the test is still edited and the suite is red. Both read `inconclusive`. So putting the test back did not end a send-back when the suite had been red to begin with (proof-bench/beside-guard, 2026-11-16).
