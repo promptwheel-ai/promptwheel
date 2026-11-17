@@ -914,6 +914,11 @@ function gateWeakenings(baseGate, headMetrics) {
 // a working-tree or CI run that has no commit message to carry the trailer.
 // One reason, one thing: when a reason can reach more than one, it lets through only what it names.
 // A reason names a thing when the thing's name stands in it as a whole word, in any case (`mandate:` is optional).
+// The checks that are about the tests themselves are ONE thing to a reason: deleting a test moves the green, the count
+// of tests and the count of assertions in one act, and a person who accepts that act has accepted all three.
+const TEST_KIND = new Set(['tests_pass', 'test_count', 'skipped_tests', 'assertions']);
+const kindOf = (label) => (TEST_KIND.has(label) ? 'the tests' : label);
+const kindsIn = (labels) => new Set([...labels].map(kindOf)).size;
 const reasonNames = (reason, label) => new RegExp(`(^|[^A-Za-z0-9_-])${label.replace(/^mandate:/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_-])`, 'i').test(reason);
 function readAllowTrailer(repo, ref) {
   let msg = '';
@@ -1158,8 +1163,10 @@ function gate(repo, opts) {
     // what THIS reason can reach: a trailer reaches less than the flag, and what it cannot reach does not count
     const reach = new Set([...[...gm, ...up].map((m) => m.name), ...(gw ? ['gate'] : []), ...guards.filter((m) => byFlag || mode.get(m.name) === true).map((m) => m.name), ...(byFlag ? soft.map((v) => `mandate:${v.name}`) : [])]);
     // One thing needs no name. More than one: the reason lets through only what it names, so a reason written
-    // about a config change does not also wave through a gamed test the person never looked at.
-    const takes = (label) => reach.has(label) && (reach.size < 2 || reasonNames(allow.reason, label));
+    // about a config change does not also wave through a gamed test the person never looked at. The checks on the
+    // tests themselves count as one thing (TEST_KIND): naming any of them names them all.
+    const named = (label) => reasonNames(allow.reason, label) || (TEST_KIND.has(label) && [...TEST_KIND].some((n) => reasonNames(allow.reason, n)));
+    const takes = (label) => reach.has(label) && (kindsIn(reach) < 2 || named(label));
     const cleared = new Set();
     for (const m of gm) if (takes(m.name)) { m.gamed = false; m.allowed = true; cleared.add(m.name); }
     for (const m of up) if (takes(m.name)) { m.unprovable = false; m.allowed = true; cleared.add(m.name); }
@@ -1223,12 +1230,14 @@ const PRESETS = {
   'antihack': { desc: 'catch reward-hacking: a target + tripwires; pairs with `run --detect-gaming` (source-only re-run)',
     metrics: [
       { name: 'tests_pass', cmd: '__TESTCMD__', extract: 'exit', direction: 'pass', guard: true },
-      { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
-      { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|\\bxit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false },
+      // the three counts of the tests themselves take a person's reason by the flag (never a trailer, which an agent can
+      // write): a test removed or skipped on purpose is sometimes the job. Until 0.8.13 no reason reached them.
+      { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|\\bxit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
       // a note when the change wins nothing (report: 'no-win'): on 340 real commits a blocking silencer count sent back 13 for a person adding
       // eslint-disable, #[allow] or //nolint in ordinary work, and in none of the 17 where it rose did anything else get better. Beside a win it still fails.
       { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa|# ?nosec|//nolint|#!?\\[allow\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, report: 'no-win', gamingCheck: false },
-      { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert|\\bt\\.(is|deepEqual|throws|truthy|falsy|not|ok) ?\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false },
+      { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert|\\bt\\.(is|deepEqual|throws|truthy|falsy|not|ok) ?\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false, allowable: 'flag' },
     ] },
   'no-ai-tells': { desc: 'opt-in: fail the gate if the em-dash count rises (an AI writing tell); some projects use them on purpose, so it is not a default',
     metrics: [
@@ -1450,7 +1459,7 @@ function printHuman(r) {
 }
 
 // The --allow flag as a person should type it for this report: with more than one thing to let through, each by name.
-const allowNames = (r) => ((r.allowable || []).length > 1 ? r.allowable.map((l) => l.replace(/^mandate:/, '')).join(', ') + ': ' : '');
+const allowNames = (r) => (kindsIn(r.allowable || []) > 1 ? r.allowable.map((l) => l.replace(/^mandate:/, '')).join(', ') + ': ' : '');
 const allowFlag = (r) => `--allow "${allowNames(r)}<reason>"`;
 
 // PR-comment markdown (rendering lives in the tool so the GitHub Action stays thin)

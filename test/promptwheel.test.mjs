@@ -1760,6 +1760,93 @@ test('--allow: what a reason cannot clear does not count toward more than one th
   assert.deepEqual(r2.allowed.cleared, ['tests_pass']); assert.equal(r2.verdict, 'fail'); assert.ok(r2.mandates.some((m) => m.name === 'notes-frozen'));
   rmSync(d, { recursive: true, force: true });
 });
+// A test removed on purpose. The default contract guards the count of tests, of skips and of assertions, and until
+// 0.8.13 no reason reached those three: a person who dropped an unwanted test failed the check whatever they declared
+// (found by typing it on 2026-11-16, proof-bench/yes-counts). They take a reason by the flag now, never by a trailer.
+function defaultContract({ red = false, mandate = false } = {}) {
+  const d = mkdtempSync(join(tmpdir(), 'pw-yes-'));
+  const g = (a) => execFileSync('git', a, { cwd: d });
+  g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+  writeFileSync(join(d, '.gitignore'), '.promptwheel/\n');
+  writeFileSync(join(d, 'package.json'), '{"name":"x","scripts":{"test":"node --test"}}');
+  writeFileSync(join(d, 'src.mjs'), `export const add=(a,b)=>a${red ? '-' : '+'}b;\nexport const mul=(a,b)=>a*b;\n`);
+  writeFileSync(join(d, 'x.test.mjs'), YES_TESTS(true));
+  assert.equal(pw(d, ['init']).code, 0);
+  if (mandate) {
+    const f = join(d, 'promptwheel.config.json'); const c = JSON.parse(readFileSync(f, 'utf8'));
+    c.mandates = [...(c.mandates || []), { name: 'notes-frozen', paths: ['NOTES.md'], allowable: 'flag', reason: 'a person changes the notes' }];
+    writeFileSync(f, JSON.stringify(c, null, 2) + '\n'); writeFileSync(join(d, 'NOTES.md'), 'as it was\n');
+  }
+  commitAll(d, 'base');
+  return d;
+}
+// test "add" is the one a change removes; "mul" stays
+const YES_TESTS = (withAdd) => "import {test} from 'node:test'; import assert from 'node:assert'; import {add, mul} from './src.mjs';\n" + (withAdd ? "test('add', () => assert.equal(add(2,2),4));\n" : '') + "test('mul', () => assert.equal(mul(2,3),6));\n";
+const TEST_KIND = ['tests_pass', 'test_count', 'skipped_tests', 'assertions'];
+const yesRun = (d, reason) => { const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto', '--json', ...(reason ? ['--allow', reason] : [])]); return { code: r.code, rep: reportOf(r.out) }; };
+test('the default contract: the three test counts take a reason by the flag, and the silencer count does not', () => {
+  const d = defaultContract();
+  const m = Object.fromEntries(JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')).metrics.map((x) => [x.name, x]));
+  for (const n of ['test_count', 'skipped_tests', 'assertions']) assert.equal(m[n].allowable, 'flag', n);
+  assert.equal(m.suppressions.allowable, undefined, 'a new silencer is not a removed test'); assert.equal(m.tests_pass.allowable, undefined);
+  rmSync(d, { recursive: true, force: true });
+});
+test('a passing test a person removes on purpose: the check fails, their reason by the flag passes it, and a trailer does not', () => {
+  const d = defaultContract();
+  writeFileSync(join(d, 'x.test.mjs'), YES_TESTS(false)); commitAll(d, 'drop the add test');
+  let r = yesRun(d);
+  assert.equal(r.code, 1); assert.equal(r.rep.verdict, 'fail');
+  assert.ok((r.rep.allowable || []).includes('test_count'), `the report says a reason can reach the count: ${JSON.stringify(r.rep.allowable)}`);
+  assert.ok(r.rep.allowable.every((l) => TEST_KIND.includes(l)), JSON.stringify(r.rep.allowable));
+  const text = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto']).out;
+  assert.match(text, /--allow "<reason>"/, 'one kind of thing: the line to copy needs no names'); assert.doesNotMatch(text, /more than one thing/);
+  r = yesRun(d, 'that test is obsolete');
+  assert.equal(r.code, 0, JSON.stringify(r.rep.allowed)); assert.equal(r.rep.verdict, 'pass');
+  assert.ok(r.rep.allowed.cleared.includes('test_count')); assert.equal(r.rep.allowed.reason, 'that test is obsolete');
+  assert.equal(r.rep.metrics.find((x) => x.name === 'test_count').allowed, true);
+  assert.equal(conformsToContract(r.rep).ok, true, conformsToContract(r.rep).errors.join('; '));
+  // an agent can write a trailer, so a trailer does not reach a count
+  execFileSync('git', ['commit', '-q', '--amend', '-m', 'drop the add test\n\nPromptwheel-Allow: test_count: that test is obsolete'], { cwd: d });
+  r = yesRun(d);
+  assert.equal(r.code, 1); assert.ok(!r.rep.allowed || !r.rep.allowed.cleared.includes('test_count'));
+  rmSync(d, { recursive: true, force: true });
+});
+test('a failing test a person removes on purpose: one reason takes the gamed green and its counts together, since they are one act', () => {
+  const d = defaultContract({ red: true });
+  writeFileSync(join(d, 'x.test.mjs'), YES_TESTS(false)); commitAll(d, 'drop the failing add test');
+  let r = yesRun(d);
+  assert.notEqual(r.code, 0); assert.equal(r.rep.metrics.find((x) => x.name === 'tests_pass').gamed, true);
+  assert.ok(r.rep.allowable.includes('tests_pass') && r.rep.allowable.includes('test_count'), JSON.stringify(r.rep.allowable));
+  r = yesRun(d, 'we dropped that feature');
+  assert.equal(r.code, 0, JSON.stringify(r.rep.allowed)); assert.equal(r.rep.verdict, 'pass');
+  assert.ok(r.rep.allowed.cleared.includes('tests_pass') && r.rep.allowed.cleared.includes('test_count'));
+  rmSync(d, { recursive: true, force: true });
+});
+test('the tests are one thing and a protected path is another: a plain reason takes neither, and naming one test check takes them all', () => {
+  const d = defaultContract({ red: true, mandate: true });
+  writeFileSync(join(d, 'x.test.mjs'), YES_TESTS(false)); writeFileSync(join(d, 'NOTES.md'), 'changed\n'); commitAll(d, 'drop the failing test and edit the notes');
+  let r = yesRun(d, 'we dropped that feature');
+  assert.notEqual(r.code, 0); assert.deepEqual(r.rep.allowed.cleared, [], 'two kinds of thing: a reason that names neither takes neither');
+  const text = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto', '--allow', 'we dropped that feature']).out;
+  assert.match(text, /--allow "[^"]*tests_pass[^"]*notes-frozen: <reason>"/, 'the line to copy names them');
+  r = yesRun(d, 'tests_pass: we dropped that feature');
+  assert.equal(r.rep.verdict, 'fail', 'the protected path still stands');
+  assert.ok(r.rep.allowed.cleared.includes('tests_pass') && r.rep.allowed.cleared.includes('test_count'), `naming one test check takes the tests: ${JSON.stringify(r.rep.allowed.cleared)}`);
+  assert.ok(!r.rep.allowed.cleared.includes('mandate:notes-frozen')); assert.ok(r.rep.mandates.some((m) => m.name === 'notes-frozen'));
+  r = yesRun(d, 'tests_pass and notes-frozen: we dropped that feature and the notes follow');
+  assert.equal(r.code, 0, JSON.stringify(r.rep.allowed)); assert.equal(r.rep.verdict, 'pass');
+  rmSync(d, { recursive: true, force: true });
+});
+test('a new lint silencer beside a gamed test is not one of the tests: a plain reason takes the test alone, and the silencer still fails the check', () => {
+  const d = defaultContract({ red: true });
+  writeFileSync(join(d, 'x.test.mjs'), YES_TESTS(true).replace('add(2,2),4', 'add(2,2),0'));
+  writeFileSync(join(d, 'src.mjs'), 'export const add=(a,b)=>a-b; // eslint-disable-line no-unused-vars\nexport const mul=(a,b)=>a*b;\n');
+  commitAll(d, 'edit the assertion and silence a rule');
+  const r = yesRun(d, 'the test was wrong');
+  assert.deepEqual(r.rep.allowed.cleared, ['tests_pass']); assert.equal(r.rep.verdict, 'fail');
+  assert.equal(r.rep.metrics.find((x) => x.name === 'suppressions').ok, false);
+  rmSync(d, { recursive: true, force: true });
+});
 test('Sawbuck-Allow (alias): covers an intentional test DELETE (not just an edit)', () => {
   const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test *.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
   writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');
