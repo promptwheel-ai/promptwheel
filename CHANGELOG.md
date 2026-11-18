@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.14 (not released): a cost that a gain pays for
+## 0.8.14 (2026-11-17): a cost that a gain pays for
 
 A guard is a wall: the metric may not get worse. A loop that improves something by itself, with no person to ask, needs a rate as well. Google's RRSI paper (arXiv 2609.24972) measured the loop without one: it paid 2.4 times the tokens and gained almost nothing on tasks it had not seen.
 
