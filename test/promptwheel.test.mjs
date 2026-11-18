@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint,
-  allowFromComments, check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION, deriveVerdict } from '../bin/promptwheel.mjs';
+  allowFromComments, check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION, deriveVerdict, applyBudgets } from '../bin/promptwheel.mjs';
 import { createHash } from 'node:crypto';
 import { realpathSync, chmodSync } from 'node:fs';
 
@@ -31,6 +31,63 @@ test('extract: null when no number', () => assert.equal(extract('nothing here', 
 test('median: odd and even', () => { assert.equal(median([3, 1, 2]), 2); assert.equal(median([1, 2, 3, 4]), 2.5); });
 test('median: empty → null', () => assert.equal(median([]), null));
 test('spread: max - min', () => { assert.equal(spread([5, 2, 9]), 7); assert.equal(spread([]), 0); });
+
+// ------------------------------------------------- unit: a cost paid for by a gain (`budget`, 0.8.14)
+// A guard is a wall. A loop that runs with no person needs a rate too: this much gain buys this much cost, no more.
+const bScore = (delta, over = {}) => ({ name: 'score', direction: 'up', guard: true, before: 0.8, after: +(0.8 + delta).toFixed(4), delta, status: delta > 0 ? 'improved' : 'unchanged', ok: true, ...over });
+const bTokens = (before, after) => ({ name: 'tokens', direction: 'down', guard: true, before, after, delta: after - before, status: after > before ? 'regressed' : 'unchanged', ok: !(after > before) });
+const bDefs = [{ name: 'score', direction: 'up', guard: true }, { name: 'tokens', direction: 'down', guard: true, budget: { gain: 'score', base: 0.10, rate: 44.5 } }];
+test('budget: a cost that rose within base + rate x gain is paid for, and says by what', () => {
+  const [, t] = applyBudgets([bScore(0.02), bTokens(100, 140)], bDefs);   // +40% against 0.10 + 44.5 * 0.02 = 99%
+  assert.equal(t.ok, true); assert.equal(t.status, 'regressed'); assert.deepEqual(t.paid, { gain: 'score', share: 0.4, allowed: 0.99 });
+  assert.equal(deriveVerdict([bScore(0.02), t]), 'pass');
+});
+test('budget: over the budget stays a failure and says by how much', () => {
+  const [, t] = applyBudgets([bScore(0.02), bTokens(100, 300)], bDefs);   // +200% against 99%
+  assert.equal(t.ok, false); assert.deepEqual(t.overBudget, { gain: 'score', share: 2, allowed: 0.99 }); assert.equal(t.paid, undefined);
+  assert.equal(deriveVerdict([bScore(0.02), t]), 'fail');
+});
+test('budget: with no trusted gain the wall stands, whatever the base', () => {
+  for (const s of [bScore(0), bScore(0.02, { status: 'inconclusive' })]) { const [, t] = applyBudgets([s, bTokens(100, 101)], bDefs); assert.equal(t.ok, false); assert.equal(t.paid, undefined); }
+});
+test('budget: a gain that was gamed, or could not be proved, pays for nothing', () => {
+  for (const over of [{ gamed: true }, { unprovable: true }]) { const [, t] = applyBudgets([bScore(0.02, over), bTokens(100, 140)], bDefs); assert.equal(t.ok, false); assert.equal(t.paid, undefined); }
+});
+test('budget: a cost that started at zero has no share to measure, an unknown gain is inert, and a metric with no budget is untouched', () => {
+  assert.equal(applyBudgets([bScore(0.02), bTokens(0, 40)], bDefs)[1].ok, false);
+  assert.equal(applyBudgets([bScore(0.02), bTokens(100, 140)], [bDefs[0], { ...bDefs[1], budget: { gain: 'nope', base: 9, rate: 9 } }])[1].ok, false);
+  assert.equal(applyBudgets([bScore(0.02), bTokens(100, 140)], [bDefs[0], { name: 'tokens', direction: 'down', guard: true }])[1].ok, false);
+  assert.equal(applyBudgets([bScore(0.02), bTokens(100, 90)], bDefs)[1].paid, undefined, 'a cost that fell needs no paying');
+});
+// the whole engine on a small repo: the score and the cost both come from source files, so the win is earned in the source
+function budgetRepo() {
+  const d = mkdtempSync(join(TMP_ROOT, 'budget-')); const g = (...a) => execFileSync('git', a, { cwd: d, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@b.c', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@b.c' } });
+  // the commands name the measure (measure.js, which no change here edits); the numbers live in a source file, as a real score lives in the code
+  mkdirSync(join(d, 'src')); const put = (score, tokens) => writeFileSync(join(d, 'src/values.js'), `module.exports = { score: ${score}, tokens: ${tokens} }\n`);
+  writeFileSync(join(d, 'measure.js'), "console.log(require('./src/values.js')[process.argv[2]])\n");
+  const cfg = (budget) => writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ metrics: [
+    { name: 'score', cmd: 'node measure.js score', extract: 'number', direction: 'up', guard: true },
+    { name: 'tokens', cmd: 'node measure.js tokens', extract: 'number', direction: 'down', guard: true, ...(budget ? { budget } : {}) }] }, null, 2));
+  put(80, 100); cfg({ gain: 'score', base: 0.10, rate: 0.2 }); g('init', '-q'); g('add', '-A'); g('commit', '-qm', 'base');
+  const run = () => { const r = spawnSync(process.execPath, [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--json'], { cwd: d, encoding: 'utf8' }); let j = null; try { j = JSON.parse(r.stdout); } catch {} return { code: r.status, j }; };
+  return { d, g, put, cfg, run };
+}
+test('budget, end to end: a gain of 2 with rate 0.2 buys a cost rise of up to 50%; 40% passes and names what paid, 80% fails', () => {
+  const a = budgetRepo(); a.put(82, 140); a.g('commit', '-qam', 'better and dearer');
+  const ok = a.run(); assert.equal(ok.code, 0, JSON.stringify(ok.j && ok.j.metrics)); assert.equal(ok.j.verdict, 'pass');
+  const t = ok.j.metrics.find((x) => x.name === 'tokens'); assert.equal(t.status, 'regressed'); assert.equal(t.ok, true); assert.equal(t.paid.gain, 'score'); assert.equal(conformsToContract(ok.j).ok, true);
+  const b = budgetRepo(); b.put(82, 180); b.g('commit', '-qam', 'better and far dearer');
+  const no = b.run(); assert.equal(no.code, 1); assert.equal(no.j.verdict, 'fail'); assert.ok(no.j.metrics.find((x) => x.name === 'tokens').overBudget);
+});
+test('budget, end to end: a change cannot write itself a budget (the gate as it was at the base decides)', () => {
+  const a = budgetRepo(); a.cfg(null); a.g('commit', '-qam', 'no budget yet');
+  a.put(82, 140); a.cfg({ gain: 'score', base: 5, rate: 5 }); a.g('commit', '-qam', 'dearer, with a budget written in the same change');
+  const r = a.run(); assert.notEqual(r.code, 0, 'a budget added in the change that needs it does not let it through'); assert.notEqual(r.j.verdict, 'pass');
+});
+test('budget, end to end: a change cannot loosen the budget it runs under (a budget is part of the guard)', () => {
+  const a = budgetRepo(); a.put(82, 400); a.cfg({ gain: 'score', base: 5, rate: 5 }); a.g('commit', '-qam', 'four times the cost, and a looser budget in the same change');
+  const r = a.run(); assert.notEqual(r.code, 0); assert.notEqual(r.j.verdict, 'pass', 'judged by the budget as it was at the base: 300% against 50%');
+});
 
 // -------------------------------------------------------------- unit: evaluate
 const m = (over = {}) => ({ direction: 'down', guard: true, extract: 'number', ...over });

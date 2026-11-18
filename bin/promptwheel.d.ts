@@ -44,6 +44,8 @@ export interface MetricConfig {
   exact?: boolean;
   /** A guarded metric fails the gate on a trusted regression; an unguarded one is tracked only. */
   guard?: boolean;
+  /** On a guard: a trusted regression is let through when the metric named in `gain` improved in the same change (earned in the source) and this one got worse by a share of its old value no larger than `base + rate * gain`. Part of the guard: a change cannot write or loosen its own. */
+  budget?: { gain: string; base?: number; rate?: number };
   /** Read a value even when `cmd` exits nonzero (never needed for `extract: 'exit'`). */
   allowNonzero?: boolean;
   /** Per-command timeout, default 300. */
@@ -163,6 +165,10 @@ export interface MetricResult extends Evaluation {
   /** `true`: a guard this change adds, unmeasurable at base because its scanner did not exist there. It starts counting from head. */
   adopted?: true;
   allowed?: true;
+  /** A trusted regression of this guard that a `budget` let through: the metric that paid, the regression as a share of the old value, and the share that gain buys. */
+  paid?: { gain: string; share: number; allowed: number };
+  /** A trusted regression that went over its `budget`: the same three numbers. The metric fails as a guard does. */
+  overBudget?: { gain: string; share: number; allowed: number };
   /** Present (`true`) only when this guarded metric regressed, no reason was declared, and `allowable: true` means a `--allow` / trailer reason would clear it. */
   allowable?: true;
 }
@@ -274,6 +280,8 @@ export declare function verdictExitCode(verdict: Verdict | string): 0 | 1 | 2 | 
  * `inconclusive` when an inert guard measured nothing and no metric improved, or when an improved
  * metric is `unprovable` (its source-only re-run could not be applied); else `pass`.
  */
+/** Applies each guard's `budget` to the measured results, in place: sets `paid` (and `ok`) or `overBudget`. Run after the gaming pass. */
+export declare function applyBudgets<T extends Partial<MetricResult>>(metrics: T[], defs: ReadonlyArray<Partial<MetricConfig>>): T[];
 export declare function deriveVerdict(metrics: ReadonlyArray<Partial<MetricResult>>, gateInfo?: { weakened?: unknown[]; allowed?: boolean } | null, mandated?: boolean): Verdict;
 
 /**

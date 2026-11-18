@@ -831,7 +831,9 @@ const PLACEHOLDER_TEST = 'echo "set your test command in promptwheel.config.json
 // `report`: true = its regression is a note; 'no-win' = a note only when the change won nothing (see winsNothing); else a guard
 const reportMode = (m) => (m.report === true ? true : m.report === 'no-win' ? 'no-win' : false);
 const winsNothing = (evaluated) => !evaluated.some((x) => x.status === 'improved' && !x.tripwire);   // a tripwire going up is not a win
-const measuredBy = (m) => JSON.stringify([m.cmd ?? null, m.extract ?? 'number', m.direction || 'up', m.exact === true, reportMode(m)]);
+// a budget is part of how a guard is judged; it is added to the signature only where there is one, so a gate with none keeps the fingerprint it had
+const budgetSig = (m) => (m.budget && typeof m.budget === 'object' ? [[m.budget.gain ?? null, Number(m.budget.base) || 0, Number(m.budget.rate) || 0]] : []);
+const measuredBy = (m) => JSON.stringify([m.cmd ?? null, m.extract ?? 'number', m.direction || 'up', m.exact === true, reportMode(m), ...budgetSig(m)]);
 // an order-independent SHA-256 (truncated) fingerprint of a gate definition, for the audit record
 function gateFingerprint(metricsList, scalars) {
   const norm = {
@@ -1062,6 +1064,25 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
 // elsewhere (a loop reading the verdict would throw away a good change). And a
 // win whose source-only re-run could not be applied (`unprovable`) is never a PASS either: a green
 // the engine could not re-prove is exactly the green it exists to doubt.
+// A COST PAID FOR BY A GAIN (0.8.14). A guard is a wall: the metric may not get worse. A loop that runs with no person
+// needs a rate as well: this much gain on X buys this much cost on Y, and no more. On a guarded metric,
+// `"budget": { "gain": "<metric>", "base": b, "rate": r }` lets a trusted regression through when the named metric has
+// a trusted improvement d that the source earned, and the regression's share of its old value is at most
+// b + r * |d|. With no such gain the wall stands as before. The rule is the cost rule of Google's RRSI (arXiv
+// 2609.24972, Eq. 7: delta C <= beta0 + beta1 * delta S), where an unregularized loop paid 2.4 times the tokens for
+// nothing. Pure arithmetic over the measured results; run after the gaming pass, so a gamed gain pays for nothing.
+export function applyBudgets(metrics, defs) {
+  for (const x of metrics) {
+    const def = (defs || []).find((c) => c && c.name === x.name); const b = def && def.budget;
+    if (!b || typeof b !== 'object' || !x.guard || x.status !== 'regressed' || x.ok) continue;
+    const g = metrics.find((y) => y.name === b.gain); const base = Number(b.base) || 0, rate = Number(b.rate) || 0;
+    if (!g || g.status !== 'improved' || g.gamed === true || g.unprovable === true || base < 0 || rate < 0 || !(Math.abs(x.before) > 0)) continue;
+    const note = { gain: g.name, share: +(Math.abs(x.after - x.before) / Math.abs(x.before)).toFixed(6), allowed: +(base + rate * Math.abs(g.delta)).toFixed(6) };
+    if (note.share <= note.allowed) { x.ok = true; x.paid = note; } else x.overBudget = note;
+  }
+  return metrics;
+}
+
 export function deriveVerdict(metrics, gateInfo = null, mandated = false) {
   const failed = metrics.some((m) => m.guard && !m.ok);
   const gamed = metrics.some((m) => m.gamed === true) || !!(gateInfo && gateInfo.weakened && !gateInfo.allowed);
@@ -1126,6 +1147,7 @@ function gate(repo, opts) {
   }
   // Section 3 (gaming detection), on by default: mutates `metrics` and yields the gate record
   const gateInfo = opts.detectGaming ? detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) : null;
+  applyBudgets(metrics, cfg.metrics);   // after the gaming pass: a gain the source did not earn pays for nothing
   // declared override: a Promptwheel-Allow trailer (or --allow) acknowledges an intentional
   // goalpost/gate change, so a would-be GAMED becomes PASS, recorded in report.allowed for review.
   // It covers an `unprovable` win too (the source-only re-run could not be applied): the declared
@@ -1432,6 +1454,8 @@ function printHuman(r) {
     const tag = m.guard ? (m.ok ? 'guard✓' : 'GUARD✗') : 'info';
     const d = m.delta == null ? 'n/a' : (m.delta > 0 ? `+${m.delta}` : `${m.delta}`);
     console.log(`  ${arrowFor(m)} ${m.name.padEnd(18)} ${String(m.before).padStart(8)} → ${String(m.after).padStart(8)}  (${d}, ${m.status}) [${tag}, ${m.confidence}]`);
+    if (m.paid) console.log(`      ✓ paid for by "${m.paid.gain}": worse by ${(m.paid.share * 100).toFixed(1)}%, and that gain buys up to ${(m.paid.allowed * 100).toFixed(1)}%`);
+    else if (m.overBudget) console.log(`      ✗ over its budget: worse by ${(m.overBudget.share * 100).toFixed(1)}%, and the gain on "${m.overBudget.gain}" buys ${(m.overBudget.allowed * 100).toFixed(1)}%`);
     if (m.inert && m.ran && m.cause === 'missing-dependency') console.log(`      ⚠ "${m.name}" could not run in the clean copy at either ref: ${m.detail}. Link or install what it needs (linkDirs or setup in promptwheel.config.json), then check again`);
     else if (m.inert && m.ran === 'both') console.log(`      ⚠ "${m.name}" ran and failed before and after this change, so it guards nothing here. Fix the failing tests, or the command, before trusting a pass`);
     else if (m.inert) console.log(`      ⚠ "${m.name}" ${m.ran ? `ran and failed at the ${m.ran} ref and did not run at the other` : 'never ran (same value at both refs)'}: its command needs a build/deps first, or is not your real test command. Fix: promptwheel init, or set setup/linkDirs in promptwheel.config.json`);

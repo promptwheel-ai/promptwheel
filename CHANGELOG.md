@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.14 (not released): a cost that a gain pays for
+
+A guard is a wall: the metric may not get worse. A loop that improves something by itself, with no person to ask, needs a rate as well. Google's RRSI paper (arXiv 2609.24972) measured the loop without one: it paid 2.4 times the tokens and gained almost nothing on tasks it had not seen.
+
+- **`budget` on a guard.** `{ "gain": "score", "base": 0.10, "rate": 0.2 }` lets a trusted regression of that metric through when the named metric improved in the same change, by a share of the old value no larger than `base + rate x gain`. The report says what paid, or by how much it went over. With no trusted gain, nothing changes: the guard fails as it did.
+- **A gain the source did not earn pays for nothing.** The rule runs after the source-only re-run.
+- **A change cannot write or loosen its own budget.** The budget is part of how a guard is judged, and a guard is judged as it stood at the base. A gate with no budget keeps the fingerprint it had.
+- **Not built:** RRSI's second rule, for a change whose gain is inside the noise. **Not run:** this rule inside RRSI's own loop.
+
 ## 0.8.13 (2026-11-16): a test removed on purpose takes a reason
 
 `CONTRACT.md` has always named "an obsolete test removed" as a change a person can declare. With the default contract it could not be: `init` guards the count of tests, of skipped tests and of assertions, no reason reached those three, and a person who removed a test they no longer wanted failed the check whatever they declared (found by typing it on 2026-11-16, in Sawbuck's proof-bench/yes-counts). A failing test deleted on purpose read `fail` for the count even after `--allow` had taken the gamed green.
