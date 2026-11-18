@@ -3021,6 +3021,56 @@ test('init: every counting tripwire leaves out the tool\'s own .promptwheel fold
   rmSync(d, { recursive: true, force: true });
 });
 
+// ---- found by replaying the contract on 408 real pull requests (proof-bench/outside-repos, 2026-11-18): a docs-only
+// change was sent back for "fewer tests" (the words "it (" in a sentence), a removed dependency for "fewer assertions"
+// (the word assert in yarn.lock), and zod's .describe( and a regex's .test( were counted as tests
+const tripwires = (files) => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-tripwire-'));
+  execFileSync('git', ['init', '-q'], { cwd: d });
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'node --test' } }));
+  mkdirSync(join(d, 'test')); writeFileSync(join(d, 'test/a.test.js'), "test('a', () => { expect(1) })\n");
+  assert.equal(pw(d, ['init', '--no-agent-block']).code, 0);
+  const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
+  const names = ['test_count', 'skipped_tests', 'suppressions', 'assertions'];
+  const counts = () => names.map((name) => +execFileSync('sh', ['-c', cfg.metrics.find((m) => m.name === name).cmd], { cwd: d, encoding: 'utf8' }).trim());
+  const was = counts();
+  for (const [f, text] of Object.entries(files)) { mkdirSync(dirname(join(d, f)), { recursive: true }); writeFileSync(join(d, f), text); }
+  const now = counts();
+  rmSync(d, { recursive: true, force: true });
+  return now.map((n, i) => n - was[i]);   // [tests, skipped, silenced, assertions] added by the files
+};
+test('init: the counting tripwires read code, not prose, lock files or data', () => {
+  assert.deepEqual(tripwires({
+    'docs/notes.md': "We ran it (twice) and test (the build) again. expect (nothing) here; assert that it('x') holds. // eslint-disable\n",
+    'README.rst': "describe (the thing) and test('it')\n",
+    'yarn.lock': '"assert@npm:^2.0.0":\n  version: 2.1.0\n  resolution: "assert@npm:2.1.0"\n',
+    'package-lock.json': '{"packages":{"node_modules/assert":{"version":"2.1.0"},"node_modules/expect":{}}}\n',
+    'locales/en.yml': 'hint: "press it (twice) to test (again), then assert"\n',
+    'data/notes.json': '{"note":"expect (this): it (works)"}\n',
+  }), [0, 0, 0, 0]);
+});
+test('init: a member call is not a test; a tap, Deno or QUnit test is', () => {
+  assert.deepEqual(tripwires({
+    'src/schema.js': "export const s = z.string().describe('a name');\nexport const ok = (v) => /^a/.test(v);\npage.it(1); suite.describe('x');\n",
+  }), [0, 0, 0, 0], 'zod .describe( and a regex .test( are not tests');
+  assert.deepEqual(tripwires({
+    'test/more.test.js': "t.test('sub', (t) => { t.equal(1, 1); t.end() })\nDeno.test('d', () => {})\nQUnit.test('q', () => {})\ndescribe('g', () => { it('i', () => {}); test('t', () => {}) })\nit.skip('s', () => {}); xtest('x', () => {})\n",
+  }), [6, 2, 0, 1], 'three member-call tests the frameworks define, a group, two tests; two skipped; one tap assertion');
+});
+test('init: the counting tripwires read Go, Rust, Ruby, Java, C#, Elixir, Swift and Python tests', () => {
+  const each = {
+    go: [{ 'add_test.go': 'func TestAdd(t *testing.T) {\n\tif add(1, 2) != 3 {\n\t\tt.Errorf("no")\n\t}\n}\nfunc (s *Suite) TestSub() { require.Equal(s.T(), 1, 1) }\nfunc TestLater(t *testing.T) { t.Skip("later") }\nfunc testHelper() {}\n' }, [3, 1, 0, 2]],
+    rust: [{ 'src/lib.rs': '#[cfg(test)]\nmod tests {\n    #[test]\n    fn adds() { assert_eq!(1 + 1, 2); }\n    #[tokio::test]\n    async fn waits() { assert!(true); }\n    #[test]\n    #[ignore]\n    fn later() {}\n}\n' }, [3, 1, 0, 2]],
+    ruby: [{ 'spec/a_spec.rb': "describe 'A' do\n  it 'adds' do\n    expect(1 + 1).to eq 2\n  end\n  xit 'later' do\n  end\n  it { is_expected.to be_nil }\nend\n" }, [2, 1, 0, 1]],
+    java: [{ 'src/test/java/ATest.java': 'class ATest {\n  @Test\n  void adds() { assertEquals(2, 1 + 1); }\n  @Test\n  @Disabled\n  void later() {}\n}\n' }, [2, 1, 0, 1]],
+    csharp: [{ 'tests/ATests.cs': 'public class ATests {\n  [Fact]\n  public void Adds() { Assert.Equal(2, 1 + 1); }\n  [Fact(Skip = "later")]\n  public void Later() {}\n  [Theory]\n  public void Many(int a) { Assert.True(a > 0); }\n}\n' }, [3, 1, 0, 2]],
+    elixir: [{ 'test/a_test.exs': 'test "adds" do\n  assert 1 + 1 == 2\nend\n' }, [1, 0, 0, 1]],
+    swift: [{ 'Tests/ATests.swift': '@Test func adds() { #expect(1 + 1 == 2) }\nfunc old() { XCTAssertEqual(1, 1) }\n' }, [1, 0, 0, 2]],
+    python: [{ 'tests/test_a.py': 'import pytest\n\ndef test_adds():\n    assert 1 + 1 == 2\n\n@pytest.mark.xfail\ndef test_later():\n    assert False\n' }, [2, 1, 0, 2]],
+  };
+  for (const [lang, [files, want]] of Object.entries(each)) assert.deepEqual(tripwires(files), want, `${lang}: [tests, skipped, silenced, assertions]`);
+});
+
 // ---- the same report: one message for a red suite, a failed setup and a missing dependency, and setup output thrown away
 test('run: a setup that fails is named in the report with its exit code and last line, at each ref it failed', () => {
   const d = tmpRepo([{ name: 'ok', cmd: 'true', extract: 'exit', direction: 'pass', guard: true }]);

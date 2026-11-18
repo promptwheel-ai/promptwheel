@@ -1248,18 +1248,36 @@ function run(argv) {
 // init, write a starter config so a newcomer isn't staring at a blank page
 // ---------------------------------------------------------------------------
 const LINT_CMD = 'npx eslint . -f unix 2>/dev/null | grep -c " error " || true';
+// The counting tripwires. They read CODE files only, and they read more than JavaScript and Python. Both came out of
+// replaying the contract on 408 real pull requests (proof-bench/outside-repos, 2026-11-18): a docs-only change was sent
+// back for "fewer tests" (the words "it (" in a sentence of a Markdown file), a removed dependency for "fewer assertions"
+// (the word assert in yarn.lock), zod's .describe( and a regex's .test( were counted as tests, and a Go, Rust or Ruby
+// repo had no test the counts could see. A contract signed before this keeps the commands it was signed with.
+const CODE_FILES = ['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'mts', 'cts', 'vue', 'svelte', 'py', 'go', 'rs', 'rb', 'java', 'kt', 'cs', 'swift', 'ex', 'exs'].map((e) => `--include="*.${e}"`).join(' ');
+const SKIP_DIRS = '--exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json';
+// grep prints each match alone (-o); `drop` takes out the matches that are not what the count means
+const tripwire = (re, drop) => `grep -rIoE "${re}" ${CODE_FILES} ${SKIP_DIRS} . 2>/dev/null${drop ? ` | grep -vE "${drop}"` : ''} | wc -l | tr -d " "`;
+// a test, by language. JavaScript: it( test( describe(, and the member calls the frameworks define (tap's t.test(, Deno.test(,
+// QUnit.test(); any other member call (.describe( on a schema, .test( on a regex) is matched WITH its dot and dropped.
+// Python and minitest: def test_. Go: func TestX( and a suite's method. Rust: #[test] and its kin. RSpec, Rails, Elixir:
+// it "..." and test "...". JUnit and Swift Testing: @Test. C#: [Fact] [Theory] [Test] [TestMethod] [TestCase].
+const TESTS_RE = String.raw`\b(t|Deno|QUnit)\.test ?\(|\.?\b(it|test|describe) ?\(|def test_|func (Test|Fuzz)[[:alnum:]_]*\(|func \([^)]*\) Test[[:alnum:]_]*\(|#\[([[:alnum:]_]+::)*(test|rstest|test_case)\b|\b(it|specify|scenario|test) [\"']|\bit \{|@(Test|ParameterizedTest|RepeatedTest)\b|\[(Fact|Theory|Test|TestMethod|TestCase|DataTestMethod)[](]`;
+const TESTS_DROP = String.raw`:\.(it|test|describe) ?\($`;
+const SKIPS_RE = String.raw`\.(skip|only) ?\(|\bx(it|test|describe) ?\(|@pytest\.mark\.(skip|xfail)|@unittest\.skip|\bt\.Skip(f|Now)?\(|#\[ignore|\bx(it|describe|context|specify) [\"']|@(Disabled|Ignore)\b|Skip ?= ?\"|\[Ignore[](]`;
+const SILENCED_RE = String.raw`eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa|# ?nosec|//nolint|#!?\[allow\(`;
+const ASSERTS_RE = String.raw`expect ?\(|\bassert|\bAssert\.[A-Z]|\bt\.(is|deepEqual|throws|truthy|falsy|not|ok|equal|same|match|notOk|rejects) ?\(|\bt\.(Error|Errorf|Fatal|Fatalf)\(|\brequire\.[A-Z][[:alnum:]]*\(|\bXCTAssert`;
 const PRESETS = {
   'antihack': { desc: 'catch reward-hacking: a target + tripwires; pairs with `run --detect-gaming` (source-only re-run)',
     metrics: [
       { name: 'tests_pass', cmd: '__TESTCMD__', extract: 'exit', direction: 'pass', guard: true },
       // the three counts of the tests themselves take a person's reason by the flag (never a trailer, which an agent can
       // write): a test removed or skipped on purpose is sometimes the job. Until 0.8.13 no reason reached them.
-      { name: 'test_count', cmd: 'grep -rIoE "\\b(it|test|describe) ?\\(|def test_" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false, allowable: 'flag' },
-      { name: 'skipped_tests', cmd: 'grep -rIoE "\\.(skip|only) ?\\(|\\bxit ?\\(|@pytest\\.mark\\.skip" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'test_count', cmd: tripwire(TESTS_RE, TESTS_DROP), extract: 'number', direction: 'up', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'skipped_tests', cmd: tripwire(SKIPS_RE), extract: 'number', direction: 'down', guard: true, gamingCheck: false, allowable: 'flag' },
       // a note when the change wins nothing (report: 'no-win'): on 340 real commits a blocking silencer count sent back 13 for a person adding
       // eslint-disable, #[allow] or //nolint in ordinary work, and in none of the 17 where it rose did anything else get better. Beside a win it still fails.
-      { name: 'suppressions', cmd: 'grep -rIoE "eslint-disable|@ts-(ignore|nocheck)|# ?type: ?ignore|# ?noqa|# ?nosec|//nolint|#!?\\[allow\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, report: 'no-win', gamingCheck: false },
-      { name: 'assertions', cmd: 'grep -rIoE "expect ?\\(|\\bassert|\\bt\\.(is|deepEqual|throws|truthy|falsy|not|ok) ?\\(" --exclude-dir=node_modules --exclude-dir=.promptwheel --exclude-dir=.git --exclude-dir=dist --exclude-dir=build --exclude-dir=coverage --exclude-dir=.next --exclude-dir=out --exclude-dir=lib-cov --exclude-dir=__pycache__ --exclude-dir=.pytest_cache --exclude-dir=target --exclude-dir=.venv --exclude-dir=venv --exclude=promptwheel.config.json . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false, allowable: 'flag' },
+      { name: 'suppressions', cmd: tripwire(SILENCED_RE), extract: 'number', direction: 'down', guard: true, report: 'no-win', gamingCheck: false },
+      { name: 'assertions', cmd: tripwire(ASSERTS_RE), extract: 'number', direction: 'up', guard: true, gamingCheck: false, allowable: 'flag' },
     ] },
   'no-ai-tells': { desc: 'opt-in: fail the gate if the em-dash count rises (an AI writing tell); some projects use them on purpose, so it is not a default',
     metrics: [
