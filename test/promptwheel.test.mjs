@@ -3108,9 +3108,10 @@ test('run: a fall in a counting tripwire says which file, and the two ways out',
   writeFileSync(join(d, 'test/a.test.js'), ONE_TEST); commitAll(d, 'drop the sub test');
   assert.deepEqual(runJson(d).rep.byCommit, ['test_count']);
   out = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']).out;
-  assert.match(out, /2\. if removing it is the job, end a commit message in this change with the line\n\s+Promptwheel-Allow: test_count: <why it had to go>/);
+  assert.match(out, /2\. only if what it tested was itself removed on purpose, end a commit message in this change with the line\n\s+Promptwheel-Allow: test_count: <what was removed, and who asked for it>/);
+  assert.match(out, /a test that fails on the new code is not a reason to remove it/);
   md = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--markdown']).out;
-  assert.match(md, /`Promptwheel-Allow: test_count: <why it had to go>`/); assert.doesNotMatch(md, /sawbuck-allow: <their reason>/);
+  assert.match(md, /`Promptwheel-Allow: test_count: <what was removed, and who asked for it>`/); assert.doesNotMatch(md, /sawbuck-allow: <their reason>/);
   rmSync(d, { recursive: true, force: true });
 });
 test('run: where the contract takes a reason from a commit, any commit of the change may carry it', () => {

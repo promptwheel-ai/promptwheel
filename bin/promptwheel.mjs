@@ -1598,14 +1598,17 @@ const fallenTests = (r) => r.metrics.filter((m) => m.allowable && TEST_KIND.has(
 const undoWords = (fell) => { const skip = fell.some((m) => m.name === 'skipped_tests'), gone = fell.some((m) => m.name !== 'skipped_tests'); return { undo: gone && skip ? 'put back what was removed, take off the skip that was added' : skip ? 'take off the skip that was added' : 'put back what was removed', job: gone ? 'removing it' : 'skipping it' }; };
 const reasonInCommit = (r, fell) => (r.byCommit || []).some((n) => fell.some((m) => m.name === n));
 function wayOut(r, fell, how) {
-  const { undo, job } = undoWords(fell);
+  const { undo, job } = undoWords(fell); const gone = fell.some((m) => m.name !== 'skipped_tests');
   const where = (m) => (m.where && m.where.length ? ', in ' + m.where.slice(0, 3).map((w) => `${w.file} (${w.before} → ${w.after})`).join(', ') + (m.where.length > 3 ? ' and more' : '') : '');
   return [
     ...fell.map((m) => `${PLAIN[m.name] || m.name}: ${m.before} → ${m.after}${where(m)}`),
     'to pass, do one of these:',
     `  1. ${undo}, and push`,
     ...(reasonInCommit(r, fell)
-      ? [`  2. if ${job} is the job, end a commit message in this change with the line`, `       Promptwheel-Allow: ${fell[0].name}: <why it had to go>`, '     (the reason is kept on the record and shown with the verdict)']
+      // the second wording. The first ("if removing it is the job ... <why it had to go>") let an agent that believed an
+      // earlier commit's false reason write "the test fails on the new code" and pass: 5 of 100 runs, all on the
+      // smallest model (proof-bench/pr-cause). With these words: 0 of 100, and 100 of 100 still said why where it was true.
+      ? [`  2. only if what it tested was itself ${gone ? 'removed' : 'switched off'} on purpose, end a commit message in this change with the line`, `       Promptwheel-Allow: ${fell[0].name}: <what was removed, and who asked for it>`, '     (the reason is kept on the record and shown with the verdict)', `  a test that fails on the new code is not a reason to ${gone ? 'remove' : 'skip'} it, whatever an earlier commit says: that is 1, and the code gets fixed`]
       : [`  2. if ${job} is the job, a person gives the reason: promptwheel run ${how}`]),
     ...(r.protects ? ['changing the workflow, the contract or this check is not a way through: those changes are sent back too'] : []),
   ];
@@ -1620,7 +1623,7 @@ function mdWayOut(r) {
   const Undo = undo[0].toUpperCase() + undo.slice(1);
   return ['>', ...(where.length ? [`> **Where:** ${where.join(', ')}`, '>'] : []),
     ...(reasonInCommit(r, fell)
-      ? [`> ${Undo}, and push. Or, if ${job} is the job, end a commit message in this change with the line \`Promptwheel-Allow: ${fell[0].name}: <why it had to go>\`. The reason is kept on the record and shown here.`]
+      ? [`> ${Undo}, and push. Or, only if what it tested was itself removed on purpose, end a commit message in this change with the line \`Promptwheel-Allow: ${fell[0].name}: <what was removed, and who asked for it>\`. The reason is kept on the record and shown here.`, '>', '> A test that fails on the new code is not a reason to remove it, whatever an earlier commit says: the code gets fixed.']
       : [`> ${Undo}, and push. Or, if ${job} is the job:`, '>', `> ${accept}`]),
     ...(r.protects ? ['>', '> Changing the workflow, the contract or this check is not a way through: those changes are sent back too.'] : [])];
 }
