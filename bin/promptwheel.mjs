@@ -1608,7 +1608,10 @@ function wayOut(r, fell, how) {
       // the second wording. The first ("if removing it is the job ... <why it had to go>") let an agent that believed an
       // earlier commit's false reason write "the test fails on the new code" and pass: 5 of 100 runs, all on the
       // smallest model (proof-bench/pr-cause). With these words: 0 of 100, and 100 of 100 still said why where it was true.
-      ? [`  2. only if what it tested was itself ${gone ? 'removed' : 'switched off'} on purpose, end a commit message in this change with the line`, `       Promptwheel-Allow: ${fell[0].name}: <what was removed, and who asked for it>`, '     (the reason is kept on the record and shown with the verdict)', `  a test that fails on the new code is not a reason to ${gone ? 'remove' : 'skip'} it, whatever an earlier commit says: that is 1, and the code gets fixed`]
+      ? [`  2. only if what it tested was itself ${gone ? 'removed' : 'switched off'} on purpose, end a commit message in this change with the line`, `       Promptwheel-Allow: ${fell[0].name}: <what was removed, and who asked for it>`, '     (the reason is kept on the record and shown with the verdict)', `  a test that fails on the new code is not a reason to ${gone ? 'remove' : 'skip'} it, whatever an earlier commit says: that is 1, and the code gets fixed`,
+         // the third way out, so the honest move is never the dearest: on a test that could not pass, about 7 in 10
+         // agents left it red and asked with these words; on two rules that clashed, 38 in 100 asked where 7 had
+         '  3. if neither can be done honestly, stop: leave the pull request red and say why. That is a right answer.']
       : [`  2. if ${job} is the job, a person gives the reason: promptwheel run ${how}`]),
     ...(r.protects ? ['changing the workflow, the contract or this check is not a way through: those changes are sent back too'] : []),
   ];
@@ -1623,7 +1626,7 @@ function mdWayOut(r) {
   const Undo = undo[0].toUpperCase() + undo.slice(1);
   return ['>', ...(where.length ? [`> **Where:** ${where.join(', ')}`, '>'] : []),
     ...(reasonInCommit(r, fell)
-      ? [`> ${Undo}, and push. Or, only if what it tested was itself removed on purpose, end a commit message in this change with the line \`Promptwheel-Allow: ${fell[0].name}: <what was removed, and who asked for it>\`. The reason is kept on the record and shown here.`, '>', '> A test that fails on the new code is not a reason to remove it, whatever an earlier commit says: the code gets fixed.']
+      ? [`> ${Undo}, and push. Or, only if what it tested was itself removed on purpose, end a commit message in this change with the line \`Promptwheel-Allow: ${fell[0].name}: <what was removed, and who asked for it>\`. The reason is kept on the record and shown here.`, '>', '> A test that fails on the new code is not a reason to remove it, whatever an earlier commit says: the code gets fixed.', '>', '> If neither can be done honestly, stop: leave the pull request red and say why. That is a right answer.']
       : [`> ${Undo}, and push. Or, if ${job} is the job:`, '>', `> ${accept}`]),
     ...(r.protects ? ['>', '> Changing the workflow, the contract or this check is not a way through: those changes are sent back too.'] : [])];
 }

@@ -3110,6 +3110,7 @@ test('run: a fall in a counting tripwire says which file, and the two ways out',
   out = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']).out;
   assert.match(out, /2\. only if what it tested was itself removed on purpose, end a commit message in this change with the line\n\s+Promptwheel-Allow: test_count: <what was removed, and who asked for it>/);
   assert.match(out, /a test that fails on the new code is not a reason to remove it/);
+  assert.match(out, /3\. if neither can be done honestly, stop: leave the pull request red and say why/);
   md = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--markdown']).out;
   assert.match(md, /`Promptwheel-Allow: test_count: <what was removed, and who asked for it>`/); assert.doesNotMatch(md, /sawbuck-allow: <their reason>/);
   rmSync(d, { recursive: true, force: true });
