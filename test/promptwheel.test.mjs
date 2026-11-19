@@ -3071,6 +3071,67 @@ test('init: the counting tripwires read Go, Rust, Ruby, Java, C#, Elixir, Swift 
   for (const [lang, [files, want]] of Object.entries(each)) assert.deepEqual(tripwires(files), want, `${lang}: [tests, skipped, silenced, assertions]`);
 });
 
+// ---- the verdict for whoever repairs it, a person or a fix run. Found by reading how agent pipelines are built
+// (proof-bench/outside-repos, section 8): most merged agent pull requests carry no word from a person, and a reject
+// that names its cause is what a fix run acts on. Until now a fall in tests said neither where nor what to do.
+const fallRepo = (allowable) => {
+  const d = mkdtempSync(join(tmpdir(), 'pw-fall-'));
+  for (const a of [['init', '-q'], ['config', 'user.name', 't'], ['config', 'user.email', 't@t'], ['config', 'commit.gpgsign', 'false']]) execFileSync('git', a, { cwd: d });
+  writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'node --test' } }));
+  mkdirSync(join(d, 'test'));
+  writeFileSync(join(d, 'test/a.test.js'), "const t = require('node:test');\nt.test('add', () => {});\nt.test('sub', () => {});\n");
+  writeFileSync(join(d, 'test/b.test.js'), "const t = require('node:test');\nt.test('mul', () => {});\n");
+  assert.equal(pw(d, ['init', '--no-agent-block']).code, 0);
+  const f = join(d, 'promptwheel.config.json'); const c = JSON.parse(readFileSync(f, 'utf8'));
+  c.metrics = c.metrics.filter((m) => ['test_count', 'skipped_tests', 'assertions'].includes(m.name)).map((m) => ({ ...m, allowable }));
+  writeFileSync(f, JSON.stringify(c, null, 2)); commitAll(d, 'the contract');
+  return d;
+};
+const ONE_TEST = "const t = require('node:test');\nt.test('add', () => {});\n";
+test('run: a fall in a counting tripwire says which file, and the two ways out', () => {
+  let d = fallRepo('flag');
+  writeFileSync(join(d, 'test/a.test.js'), ONE_TEST); commitAll(d, 'drop the sub test');
+  const r = runJson(d);
+  assert.equal(r.code, 1);
+  assert.deepEqual(r.rep.metrics.find((x) => x.name === 'test_count').where, [{ file: 'test/a.test.js', before: 2, after: 1 }]);
+  assert.equal(r.rep.byCommit, undefined, 'this contract takes no reason from a commit');
+  let out = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']).out;
+  assert.match(out, /fewer tests: 3 → 2, in test\/a\.test\.js \(2 → 1\)/);
+  assert.match(out, /1\. put back what was removed, and push/);
+  assert.match(out, /2\. if removing it is the job, a person gives the reason: promptwheel run --allow "<reason>"/);
+  assert.doesNotMatch(out, /Promptwheel-Allow: test_count/);
+  let md = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--markdown']).out;
+  assert.match(md, /\*\*Where:\*\* `test\/a\.test\.js` \(2 → 1\)/); assert.match(md, /Put back what was removed, and push/);
+  assert.match(md, /someone with write access who did not open this PR comments `sawbuck-allow: <their reason>`/);
+  rmSync(d, { recursive: true, force: true });
+  d = fallRepo(true);
+  writeFileSync(join(d, 'test/a.test.js'), ONE_TEST); commitAll(d, 'drop the sub test');
+  assert.deepEqual(runJson(d).rep.byCommit, ['test_count']);
+  out = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']).out;
+  assert.match(out, /2\. if removing it is the job, end a commit message in this change with the line\n\s+Promptwheel-Allow: test_count: <why it had to go>/);
+  md = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--markdown']).out;
+  assert.match(md, /`Promptwheel-Allow: test_count: <why it had to go>`/); assert.doesNotMatch(md, /sawbuck-allow: <their reason>/);
+  rmSync(d, { recursive: true, force: true });
+});
+test('run: where the contract takes a reason from a commit, any commit of the change may carry it', () => {
+  const twoCommits = (d) => {
+    writeFileSync(join(d, 'test/a.test.js'), ONE_TEST);
+    execFileSync('git', ['commit', '-qam', 'drop the sub test\n\nPromptwheel-Allow: test_count: the rule it checked went'], { cwd: d });
+    writeFileSync(join(d, 'notes.txt'), 'later\n'); commitAll(d, 'a later commit that says nothing');
+    const r = spawnSync('node', [ENGINE, 'run', '--base', 'HEAD~2', '--head', 'HEAD', '--json', '--no-record'], { cwd: d, encoding: 'utf8' });
+    return { code: r.status, rep: JSON.parse(r.stdout) };
+  };
+  let d = fallRepo(true);
+  let r = twoCommits(d);
+  assert.equal(r.code, 0, JSON.stringify(r.rep.allowed));
+  assert.ok(r.rep.allowed.cleared.includes('test_count')); assert.match(r.rep.allowed.reason, /the rule it checked went/);
+  rmSync(d, { recursive: true, force: true });
+  d = fallRepo('flag');
+  r = twoCommits(d);
+  assert.equal(r.code, 1, 'a contract that asks a person takes no reason from any commit');
+  rmSync(d, { recursive: true, force: true });
+});
+
 // ---- the same report: one message for a red suite, a failed setup and a missing dependency, and setup output thrown away
 test('run: a setup that fails is named in the report with its exit code and last line, at each ref it failed', () => {
   const d = tmpRepo([{ name: 'ok', cmd: 'true', extract: 'exit', direction: 'pass', guard: true }]);

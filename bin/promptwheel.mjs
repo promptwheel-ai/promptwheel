@@ -922,11 +922,36 @@ const TEST_KIND = new Set(['tests_pass', 'test_count', 'skipped_tests', 'asserti
 const kindOf = (label) => (TEST_KIND.has(label) ? 'the tests' : label);
 const kindsIn = (labels) => new Set([...labels].map(kindOf)).size;
 const reasonNames = (reason, label) => new RegExp(`(^|[^A-Za-z0-9_-])${label.replace(/^mandate:/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_-])`, 'i').test(reason);
-function readAllowTrailer(repo, ref) {
-  let msg = '';
-  try { msg = execFileSync('git', ['log', '-1', '--no-show-signature', '--format=%B', ref], { cwd: repo, encoding: 'utf8' }); } catch { return null; }
-  const m = msg.match(/^[ \t]*(?:Promptwheel-Allow|Sawbuck-Allow)[ \t]*:[ \t]*(\S.*?)[ \t]*$/im);
-  return m && m[1].trim() ? { reason: m[1].trim().slice(0, 300) } : null;
+// A reason written in a commit. Every commit of the change is read (base..head), not the last one alone: a fix run
+// that adds a commit must not lose the reason an earlier commit of the same change gave. With no base, the head commit.
+function readAllowTrailer(repo, ref, base) {
+  const log = (args) => { try { return execFileSync('git', ['log', '--no-show-signature', '--format=%B', ...args], { cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return ''; } };
+  const msg = (base && log([`${base}..${ref}`])) || log(['-1', ref]);
+  const found = [...msg.matchAll(/^[ \t]*(?:Promptwheel-Allow|Sawbuck-Allow)[ \t]*:[ \t]*(\S.*?)[ \t]*$/gim)].map((m) => m[1].trim()).filter(Boolean);
+  return found.length ? { reason: [...new Set(found)].join(' | ').slice(0, 300) } : null;
+}
+
+// Which files a fallen count fell in, for whoever repairs it. Only for the tripwires `init` writes (a grep that prints
+// every match, counted): the same grep, counted by file, at both refs. Refs mode only: it checks out two commits.
+const TRIP_TAIL = /\|\s*wc -l\s*\|\s*tr -d " "\s*$/;
+function tripwireWhere(repo, base, head, def) {
+  if (!def || typeof def.cmd !== 'string' || !/^grep -rIoE /.test(def.cmd) || !TRIP_TAIL.test(def.cmd)) return null;
+  const byFile = def.cmd.replace(TRIP_TAIL, '| cut -d: -f1 | sort | uniq -c');
+  const at = (ref) => {
+    const wt = mkdtempSync(join(tmpBase(repo), tmpPrefix(repo, 'promptwheel')));
+    try {
+      addWorktree(repo, wt, ref);
+      const out = execSync(byFile, { cwd: wt, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 * 1024 * 1024, timeout: 120000 });
+      return Object.fromEntries(out.split('\n').map((l) => l.match(/^\s*(\d+)\s+(.+)$/)).filter(Boolean).map((x) => [x[2].replace(/^\.\//, ''), +x[1]]));
+    } catch { return null; } finally { try { git(['worktree', 'remove', '--force', wt], repo); } catch { rmSync(wt, { recursive: true, force: true }); } }
+  };
+  const b = at(base), a = at(head);
+  if (!b || !a) return null;
+  const down = def.direction === 'down';
+  const worse = [...new Set([...Object.keys(b), ...Object.keys(a)])].map((file) => ({ file, before: b[file] || 0, after: a[file] || 0 }))
+    .filter((x) => (down ? x.after > x.before : x.after < x.before))
+    .sort((x, y) => Math.abs(y.after - y.before) - Math.abs(x.after - x.before) || (x.file < y.file ? -1 : 1));
+  return worse.length ? worse.slice(0, 5) : null;
 }
 
 // A change is judged by the gate that was in force before it (`baseGate`: the config at base, or the
@@ -1158,7 +1183,7 @@ function gate(repo, opts) {
   // commit message, so where the threat is the agent itself only the --allow flag counts. The base
   // ref's contract is read too, so an agent cannot turn trailers back on in the change it is making.
   const trailersOff = () => !!process.env.PROMPTWHEEL_NO_ALLOW_TRAILER || cfg.allowTrailer === false || ((gateDefAtRef(repo, base) || {}).scalars || {}).allowTrailer === false;
-  const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300), by: 'flag' } : (opts.working || trailersOff() ? null : readAllowTrailer(repo, head));
+  const allow = opts.allow ? { reason: String(opts.allow).slice(0, 300), by: 'flag' } : (opts.working || trailersOff() ? null : readAllowTrailer(repo, head, base));
   // mandates: a protected-path hard rule fails the gate no matter what the metrics say.
   // The base ref's mandates count too (resolved through `extends` by gateDefAtRef), so a change
   // cannot clear a mandate by deleting it in the same diff that violates it.
@@ -1200,6 +1225,9 @@ function gate(repo, opts) {
     if (reach.size) allowed = { reason: allow.reason, cleared: [...cleared] };
   }
   for (const m of guards) if (!m.allowed) m.allowable = true;   // failed, and a declared reason would clear it: say so in the report
+  // for whoever repairs it, a person or a fix run: which files a fallen count fell in, and whether a reason in a commit is taken
+  if (!opts.working) for (const m of guards) if (!m.allowed && m.status === 'regressed') { const w = tripwireWhere(repo, base, head, (cfg.metrics || []).find((c) => c && c.name === m.name)); if (w) m.where = w; }
+  const byCommit = opts.working || trailersOff() ? [] : guards.filter((m) => !m.allowed && mode.get(m.name) === true).map((m) => m.name);
   const mandated = mandateViolations.length > 0;
   const verdict = deriveVerdict(metrics, gateInfo, mandated);
   // what was measured in words, and one thing no diff shows: a variable in this environment that can change which
@@ -1214,6 +1242,8 @@ function gate(repo, opts) {
     ...(gateInfo ? { gate: gateInfo } : {}),
     ...(allowed ? { allowed } : {}),
     ...(allowable.length ? { allowable } : {}),
+    ...(byCommit.length ? { byCommit } : {}),
+    ...(Array.isArray(cfg.mandates) && cfg.mandates.length ? { protects: cfg.mandates.length } : {}),
   };
   // a setup command that failed, at the ref it failed at: the usual reason a metric could not be measured
   const sb = setupFails.get(before), sa = setupFails.get(after);
@@ -1493,7 +1523,12 @@ function printHuman(r) {
     const takes = r.mandates.filter((md) => md.allowable).map((md) => `"${md.name}"`);
     if (takes.length && !left.length) console.log(`  intentional? ${takes.join(', ')} ${takes.length > 1 ? 'accept' : 'accepts'} a person's declared reason: promptwheel run ${how} passes with the reason on the record${each}`);
     if (takes.length < r.mandates.length) console.log(`  ${takes.length ? 'any other' : 'a'} mandate is a hard rule; if the change is truly intended, retire the mandate in promptwheel.config.json in a change of its own first (a tracked, tamper-evident change), do not work around it`);
-  } else if (r.verdict === 'fail' && r.metrics.some((m) => m.allowable) && !left.length) console.log(`  intentional? this guard accepts a person's declared reason: promptwheel run ${how} passes with the reason on the record${each || ` (${r.metrics.filter((m) => m.allowable).map((m) => m.name).join(', ')})`}`);
+  } else if (r.verdict === 'fail' && r.metrics.some((m) => m.allowable) && !left.length) {
+    // a pull request's reader is often a fix run: say where the tests fell and the two ways out. A session keeps its own words.
+    const fell = r.mode === 'refs' ? fallenTests(r) : [];
+    if (fell.length) for (const l of wayOut(r, fell, how)) console.log('  ' + l);
+    else console.log(`  intentional? this guard accepts a person's declared reason: promptwheel run ${how} passes with the reason on the record${each || ` (${r.metrics.filter((m) => m.allowable).map((m) => m.name).join(', ')})`}`);
+  }
   else if (r.verdict === 'fail') console.log('  intentional? loosen that guard locally in promptwheel.config.json (guard:false, or override the inherited metric by name)');
   if (r.allowed && r.allowed.cleared.length) console.log(`  ✓ allowed: ${r.allowed.cleared.join(', ')} acknowledged as an intentional change, recorded (Promptwheel-Allow: ${r.allowed.reason})`);
   if (left.length) console.log(`  not let through: ${left.join(', ')}. A reason lets through only what it names when there is more than one thing. To accept them all: promptwheel run ${how}`);
@@ -1557,6 +1592,38 @@ export function allowDecision(comments, opts = {}) {
 }
 export function allowFromComments(comments, opts) { return allowDecision(comments, opts).reason; }
 
+// What a fallen count of the tests says to whoever repairs it, a person or a fix run: where it fell, and the two ways
+// out. A reject that names its cause is what a fix run acts on; "a guarded metric regressed" names none.
+const fallenTests = (r) => r.metrics.filter((m) => m.allowable && TEST_KIND.has(m.name) && m.name !== 'tests_pass');
+const undoWords = (fell) => { const skip = fell.some((m) => m.name === 'skipped_tests'), gone = fell.some((m) => m.name !== 'skipped_tests'); return { undo: gone && skip ? 'put back what was removed, take off the skip that was added' : skip ? 'take off the skip that was added' : 'put back what was removed', job: gone ? 'removing it' : 'skipping it' }; };
+const reasonInCommit = (r, fell) => (r.byCommit || []).some((n) => fell.some((m) => m.name === n));
+function wayOut(r, fell, how) {
+  const { undo, job } = undoWords(fell);
+  const where = (m) => (m.where && m.where.length ? ', in ' + m.where.slice(0, 3).map((w) => `${w.file} (${w.before} → ${w.after})`).join(', ') + (m.where.length > 3 ? ' and more' : '') : '');
+  return [
+    ...fell.map((m) => `${PLAIN[m.name] || m.name}: ${m.before} → ${m.after}${where(m)}`),
+    'to pass, do one of these:',
+    `  1. ${undo}, and push`,
+    ...(reasonInCommit(r, fell)
+      ? [`  2. if ${job} is the job, end a commit message in this change with the line`, `       Promptwheel-Allow: ${fell[0].name}: <why it had to go>`, '     (the reason is kept on the record and shown with the verdict)']
+      : [`  2. if ${job} is the job, a person gives the reason: promptwheel run ${how}`]),
+    ...(r.protects ? ['changing the workflow, the contract or this check is not a way through: those changes are sent back too'] : []),
+  ];
+}
+function mdWayOut(r) {
+  if (!r.explained.some((x) => !x.noted && x.allowable)) return [];
+  const accept = `To accept this, someone with write access who did not open this PR comments \`sawbuck-allow: ${allowNames(r)}<their reason>\` on it, and the check is run again.${allowNames(r) ? ' A reason lets through only what it names when there is more than one thing.' : ''}`;
+  const fell = fallenTests(r);
+  if (!fell.length) return ['>', `> ${accept}`];
+  const { undo, job } = undoWords(fell);
+  const where = fell.flatMap((m) => (m.where || []).slice(0, 3).map((w) => `\`${w.file}\` (${w.before} → ${w.after})`));
+  const Undo = undo[0].toUpperCase() + undo.slice(1);
+  return ['>', ...(where.length ? [`> **Where:** ${where.join(', ')}`, '>'] : []),
+    ...(reasonInCommit(r, fell)
+      ? [`> ${Undo}, and push. Or, if ${job} is the job, end a commit message in this change with the line \`Promptwheel-Allow: ${fell[0].name}: <why it had to go>\`. The reason is kept on the record and shown here.`]
+      : [`> ${Undo}, and push. Or, if ${job} is the job:`, '>', `> ${accept}`]),
+    ...(r.protects ? ['>', '> Changing the workflow, the contract or this check is not a way through: those changes are sent back too.'] : [])];
+}
 function renderMarkdown(r) {
   const icon = r.verdict === 'pass' ? '✅' : r.verdict === 'gamed' ? '🚩' : r.verdict === 'inconclusive' ? '🟡' : '❌';
   const sIcon = { improved: '🟢', regressed: '🔴', unchanged: '⚪', inconclusive: '🟡', unmeasurable: '⚫' };
@@ -1571,7 +1638,7 @@ function renderMarkdown(r) {
     `\`${r.base} → ${r.head}\` · ${r.mode} mode${r.repeat > 1 ? ` · ×${r.repeat}` : ''}`,
     '',
     ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Protected path touched:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : md.edited ? ' (edited in this same change; the version before the change stays in force for the change that edits it)' : ''}`).join('\n'), ''] : []),
-    ...(r.explained ? [...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...(r.explained.some((x) => !x.noted && x.allowable) ? ['>', `> To accept this, someone with write access who did not open this PR comments \`sawbuck-allow: ${allowNames(r)}<their reason>\` on it, and the check is run again.${allowNames(r) ? ' A reason lets through only what it names when there is more than one thing.' : ''}`] : []), ''] : []),
+    ...(r.explained ? [...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...mdWayOut(r), ''] : []),
     '| metric | before | after | Δ | status | confidence |',
     '|---|--:|--:|--:|---|---|',
     rows,
