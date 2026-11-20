@@ -1,5 +1,7 @@
 # PromptWheel
 
+PromptWheel is the engine inside Sawbuck. If you came for the tool, start at [github.com/sawbuck-ai/sawbuck](https://github.com/sawbuck-ai/sawbuck).
+
 [![CI](https://github.com/promptwheel-ai/promptwheel/actions/workflows/ci.yml/badge.svg)](https://github.com/promptwheel-ai/promptwheel/actions/workflows/ci.yml) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) ![Node ≥18](https://img.shields.io/badge/node-%E2%89%A518-brightgreen) ![deps: zero](https://img.shields.io/badge/deps-zero-blue)
 
 **A deterministic, zero-LLM check for your coding loop.** A green test should mean your agent *fixed the code*, not that it edited the test to match the bug. PromptWheel re-proves every win from the agent's source edits alone, so a test that went from red to green because the test, grader or declared config changed reads `GAMED`. The code being checked never gets to grade itself.
