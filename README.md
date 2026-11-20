@@ -148,7 +148,7 @@ writes `promptwheel.lock.json` (the shape of the repo, from `promptwheel lock`) 
 
 ## In CI and in Claude Code
 
-**GitHub Action.** Drop this in your repo. It fails the check on a guarded regression, a gamed win, or an inconclusive gate, and says why in one comment on the pull request, which it edits in place. A pull request that passes gets no comment:
+**GitHub Action.** Drop this in your repo. It fails the check on a guarded regression, a gamed win, or an inconclusive gate, and says why in one comment on the pull request, which it edits in place. A pull request that passes with nothing to note gets no comment:
 
 ```yaml
 # .github/workflows/promptwheel.yml

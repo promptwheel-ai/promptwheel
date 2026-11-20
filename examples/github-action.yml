@@ -2,7 +2,7 @@
 # a promptwheel.config.json at the root customizes what is measured).
 # Fails the check on a guarded regression beyond the noise band, a GAMED win (exit 2), or an
 # inconclusive gate (exit 3), and says why in one comment on the pull request, edited in place.
-# A pull request that passes gets no comment.
+# A pull request that passes with nothing to note gets no comment.
 name: PromptWheel
 
 on:
