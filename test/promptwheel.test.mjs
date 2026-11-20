@@ -3589,3 +3589,26 @@ test('the report says when the opener\'s own comment counts: the contract at the
   const r = gateRun(d); assert.equal(r.rep.openerCounts, true); assert.equal(conformsToContract(r.rep).ok, true);
   rmSync(d, { recursive: true, force: true });
 });
+// Found while testing sawbuck contract --solo (2026-11-20): a changed workflow file is the most common send-back on
+// ordinary work (proof-bench/outside-repos: over half), and the comment for it named the path and never said how a
+// person accepts it on a pull request. The way through was printed only under a count that fell.
+test('a protected path sent back on a pull request says how to accept it; one that takes no reason says what a person does first', () => {
+  const soft = { name: 'workflows-frozen', reason: 'workflows run with the repository secrets', files: ['.github/workflows/ci.yml'], allowable: 'flag' };
+  const hard = { name: 'registry-config-frozen', reason: 'registry and token configuration decides where packages come from', files: ['.npmrc'] };
+  let md = renderMarkdown(prRep({ verdict: 'fail', mandates: [soft], allowable: ['mandate:workflows-frozen'], protects: 9 }));
+  assert.match(md, /> ⛔ \*\*Protected path touched:\*\* `workflows-frozen`[^\n]*\n>\n> To accept this, someone with write access who did not open this PR comments `sawbuck-allow: <their reason>` on it, and the check is run again\./);
+  assert.ok(md.indexOf('To accept this') < md.indexOf('<details>'), 'in view, not in the fold');
+  md = renderMarkdown(prRep({ verdict: 'fail', mandates: [soft], allowable: ['mandate:workflows-frozen'], openerCounts: true }));
+  assert.match(md, /> To accept this, comment `sawbuck-allow: <the reason>` on this PR, and the check is run again\. One person works in this repo/);
+  md = renderMarkdown(prRep({ verdict: 'fail', mandates: [hard] }));
+  assert.doesNotMatch(md, /sawbuck-allow/, 'a path that takes no reason is not offered one');
+  assert.match(md, /> This protected path takes no reason\. To change it on purpose, a person first takes its rule out of `promptwheel\.config\.json`, in a change of its own\./);
+  md = renderMarkdown(prRep({ verdict: 'fail', mandates: [soft, hard], allowable: ['mandate:workflows-frozen'] }));
+  assert.match(md, /sawbuck-allow: <their reason>/); assert.match(md, /> `registry-config-frozen` takes no reason\. To change it on purpose/);
+  // with a count that fell too, the way through is said once, and names each thing
+  md = renderMarkdown(sentBack({ mandates: [soft], allowable: ['test_count', 'mandate:workflows-frozen'] }));
+  assert.equal(md.match(/To accept this/g).length, 1); assert.match(md, /`sawbuck-allow: test_count, workflows-frozen: <their reason>`/);
+  // a reason was given and let it through: nothing is asked
+  md = renderMarkdown(prRep({ allowed: { reason: 'the step is harmless (approved by pat)', cleared: ['mandate:workflows-frozen'] }, allowable: ['mandate:workflows-frozen'] }));
+  assert.doesNotMatch(md, /To accept this/);
+});

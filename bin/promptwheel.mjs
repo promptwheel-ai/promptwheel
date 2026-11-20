@@ -1771,6 +1771,17 @@ const SAWBUCK_REPO = 'https://github.com/sawbuck-ai/sawbuck';
 const MD_FOOT = `<sub>[Sawbuck](${SAWBUCK_REPO}) checks what a change did to the tests. No model reads your code.</sub>`;
 const MD_HEADLINE = { pass: 'passes', fail: 'sent back', gamed: 'sent back', inconclusive: 'could not measure' };
 const MD_ICON = { pass: '✅', fail: '❌', gamed: '🚩', inconclusive: '🟡' };
+// A protected path that was touched, for a reader on a pull request: how a person accepts it, said once (under a
+// count that fell when there is one, else here). A path that takes no reason is not offered one. Until 0.8.15 the
+// comment named the path and stopped there, and a changed workflow is the most common send-back on ordinary work.
+function mdPathWayOut(r) {
+  const soft = r.mandates.filter((md) => md.allowable), hard = r.mandates.filter((md) => !md.allowable);
+  const saidBelow = !!(r.explained && mdWayOut(r).length);
+  return [
+    ...(soft.length && !saidBelow ? ['>', `> ${mdAccept(r)}${allowNames(r) ? ' A reason lets through only what it names when there is more than one thing.' : ''}`] : []),
+    ...(hard.length ? ['>', `> ${r.mandates.length > 1 ? hard.map((md) => `\`${md.name}\``).join(', ') : 'This protected path'} ${hard.length > 1 ? 'take' : 'takes'} no reason. To change it on purpose, a person first takes its rule out of \`promptwheel.config.json\`, in a change of its own.`] : []),
+  ];
+}
 function renderMarkdown(r, o = {}) {
   const sIcon = { improved: '🟢', regressed: '🔴', unchanged: '⚪', inconclusive: '🟡', unmeasurable: '⚫' };
   const rows = r.metrics.map((m) => {
@@ -1788,7 +1799,7 @@ function renderMarkdown(r, o = {}) {
   return [
     `### ${would ? '✋' : MD_ICON[r.verdict] || '❌'} Sawbuck${would ? ', comment only: this would have been sent back' : `: ${MD_HEADLINE[r.verdict] || r.verdict}`}`,
     ...(would ? ['This check only comments here. It never fails the job.'] : []),
-    ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Protected path touched:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : md.edited ? ' (edited in this same change; the version before the change stays in force for the change that edits it)' : ''}`).join('\n')] : []),
+    ...(r.mandates ? [[...r.mandates.map((md) => `> ⛔ **Protected path touched:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : md.edited ? ' (edited in this same change; the version before the change stays in force for the change that edits it)' : ''}`), ...mdPathWayOut(r)].join('\n')] : []),
     ...(r.explained ? [[...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...mdWayOut(r)].join('\n')] : []),
     ...(inView ? [said] : []),
     ...(r.gate && r.gate.weakened ? [`> 🚩 **Gate weakened:** ${r.gate.weakened.map((w) => `\`${w.name}\` ${w.change === 'guard-removed' ? 'removed' : w.change === 'guard-edited' ? 'edited' : w.change === 'measurement-edited' ? 'measured another way (setup, env or linked dirs)' : 'disabled'} (would have ${wouldHave(w.status)} at head)`).join('; ')}. The pass was bought by changing the gate, not by earning it.`] : []),
