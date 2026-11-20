@@ -3179,7 +3179,9 @@ test('run: the missing-dependency hint names the file, not the bare error code a
   writeFileSync(join(d, 'note.txt'), 'x'); commitAll(d, 'b');
   const m = runJson(d).rep.metrics.find((x) => x.name === 'tests_pass');
   assert.equal(m.cause, 'missing-dependency');
-  assert.match(m.detail, /^Cannot find module .*not-here\.mjs.* imported from .*run\.mjs/, m.detail);
+  // the hint is cut at 200 characters, and where the temp folder's path is long (a Mac's, a sandbox's) the cut falls
+  // before the importing file. The file that is missing comes first, and that is what the hint is for.
+  assert.match(m.detail, /^Cannot find module .*not-here\.mjs/, m.detail);
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -3577,7 +3579,12 @@ test('the Action: comments read once, one comment made or edited, comment-only n
   assert.match(action, /pr-comment --report "\$RUNNER_TEMP\/promptwheel\.json"/);
   assert.match(action, /gh api -X PATCH "repos\/\$REPO\/issues\/comments\/\$\{PLAN#update:\}"/, 'an earlier comment is edited in place');
   assert.match(action, /KEY: \$\{\{ github\.workflow \}\}\/\$\{\{ github\.job \}\}/);
-  assert.equal((action.match(/gh api --paginate/g) || []).length, 1, 'the comments are read once, for the approval and for the check\'s own earlier comment');
+  // Two pushes close together: the run for the first posts while the run for the second is still measuring. A list
+  // taken when the job began does not hold that comment, and the second run posted beside it (found by letting the
+  // stand-in for gh add a comment between the steps: 2 comments where 1 is allowed).
+  assert.equal((action.match(/gh api --paginate/g) || []).length, 2, 'read for the approval when the job begins, and again just before the check speaks');
+  assert.ok(action.indexOf('promptwheel-comments-now.jsonl') > action.indexOf('promptwheel.mjs" run'), 'the second reading comes after the measuring');
+  assert.match(action, /pr-comment [\s\S]*--comments "\$RUNNER_TEMP\/promptwheel-comments-now\.jsonl"/, 'and it is the one the comment is planned from');
   assert.match(action, /if \[ "\$COMMENT_ONLY" = true \]; then[\s\S]*exit 0/, 'comment-only: the last step passes whatever the verdict');
   assert.doesNotMatch(action, /gh pr comment "\$\{\{/, 'no comment is posted without the plan');
 });

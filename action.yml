@@ -38,9 +38,8 @@ runs:
         node-version: '20'
 
     # Runs straight from this action's own checkout: no npm install, no build.
-    # The pull request's comments, read once: a person's approval is looked for in them, and this check's own earlier
-    # comment, which it edits in place. The endpoint lists oldest first, so every page is read: one call would stop
-    # at the oldest 100.
+    # The pull request's comments, read when the job begins: a person's approval is looked for in them. The endpoint
+    # lists oldest first, so every page is read: one call would stop at the oldest 100.
     - id: comments
       if: ${{ github.event_name == 'pull_request' }}
       shell: bash
@@ -65,10 +64,16 @@ runs:
 
     # The check, then what to say about it. pr-comment decides: nothing, a new comment, or an edit of the one this
     # check already left (KEY names the workflow and job, so two workflows that use this action each keep their own).
+    # The comments are read a second time just before that: the run for an earlier push may have posted while this
+    # one was measuring, and its comment is the one to edit, not one to post beside.
     # The whole report goes to the job summary on every run.
     - id: gate
       shell: bash
       env:
+        GH_TOKEN: ${{ github.token }}
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        EVENT: ${{ github.event_name }}
         ALLOW: ${{ inputs.allow || steps.approval.outputs.allow }}
         KEY: ${{ github.workflow }}/${{ github.job }}
         COMMENT: ${{ inputs.comment }}
@@ -82,8 +87,12 @@ runs:
         code=$?
         cat "$RUNNER_TEMP/promptwheel.err" >&2
         echo "exit=$code" >> "$GITHUB_OUTPUT"
+        if [ "$EVENT" = pull_request ]; then
+          gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" --jq '.[]' > "$RUNNER_TEMP/promptwheel-comments-now.jsonl" 2>/dev/null \
+            || cp "$RUNNER_TEMP/promptwheel-comments.jsonl" "$RUNNER_TEMP/promptwheel-comments-now.jsonl" 2>/dev/null
+        fi
         plan=$(node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" pr-comment --report "$RUNNER_TEMP/promptwheel.json" --exit "$code" --error "$RUNNER_TEMP/promptwheel.err" \
-          --comments "$RUNNER_TEMP/promptwheel-comments.jsonl" --key "$KEY" --note "$RUNNER_TEMP/promptwheel-allow-note.md" \
+          --comments "$RUNNER_TEMP/promptwheel-comments-now.jsonl" --key "$KEY" --note "$RUNNER_TEMP/promptwheel-allow-note.md" \
           --comment "$COMMENT" --inconclusive "$INCONCLUSIVE" --comment-only "$COMMENT_ONLY" \
           --body "$RUNNER_TEMP/promptwheel.md" --summary "$GITHUB_STEP_SUMMARY")
         echo "plan=${plan:-none}" >> "$GITHUB_OUTPUT"
