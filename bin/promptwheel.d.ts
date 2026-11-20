@@ -252,6 +252,8 @@ export interface Report {
   allowed?: AllowedRecord;
   /** What a declared reason can let through in this run, by name (metric names, `'gate'`, `'mandate:<name>'`). One thing needs no name; with more than one, a reason lets through only the ones it names as whole words. */
   allowable?: string[];
+  /** `true` when the contract at the base holds `"allowFromAuthor": true`: on a pull request the comment of the account that opened it counts. */
+  openerCounts?: true;
   /** Present only when the `setup` command failed: at which ref, with what exit code, and its last output line. */
   setup?: { base?: SetupFailure; head?: SetupFailure };
   provenance: Provenance;
@@ -345,8 +347,48 @@ export declare function evaluate(
   repeat: number,
 ): Evaluation;
 
-/** Render a report as the PR-comment markdown the GitHub Action posts. */
-export declare function renderMarkdown(report: Report): string;
+/**
+ * Render a report as the markdown the GitHub Action posts: what a reader has to do in view, the table of numbers
+ * folded away (`fold: false` leaves it open, as the job summary has it). `commentOnly` with `wouldFail` gives the
+ * comment-only wording; `note` is added as it is.
+ */
+export declare function renderMarkdown(report: Report, options?: { fold?: boolean; commentOnly?: boolean; wouldFail?: boolean; note?: string }): string;
+
+/** What `commentPlan` decided: nothing, a new comment, or an edit of the check's own earlier comment (`id`). */
+export interface CommentPlan {
+  action: 'none' | 'create' | 'update';
+  /** With `update`: the id of the comment to edit. */
+  id?: number;
+  /** The comment, with its hidden first line; `''` for `none`. */
+  body: string;
+  /** The whole report, unfolded, for the job summary. Present on every run. */
+  summary: string;
+  /** The job would fail on this run (an inconclusive verdict counts only where `inconclusive` is not `pass`). */
+  wouldFail: boolean;
+}
+
+/**
+ * What a pull-request check does with its comment. One comment, known by a hidden first line built from `key` and
+ * by its author (the Actions bot), edited in place. It speaks when the job would fail, when a reason was used, when
+ * a file lost tests or assertions while the total held, when the check's own definition changed, or when the run
+ * printed no report. A plain pass says nothing; an earlier comment is then edited to one short line. `comment`:
+ * `'true'` (the default), `'always'` (the whole report every time) or `'false'`. Pure: nothing is posted here.
+ */
+export declare function commentPlan(input?: {
+  report?: Report | null;
+  /** The run's exit code. */
+  exit?: number | string;
+  /** What the run printed on stderr, for a run with no report. */
+  error?: string;
+  /** The pull request's comments, as GitHub's API returns them. */
+  comments?: unknown[];
+  key?: string;
+  /** A line to add when the job would fail (the approval that was not counted). */
+  note?: string;
+  comment?: 'true' | 'always' | 'false';
+  inconclusive?: 'fail' | 'pass';
+  commentOnly?: boolean;
+}): CommentPlan;
 
 /** The built-in classifier: is this repo-relative path test / config / grader / golden (not production source)? */
 export declare function isNonSource(path: string): boolean;

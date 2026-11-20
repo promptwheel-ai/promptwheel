@@ -148,7 +148,7 @@ writes `promptwheel.lock.json` (the shape of the repo, from `promptwheel lock`) 
 
 ## In CI and in Claude Code
 
-**GitHub Action.** Drop this in your repo; it posts a verdict comment on every PR and fails the check on a guarded regression, a gamed win, or an inconclusive gate:
+**GitHub Action.** Drop this in your repo. It fails the check on a guarded regression, a gamed win, or an inconclusive gate, and says why in one comment on the pull request, which it edits in place. A pull request that passes gets no comment:
 
 ```yaml
 # .github/workflows/promptwheel.yml
@@ -165,7 +165,7 @@ jobs:
         with: { repeat: '3' }
 ```
 
-The Action runs straight from its own checkout, no npm install, no build. See [`action.yml`](action.yml); a copy-paste workflow file lives at [`examples/github-action.yml`](examples/github-action.yml). Make the check a branch-protection requirement and the agent cannot merge past it.
+The Action runs straight from its own checkout, no npm install, no build. See [`action.yml`](action.yml); a copy-paste workflow file lives at [`examples/github-action.yml`](examples/github-action.yml). Make the check a branch-protection requirement and the agent cannot merge past it. To try it first, add `comment-only: true` under `with:`. Then the job never fails, and the comment says what would have been sent back.
 
 **Claude Code plugin.** Bring the gate in as slash commands (the plugin wraps the CLI, so install that too: `npm i -g promptwheel`):
 

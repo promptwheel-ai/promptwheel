@@ -2811,7 +2811,7 @@ test('the Action hands pr-allow the account that opened the pull request and the
   const action = readFileSync(join(dirname(ENGINE), '..', 'action.yml'), 'utf8');
   assert.match(action, /OPENER: \$\{\{ github\.event\.pull_request\.user\.login \}\}/, 'the opener comes from GitHub, in the environment, not typed into the script');
   assert.match(action, /pr-allow --author "\$OPENER" --base "\$BASE" --note "\$RUNNER_TEMP\/promptwheel-allow-note\.md"/);
-  assert.match(action, /promptwheel-allow-note\.md" >> "\$RUNNER_TEMP\/promptwheel\.md"/, 'what was not counted is in the comment the check posts');
+  assert.match(action, /pr-comment [\s\S]*--note "\$RUNNER_TEMP\/promptwheel-allow-note\.md"/, 'what was not counted is in the comment the check posts');
 });
 test('the report tells a reader who may accept it: someone with write access who did not open the pull request', () => {
   const d = repoWith({ 'package.json': JSON.stringify({ name: 'a' }) });
@@ -3458,5 +3458,134 @@ test('run: where a count fell is read from the change alone, and names the same 
   assert.deepEqual(rep.metrics.find((m) => m.name === 'test_count').where, [{ file: 'test/gone.test.js', before: 2, after: 0 }, { file: 'test/a.test.js', before: 2, after: 1 }]);
   const adds = readFileSync(log, 'utf8').split('\n').filter((l) => /worktree add/.test(l)).length;
   assert.equal(adds, 2, `the two commits are checked out once each, for the measure itself, and never again to say where (${adds} checkouts)`);
+  rmSync(d, { recursive: true, force: true });
+});
+
+// ---- 0.8.15: the comment on a pull request. Until now the Action posted a new comment on every push, a pass
+// included, titled "PromptWheel, outcome gate", with a link to the engine (run on the released 0.8.14: ten pushes,
+// ten comments). Now: ONE comment, edited in place, and only when there is something to say. It is Sawbuck's, with
+// one link, to the one repo. The sentences that tell a fix run how to get through are the measured ones, unchanged.
+const prRep = (over = {}) => ({ base: 'aaa1111', head: 'bbb2222', mode: 'refs', repeat: 1, verdict: 'pass',
+  metrics: [{ name: 'tests_pass', guard: true, before: 1, after: 1, delta: 0, status: 'unchanged', confidence: 'high', ok: true }], ...over });
+const FELL = { name: 'test_count', guard: true, before: 3, after: 2, delta: -1, status: 'regressed', confidence: 'high', ok: false, allowable: true, where: [{ file: 'test/a.test.js', before: 2, after: 1 }] };
+const sentBack = (over = {}) => prRep({ verdict: 'fail', metrics: [prRep().metrics[0], FELL], explained: [{ metric: 'test_count', noted: false, what: 'fewer tests', allowable: true }], allowable: ['test_count'], protects: 9, ...over });
+const KEY = 'Sawbuck/contract';
+const botComment = (id, body, key = KEY) => ({ id, body: `<!-- sawbuck-check: ${key} -->\n${body}`, user: { login: 'github-actions[bot]', type: 'Bot' } });
+const plan = (o) => engineNow.commentPlan({ key: KEY, comments: [], ...o });
+test('the comment is Sawbuck\'s: its name, one link to the one repo, the numbers folded away, the measured sentences as they were', () => {
+  const md = renderMarkdown(sentBack());
+  assert.match(md, /^### ❌ Sawbuck: sent back$/m);
+  assert.doesNotMatch(md, /PromptWheel|promptwheel-ai|outcome gate/);
+  assert.deepEqual(md.match(/\]\(https?:[^)]*\)/g), ['](https://github.com/sawbuck-ai/sawbuck)'], 'one link, to the one repo');
+  assert.ok(md.indexOf('<details>') > 0 && md.indexOf('<details>') < md.indexOf('| metric |') && md.indexOf('| metric |') < md.indexOf('</details>'), 'the table sits inside the fold');
+  assert.ok(md.indexOf('Put back what was removed, and push') < md.indexOf('<details>'), 'what to do is in view');
+  assert.match(md, /> \*\*Where:\*\* `test\/a\.test\.js` \(2 → 1\)/);
+  assert.match(md, /> Put back what was removed, and push\. Or, if removing it is the job:\n>\n> To accept this, someone with write access who did not open this PR comments `sawbuck-allow: <their reason>` on it, and the check is run again\./);
+  assert.match(md, /verdict FAIL/, 'the engine\'s own word for it is still there, with the numbers');
+  assert.match(renderMarkdown(prRep({ verdict: 'gamed', metrics: [{ ...prRep().metrics[0], status: 'improved', gamed: true, retained: 0 }] })), /^### 🚩 Sawbuck: sent back\n\n> 🚩 A metric "improved" only because/m, 'a gamed win says why in view, not in the fold');
+  assert.doesNotMatch(renderMarkdown(sentBack(), { fold: false }), /<details>/, 'the job summary gets it unfolded');
+});
+test('a comment only when there is something to say: ten passing pushes leave none, and a pass with only watch-notes leaves none', () => {
+  const comments = [{ id: 1, body: 'looks good to me', user: { login: 'pat', type: 'User' } }];
+  for (let push = 0; push < 10; push++) { const p = plan({ report: prRep({ head: `bbb000${push}` }), exit: 0, comments }); assert.equal(p.action, 'none', `push ${push}`); assert.equal(p.body, ''); }
+  const noted = prRep({ explained: [{ metric: 'dependency_entries', noted: true, what: 'a new dependency' }, { metric: 'environment', noted: true, what: 'the environment this ran in can change which tests run, or load code into them', items: ['PYTEST_ADDOPTS'] }] });
+  assert.equal(plan({ report: noted, exit: 0 }).action, 'none', 'a new dependency as a note, or a note about the environment, does not open a comment');
+  assert.match(plan({ report: noted, exit: 0 }).summary, /a new dependency/, 'it is in the job summary, on every run');
+  assert.match(plan({ report: prRep(), exit: 0 }).summary, /\| metric \|/); assert.doesNotMatch(plan({ report: prRep(), exit: 0 }).summary, /<details>/);
+});
+test('one comment, edited in place: a send-back makes it, the next push edits it, and the fix edits it to a short passing line', () => {
+  const first = plan({ report: sentBack(), exit: 1 });
+  assert.equal(first.action, 'create'); assert.match(first.body, /^<!-- sawbuck-check: Sawbuck\/contract -->\n### ❌ Sawbuck: sent back/);
+  const thread = [{ id: 7, body: 'why is this red?', user: { login: 'pat', type: 'User' } }, botComment(41, first.body.split('\n').slice(1).join('\n'))];
+  const second = plan({ report: sentBack({ head: 'ccc3333' }), exit: 1, comments: thread });
+  assert.deepEqual([second.action, second.id], ['update', 41], 'the same comment, not a second one'); assert.match(second.body, /ccc3333/);
+  const fixed = plan({ report: prRep({ head: 'ddd4444' }), exit: 0, comments: thread });
+  assert.deepEqual([fixed.action, fixed.id], ['update', 41], 'a comment that said "sent back" is not left standing on a pull request that passes');
+  assert.match(fixed.body, /^<!-- sawbuck-check: Sawbuck\/contract -->\n### ✅ Sawbuck: passes\n\nNothing to add on this push \(`aaa1111 → ddd4444`\)\. What this comment said about an earlier push is in its edit history\./);
+  assert.doesNotMatch(fixed.body, /\| metric \|/, 'short: no table');
+  const again = plan({ report: prRep({ head: 'ddd4444' }), exit: 0, comments: [botComment(41, fixed.body.split('\n').slice(1).join('\n'))] });
+  assert.equal(again.action, 'none', 'the same words are not posted twice');
+});
+test('the one comment is known by its hidden line AND its author: a person who copies the line is not written over, and another workflow has its own', () => {
+  const copied = { id: 9, body: `<!-- sawbuck-check: ${KEY} -->\n### ✅ Sawbuck: passes`, user: { login: 'mallory', type: 'User' } };
+  assert.equal(plan({ report: sentBack(), exit: 1, comments: [copied] }).action, 'create');
+  assert.equal(plan({ report: prRep(), exit: 0, comments: [copied] }).action, 'none');
+  const other = botComment(12, 'x', 'PromptWheel/outcome-gate');
+  assert.equal(plan({ report: sentBack(), exit: 1, comments: [other] }).action, 'create', 'a second workflow that uses the Action keeps its own comment');
+  assert.deepEqual([plan({ report: sentBack(), exit: 1, comments: [botComment(3, 'a'), other, botComment(5, 'b')] }).id], [5], 'the newest of its own');
+  assert.match(plan({ report: sentBack(), exit: 1, key: 'a --> <b>\nc' }).body, /^<!-- sawbuck-check: a -- bc -->\n/, 'a name cannot close the hidden line');
+});
+test('what counts as something to say: a reason that was used, a file that lost its tests, the check\'s own definition changed', () => {
+  const allowed = prRep({ allowed: { reason: 'the rule it checked went (approved by pat)', cleared: ['test_count'] }, allowable: ['test_count'] });
+  let p = plan({ report: allowed, exit: 0 }); assert.equal(p.action, 'create'); assert.match(p.body, /### ✅ Sawbuck: passes\n\n> ✓ \*\*Allowed:\*\* `test_count` cleared by a declared reason: the rule it checked went \(approved by pat\)/);
+  const lost = prRep({ metrics: [prRep().metrics[0], { name: 'assertions', guard: true, before: 9, after: 9, delta: 0, status: 'unchanged', confidence: 'high', ok: true, lostIn: [{ file: 'test/pay.test.js', before: 3, after: 0 }] }] });
+  p = plan({ report: lost, exit: 0 }); assert.equal(p.action, 'create');
+  assert.match(p.body, /> ℹ️ \*\*Note:\*\* `test\/pay\.test\.js` has fewer assertions \(3 → 0\), though the repo's total did not fall\./);
+  p = plan({ report: prRep({ gate: { changed: true, fingerprint: { base: 'f1', head: 'f2' } } }), exit: 0 }); assert.equal(p.action, 'create'); assert.match(p.body, /Gate definition changed/);
+});
+test('comment: always gives the whole report on every run, still in one comment; comment: false gives none', () => {
+  let p = plan({ report: prRep(), exit: 0, comment: 'always' }); assert.equal(p.action, 'create'); assert.match(p.body, /### ✅ Sawbuck: passes/); assert.match(p.body, /\| metric \|/);
+  p = plan({ report: prRep({ head: 'eee5555' }), exit: 0, comment: 'always', comments: [botComment(2, 'x')] }); assert.deepEqual([p.action, p.id], ['update', 2]);
+  assert.equal(plan({ report: sentBack(), exit: 1, comment: 'false' }).action, 'none');
+  assert.match(plan({ report: sentBack(), exit: 1, comment: 'false' }).summary, /sent back/, 'the job summary still has it');
+});
+test('could not measure: a comment where that fails the job, none where the workflow says it passes', () => {
+  const inc = prRep({ verdict: 'inconclusive', metrics: [{ ...prRep().metrics[0], before: 0, after: 0, inert: true }] });
+  let p = plan({ report: inc, exit: 3, inconclusive: 'fail' }); assert.equal(p.action, 'create'); assert.match(p.body, /### 🟡 Sawbuck: could not measure\n\n> 🟡 A 🛡️ guarded check is \*\*inert\*\*/);
+  p = plan({ report: inc, exit: 3, inconclusive: 'pass' }); assert.equal(p.action, 'none'); assert.match(p.summary, /could not measure/);
+});
+test('comment-only: the comment says what would have been sent back, and that this check never fails the job here', () => {
+  let p = plan({ report: sentBack(), exit: 1, commentOnly: true });
+  assert.equal(p.action, 'create'); assert.equal(p.wouldFail, true);
+  assert.match(p.body, /### ✋ Sawbuck, comment only: this would have been sent back\n\nThis check only comments here\. It never fails the job\.\n\n> ✋ \*\*Needs a look:\*\* fewer tests/);
+  p = plan({ report: prRep(), exit: 0, commentOnly: true }); assert.equal(p.action, 'none'); assert.equal(p.wouldFail, false);
+  p = plan({ report: null, exit: 64, error: 'some warning\npromptwheel: promptwheel.config.json is not valid JSON (Unexpected token } at 12)\n', commentOnly: true });
+  assert.equal(p.action, 'create'); assert.match(p.body, /### ⚠️ Sawbuck: could not run\n\nNothing was checked on this push:\n\n> promptwheel: promptwheel\.config\.json is not valid JSON \(Unexpected token \} at 12\)/);
+  assert.match(plan({ report: null, exit: 64, error: '' }).body, /could not run/, 'with comment-only off too: a red job says why');
+});
+test('what was not counted is said in the comment; and where the base contract says one person works here, the way through says so', () => {
+  const note = '\n> ✋ **Not counted:** a `sawbuck-allow:` comment from `acme-agent-svc`, the account that opened this pull request.\n';
+  assert.match(plan({ report: sentBack(), exit: 1, note }).body, /\*\*Not counted:\*\* a `sawbuck-allow:` comment from `acme-agent-svc`/);
+  assert.doesNotMatch(plan({ report: prRep(), exit: 0, comments: [botComment(4, 'x')], note }).body, /Not counted/, 'nothing needed a reason on a push that passes');
+  const solo = renderMarkdown(sentBack({ openerCounts: true }));
+  assert.match(solo, /> To accept this, comment `sawbuck-allow: <the reason>` on this PR, and the check is run again\. One person works in this repo, so a comment from the account that opened the PR counts\./);
+  assert.doesNotMatch(solo, /who did not open this PR/);
+});
+test('pr-comment: the command the Action runs prints what to do, writes the comment and the summary, and refuses a flag it does not know', () => {
+  const d = mkdtempSync(join(TMP_ROOT, 'prc-')); const f = (n) => join(d, n);
+  writeFileSync(f('report.json'), JSON.stringify(sentBack())); writeFileSync(f('comments.jsonl'), ''); writeFileSync(f('summary.md'), 'earlier step\n');
+  const run = (...a) => spawnSync('node', [ENGINE, 'pr-comment', '--report', f('report.json'), '--comments', f('comments.jsonl'), '--key', KEY, '--body', f('body.md'), '--summary', f('summary.md'), ...a], { encoding: 'utf8' });
+  let r = run('--exit', '1'); assert.equal(r.status, 0, r.stderr); assert.equal(r.stdout.trim(), 'create');
+  assert.match(readFileSync(f('body.md'), 'utf8'), /^<!-- sawbuck-check: Sawbuck\/contract -->\n### ❌ Sawbuck: sent back/);
+  assert.match(readFileSync(f('summary.md'), 'utf8'), /^earlier step\n[\s\S]*Sawbuck: sent back/, 'the summary is added to, never written over');
+  writeFileSync(f('comments.jsonl'), JSON.stringify({ id: 1, body: 'hi', user: { login: 'pat', type: 'User' } }) + '\n' + JSON.stringify(botComment(88, 'old')) + '\n');
+  assert.equal(run('--exit', '1').stdout.trim(), 'update:88');
+  writeFileSync(f('report.json'), JSON.stringify(prRep())); writeFileSync(f('comments.jsonl'), '');
+  r = run('--exit', '0'); assert.equal(r.stdout.trim(), 'none'); assert.equal(readFileSync(f('body.md'), 'utf8'), '');
+  r = run('--exit', '0', '--comment-only', 'true'); assert.equal(r.stdout.trim(), 'none', 'a pass is a pass in comment-only too');
+  writeFileSync(f('report.json'), ''); writeFileSync(f('err.txt'), 'promptwheel: base ref "x" is not in this clone\n');
+  r = run('--exit', '64', '--error', f('err.txt')); assert.equal(r.stdout.trim(), 'create'); assert.match(readFileSync(f('body.md'), 'utf8'), /could not run[\s\S]*base ref "x" is not in this clone/);
+  r = run('--exit', '1', '--coment', 'always'); assert.equal(r.status, 64); assert.match(r.stderr, /unknown flag --coment/);
+  rmSync(d, { recursive: true, force: true });
+});
+test('the Action: comments read once, one comment made or edited, comment-only never fails the job', () => {
+  const action = readFileSync(join(dirname(ENGINE), '..', 'action.yml'), 'utf8');
+  assert.match(action, /^  comment-only:\n    description: /m);
+  assert.match(action, /pr-comment --report "\$RUNNER_TEMP\/promptwheel\.json"/);
+  assert.match(action, /gh api -X PATCH "repos\/\$REPO\/issues\/comments\/\$\{PLAN#update:\}"/, 'an earlier comment is edited in place');
+  assert.match(action, /KEY: \$\{\{ github\.workflow \}\}\/\$\{\{ github\.job \}\}/);
+  assert.equal((action.match(/gh api --paginate/g) || []).length, 1, 'the comments are read once, for the approval and for the check\'s own earlier comment');
+  assert.match(action, /if \[ "\$COMMENT_ONLY" = true \]; then[\s\S]*exit 0/, 'comment-only: the last step passes whatever the verdict');
+  assert.doesNotMatch(action, /gh pr comment "\$\{\{/, 'no comment is posted without the plan');
+});
+test('the report says when the opener\'s own comment counts: the contract at the base decides, a change cannot say so for itself', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'true', extract: 'exit', direction: 'pass', guard: true }]); commitAll(d, 'base');
+  const cfgPath = join(d, 'promptwheel.config.json'); const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+  writeFileSync(join(d, 'a.js'), '1\n'); commitAll(d, 'a change');
+  assert.equal(gateRun(d).rep.openerCounts, undefined, 'a contract that does not say so');
+  writeFileSync(cfgPath, JSON.stringify({ ...cfg, allowFromAuthor: true })); commitAll(d, 'one person here');
+  assert.equal(gateRun(d).rep.openerCounts, undefined, 'the change that adds the setting is judged without it');
+  writeFileSync(join(d, 'a.js'), '2\n'); commitAll(d, 'the next change');
+  const r = gateRun(d); assert.equal(r.rep.openerCounts, true); assert.equal(conformsToContract(r.rep).ok, true);
   rmSync(d, { recursive: true, force: true });
 });

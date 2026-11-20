@@ -1369,6 +1369,9 @@ function gate(repo, opts) {
     ...(allowable.length ? { allowable } : {}),
     ...(byCommit.length ? { byCommit } : {}),
     ...(Array.isArray(cfg.mandates) && cfg.mandates.length ? { protects: cfg.mandates.length } : {}),
+    // a repo with one person in it: the contract at the base says the account that opened a pull request may let it
+    // through, so the words about who can accept a change say that (read at the base, like pr-allow does)
+    ...(((gateDefAtRef(repo, base) || {}).scalars || {}).allowFromAuthor === true ? { openerCounts: true } : {}),
   };
   // a setup command that failed, at the ref it failed at: the usual reason a metric could not be measured
   const sb = setupFails.get(before), sa = setupFails.get(after);
@@ -1742,9 +1745,14 @@ function wayOut(r, fell, how) {
     ...(r.protects ? ['changing the workflow, the contract or this check is not a way through: those changes are sent back too'] : []),
   ];
 }
+// Who may accept a change on a pull request: someone who did not open it, or, where the contract on the base branch
+// says one person works here (`openerCounts`), anyone with write access, the opener included.
+const mdAccept = (r, all) => (r.openerCounts
+  ? `To accept ${all ? 'them all' : 'this'}, comment \`sawbuck-allow: ${allowNames(r)}<the reason>\` on this PR${all ? '' : ', and the check is run again'}. One person works in this repo, so a comment from the account that opened the PR counts.`
+  : `To accept ${all ? 'them all' : 'this'}, someone with write access who did not open this PR comments \`sawbuck-allow: ${allowNames(r)}<their reason>\`${all ? '' : ' on it, and the check is run again'}.`);
 function mdWayOut(r) {
   if (!r.explained.some((x) => !x.noted && x.allowable)) return [];
-  const accept = `To accept this, someone with write access who did not open this PR comments \`sawbuck-allow: ${allowNames(r)}<their reason>\` on it, and the check is run again.${allowNames(r) ? ' A reason lets through only what it names when there is more than one thing.' : ''}`;
+  const accept = `${mdAccept(r)}${allowNames(r) ? ' A reason lets through only what it names when there is more than one thing.' : ''}`;
   const fell = fallenTests(r);
   if (!fell.length) return ['>', `> ${accept}`];
   const { undo, job } = undoWords(fell);
@@ -1756,33 +1764,90 @@ function mdWayOut(r) {
       : [`> ${Undo}, and push. Or, if ${job} is the job:`, '>', `> ${accept}`]),
     ...(r.protects ? ['>', '> Changing the workflow, the contract or this check is not a way through: those changes are sent back too.'] : [])];
 }
-function renderMarkdown(r) {
-  const icon = r.verdict === 'pass' ? '✅' : r.verdict === 'gamed' ? '🚩' : r.verdict === 'inconclusive' ? '🟡' : '❌';
+// The comment is Sawbuck's: its name, and one link, to the one repo. What a reader has to do is in view; the table
+// of numbers is folded away (`fold: false` for the job summary, which nobody has to scroll past). The sentences
+// about how to get through are the ones measured on agents (proof-bench/pr-cause) and are not reworded here.
+const SAWBUCK_REPO = 'https://github.com/sawbuck-ai/sawbuck';
+const MD_FOOT = `<sub>[Sawbuck](${SAWBUCK_REPO}) checks what a change did to the tests. No model reads your code.</sub>`;
+const MD_HEADLINE = { pass: 'passes', fail: 'sent back', gamed: 'sent back', inconclusive: 'could not measure' };
+const MD_ICON = { pass: '✅', fail: '❌', gamed: '🚩', inconclusive: '🟡' };
+function renderMarkdown(r, o = {}) {
   const sIcon = { improved: '🟢', regressed: '🔴', unchanged: '⚪', inconclusive: '🟡', unmeasurable: '⚫' };
   const rows = r.metrics.map((m) => {
     const d = m.delta == null ? 'n/a' : (m.delta > 0 ? `+${m.delta}` : `${m.delta}`);
     const status = m.gamed === true ? `🚩 gamed (${(m.retained * 100).toFixed(0)}% survives source-only)` : `${sIcon[m.status] || ''} ${m.status}${m.inert ? ' ⚠ never passes' : ''}`;
     return `| ${m.guard ? '🛡️ ' : ''}${m.name} | ${m.before} | ${m.after} | ${d} | ${status} | ${m.confidence} |`;
   }).join('\n');
+  const said = r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader, not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? (r.mandates ? '> ⛔ A protected path changed. This is a hard rule; no metric result clears it.' : '> ❌ A 🛡️ guarded metric regressed beyond the noise band.') : r.verdict === 'inconclusive' ? (r.metrics.some((m) => m.inert) && r.metrics.every((m) => !m.inert || m.ran === 'both') ? '> 🟡 A 🛡️ guarded check is **inert**, it fails before and after this change, so nothing was actually verified. Fix it before trusting a pass.' : '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.') : '> ✅ No guarded metric regressed.';
+  // a gamed win and a check that measured nothing have no "needs a look" line of their own: their sentence stays in view
+  const inView = r.verdict === 'gamed' || r.verdict === 'inconclusive';
+  const lost = r.metrics.flatMap((m) => (m.lostIn || []).map((w) => `> ℹ️ **Note:** \`${w.file}\` has ${PLAIN[m.name] || m.name} (${w.before} → ${w.after}), though the repo's total did not fall.`));
+  const table = ['| metric | before | after | Δ | status | confidence |', '|---|--:|--:|--:|---|---|', rows, ...(inView ? [] : ['', said])].join('\n');
+  const span = `${r.base} → ${r.head}`, rest = `${r.repeat > 1 ? `, ×${r.repeat}` : ''}, verdict ${r.verdict.toUpperCase()}`;
+  const would = o.commentOnly && o.wouldFail;
   return [
-    `### ${icon} PromptWheel, outcome gate: **${r.verdict.toUpperCase()}**`,
-    '',
-    `\`${r.base} → ${r.head}\` · ${r.mode} mode${r.repeat > 1 ? ` · ×${r.repeat}` : ''}`,
-    '',
-    ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Protected path touched:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : md.edited ? ' (edited in this same change; the version before the change stays in force for the change that edits it)' : ''}`).join('\n'), ''] : []),
-    ...(r.explained ? [...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...mdWayOut(r), ''] : []),
-    '| metric | before | after | Δ | status | confidence |',
-    '|---|--:|--:|--:|---|---|',
-    rows,
-    '',
-    r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader, not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? (r.mandates ? '> ⛔ A protected path changed. This is a hard rule; no metric result clears it.' : '> ❌ A 🛡️ guarded metric regressed beyond the noise band.') : r.verdict === 'inconclusive' ? (r.metrics.some((m) => m.inert) && r.metrics.every((m) => !m.inert || m.ran === 'both') ? '> 🟡 A 🛡️ guarded check is **inert**, it fails before and after this change, so nothing was actually verified. Fix it before trusting a pass.' : '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.') : '> ✅ No guarded metric regressed.',
-    ...(r.gate && r.gate.weakened ? ['', `> 🚩 **Gate weakened:** ${r.gate.weakened.map((w) => `\`${w.name}\` ${w.change === 'guard-removed' ? 'removed' : w.change === 'guard-edited' ? 'edited' : w.change === 'measurement-edited' ? 'measured another way (setup, env or linked dirs)' : 'disabled'} (would have ${wouldHave(w.status)} at head)`).join('; ')}. The pass was bought by changing the gate, not by earning it.`] : []),
-    ...(r.allowed && r.allowed.cleared.length ? ['', `> ✓ **Allowed:** \`${r.allowed.cleared.join('`, `')}\` cleared by a declared reason: ${r.allowed.reason}`] : []),
-    ...(r.allowed && (r.allowable || []).some((l) => !r.allowed.cleared.includes(l)) ? ['', `> ✋ **Not let through:** \`${r.allowable.filter((l) => !r.allowed.cleared.includes(l)).join('`, `')}\`. A reason lets through only what it names when there is more than one thing. To accept them all, someone with write access who did not open this PR comments \`sawbuck-allow: ${allowNames(r)}<their reason>\`.`] : []),
-    ...(r.gate && r.gate.changed ? ['', `> ⚠ **Gate definition changed** in this diff (fingerprint \`${r.gate.fingerprint.base}\` -> \`${r.gate.fingerprint.head}\`): a metric, guard, evaluatorPath, mandate, or the setup, env or linked dirs they are measured with was added, removed or edited. Review the config change with the code.`] : []),
-    '',
-    '<sub>🛡️ = guard · _prove every change moved a metric_ · [PromptWheel](https://github.com/promptwheel-ai/promptwheel)</sub>',
-  ].join('\n');
+    `### ${would ? '✋' : MD_ICON[r.verdict] || '❌'} Sawbuck${would ? ', comment only: this would have been sent back' : `: ${MD_HEADLINE[r.verdict] || r.verdict}`}`,
+    ...(would ? ['This check only comments here. It never fails the job.'] : []),
+    ...(r.mandates ? [r.mandates.map((md) => `> ⛔ **Protected path touched:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : md.edited ? ' (edited in this same change; the version before the change stays in force for the change that edits it)' : ''}`).join('\n')] : []),
+    ...(r.explained ? [[...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...mdWayOut(r)].join('\n')] : []),
+    ...(inView ? [said] : []),
+    ...(r.gate && r.gate.weakened ? [`> 🚩 **Gate weakened:** ${r.gate.weakened.map((w) => `\`${w.name}\` ${w.change === 'guard-removed' ? 'removed' : w.change === 'guard-edited' ? 'edited' : w.change === 'measurement-edited' ? 'measured another way (setup, env or linked dirs)' : 'disabled'} (would have ${wouldHave(w.status)} at head)`).join('; ')}. The pass was bought by changing the gate, not by earning it.`] : []),
+    ...(r.allowed && r.allowed.cleared.length ? [`> ✓ **Allowed:** \`${r.allowed.cleared.join('`, `')}\` cleared by a declared reason: ${r.allowed.reason}`] : []),
+    ...(r.allowed && (r.allowable || []).some((l) => !r.allowed.cleared.includes(l)) ? [`> ✋ **Not let through:** \`${r.allowable.filter((l) => !r.allowed.cleared.includes(l)).join('`, `')}\`. A reason lets through only what it names when there is more than one thing. ${mdAccept(r, true)}`] : []),
+    ...(r.gate && r.gate.changed ? [`> ⚠ **Gate definition changed** in this diff (fingerprint \`${r.gate.fingerprint.base}\` -> \`${r.gate.fingerprint.head}\`): a metric, guard, evaluatorPath, mandate, or the setup, env or linked dirs they are measured with was added, removed or edited. Review the config change with the code.`] : []),
+    ...(lost.length ? [lost.join('\n')] : []),
+    ...(o.note && String(o.note).trim() ? [String(o.note).trim()] : []),
+    o.fold === false ? `\`${span}\`${rest}\n\n${table}` : `<details><summary>What was measured (<code>${span}</code>${rest})</summary>\n\n${table}\n\n</details>`,
+    MD_FOOT,
+  ].join('\n\n');
+}
+
+// ---- The comment on a pull request: one, edited in place, and only when there is something to say -------------------
+// Until 0.8.15 the Action posted a new comment on every push, a pass included. A check that speaks on every push is
+// one a maintainer mutes, and then its one real sentence is not read either. So:
+// - It keeps ONE comment. It knows its own by a hidden first line that names the workflow and job, AND by its author
+//   (the Actions bot): a person who copies the line is not written over, and a second workflow has its own comment.
+// - It speaks when the job would fail, when a reason was used (that is the record), when a file lost tests or
+//   assertions while the total held, when the check's own definition changed, or when it could not run at all.
+// - A plain pass says nothing. The watch-notes of a full contract (a new dependency, the shape of the repo) and a note
+//   about the environment do not open a comment: they are in the job summary on every run, and in the comment when
+//   there is one. `comment: always` gives the whole report every time; `comment: false` gives none.
+// - A comment about an earlier push is never left standing on a push that passes: it is edited to one short line.
+// `commentOnly`: the job never fails, and the comment says what would have been sent back.
+// Pure: what to do is returned, and the Action's own shell does it. { action: 'none' | 'create' | 'update', id, body,
+// summary, wouldFail }.
+const BOT = 'github-actions[bot]';
+const markerFor = (key) => `<!-- sawbuck-check: ${String(key || '').replace(/[^A-Za-z0-9 _.\/-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'check'} -->`;
+export function commentPlan(input = {}) {
+  const { report = null, error = '', comments = [], note = '' } = input;
+  const exit = Number(input.exit) || 0, mode = String(input.comment ?? 'true'), commentOnly = input.commentOnly === true;
+  const wouldFail = exit !== 0 && !(exit === 3 && input.inconclusive === 'pass');
+  const marker = markerFor(input.key);
+  const mine = [...(comments || [])].reverse().find((c) => c && c.user && c.user.login === BOT && String(c.body || '').split('\n')[0].trim() === marker);
+  const readable = !!report && typeof report === 'object' && Array.isArray(report.metrics) && typeof report.verdict === 'string';
+  let full, speaks;
+  if (!readable) {
+    // the run did not get as far as a verdict (a config that cannot be read, a base commit that is not in the clone)
+    // the engine's own line when it wrote one (they begin with its name), else the last thing printed
+    const lines = String(error || '').replace(/\x1b\[[0-9;]*m/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
+    const line = [...lines].reverse().find((l) => /^promptwheel\b/.test(l)) || lines[lines.length - 1] || '';
+    const why = line ? `> ${line.slice(0, 300)}` : '';
+    full = ['### ⚠️ Sawbuck: could not run', `Nothing was checked on this push${why ? ':' : '.'}`, ...(why ? [why] : []), ...(commentOnly ? ['This check only comments here. It never fails the job.'] : []), MD_FOOT].join('\n\n');
+    speaks = true;
+  } else {
+    speaks = wouldFail || !!(report.allowed && (report.allowed.cleared || []).length) || report.metrics.some((m) => m.lostIn && m.lostIn.length) || !!(report.gate && report.gate.changed);
+    full = null;
+  }
+  const render = (fold) => (readable ? renderMarkdown(report, { fold, commentOnly, wouldFail, note: wouldFail ? note : '' }) : full);
+  const summary = render(false);
+  if (mode === 'false') return { action: 'none', body: '', summary, wouldFail };
+  let text = '';
+  if (speaks || mode === 'always') text = render(true);
+  else if (mine) text = [`### ✅ Sawbuck: passes`, `Nothing to add on this push (\`${report.base} → ${report.head}\`). What this comment said about an earlier push is in its edit history.`, MD_FOOT].join('\n\n');
+  if (!text) return { action: 'none', body: '', summary, wouldFail };
+  const body = `${marker}\n${text}`;
+  if (mine && String(mine.body || '').trim() === body.trim()) return { action: 'none', body: '', summary, wouldFail };
+  return mine ? { action: 'update', id: mine.id, body, summary, wouldFail } : { action: 'create', body, summary, wouldFail };
 }
 
 function parseArgs(argv) {
@@ -2020,18 +2085,43 @@ function checkFlags(cmd, argv) {
 // --author <login>: the account that opened the pull request; its own comment does not count, unless the contract at
 // --base <ref> holds "allowFromAuthor": true (read from that commit, so a pull request cannot say so for itself).
 // --note <file>: when the only approval was the opener's, one line saying so, for the comment the check posts.
+// a JSON array, or one comment per line (every page `gh api --paginate --jq '.[]'` prints); [] when it cannot be read
+function readComments(text) {
+  const t = String(text || '').trim();
+  try { return [].concat(JSON.parse(t || '[]')); } catch { try { return t.split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } }
+}
 async function prAllow(argv = []) {
   const val = (f) => { const i = argv.indexOf(f); return i > -1 && argv[i + 1] !== undefined && !String(argv[i + 1]).startsWith('--') ? String(argv[i + 1]) : ''; };
   const author = val('--author'), base = val('--base'), note = val('--note');
   let t = ''; process.stdin.setEncoding('utf8');
   for await (const chunk of process.stdin) t += chunk;
-  t = t.trim(); let c = [];
-  try { c = [].concat(JSON.parse(t || '[]')); } catch { try { c = t.split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { /* unreadable, no approval */ } }
+  const c = readComments(t);
   let own = false;
   if (author && base) { try { own = ((gateDefAtRef(process.cwd(), base) || {}).scalars || {}).allowFromAuthor === true; } catch { /* no contract at the base: the opener does not count */ } }
   const d = allowDecision(c, { author, allowFromAuthor: own });
   if (note) { try { writeFileSync(note, d.skipped && !d.reason ? `\n> ✋ **Not counted:** a \`sawbuck-allow:\` comment from \`${d.skipped}\`, the account that opened this pull request. Whoever opened a pull request cannot let it through. Someone else with write access can. In a repo with one person in it, set \`"allowFromAuthor": true\` in \`promptwheel.config.json\` on the base branch; a pull request cannot turn that on for itself.\n` : ''); } catch { /* the note is a courtesy */ } }
   process.stdout.write(d.reason);
+}
+
+// pr-comment: what the Action does with the comment, decided here so the Action's shell stays thin (commentPlan).
+// Prints one word: `none`, `create`, or `update:<comment id>`. Writes the comment to --body (empty for `none`) and
+// adds the whole report to --summary. A file that is missing or empty reads as nothing; a flag it does not know is a
+// usage error, so a typo in a workflow cannot switch comment-only off in silence.
+const PR_COMMENT_FLAGS = ['--report', '--exit', '--error', '--comments', '--key', '--note', '--comment', '--inconclusive', '--comment-only', '--body', '--summary'];
+function prComment(argv = []) {
+  const o = {};
+  for (let i = 0; i < argv.length; i += 2) {
+    if (!PR_COMMENT_FLAGS.includes(argv[i])) bad(`promptwheel pr-comment: unknown flag ${argv[i]} (it takes ${PR_COMMENT_FLAGS.join(', ')})`);
+    if (argv[i + 1] === undefined) bad(`promptwheel pr-comment: ${argv[i]} needs a value`);
+    o[argv[i].slice(2)] = String(argv[i + 1]);
+  }
+  for (const [k, ok] of [['comment', ['true', 'always', 'false']], ['inconclusive', ['fail', 'pass']], ['comment-only', ['true', 'false']]]) if (o[k] !== undefined && !ok.includes(o[k])) bad(`promptwheel pr-comment: --${k} is ${ok.join(' or ')} (got "${o[k]}")`);
+  const read = (f) => { try { return f ? readFileSync(f, 'utf8') : ''; } catch { return ''; } };
+  let report = null; try { report = JSON.parse(read(o.report)); } catch { /* the run printed no report: it could not run */ }
+  const p = commentPlan({ report, exit: o.exit, error: read(o.error), comments: readComments(read(o.comments)), key: o.key, note: read(o.note), comment: o.comment, inconclusive: o.inconclusive, commentOnly: o['comment-only'] === 'true' });
+  if (o.body) writeFileSync(o.body, p.body ? p.body + '\n' : '');
+  if (o.summary) { try { appendFileSync(o.summary, p.summary + '\n'); } catch { /* the summary is a courtesy */ } }
+  process.stdout.write(p.action === 'update' ? `update:${p.id}\n` : `${p.action}\n`);
 }
 
 // write or refresh the architecture lock from the tree as it stands. A person runs this: the lock file is
@@ -2049,6 +2139,7 @@ function dispatch() {
   if (cmd in COMMAND_FLAGS) checkFlags(cmd, rest);
   if (cmd === 'run') run(rest);
   else if (cmd === 'pr-allow') return prAllow(rest);
+  else if (cmd === 'pr-comment') prComment(rest);
   else if (cmd === 'init') init(rest);
   else if (cmd === 'lock') return lock(rest);
   else {
@@ -2067,6 +2158,7 @@ function dispatch() {
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
       '  promptwheel pr-allow < comments.json         print the newest `sawbuck-allow: <reason>` from a PR comment by someone with write access (the Action uses it;',
       '                                               --author <login> leaves out the account that opened the PR, unless the contract at --base <ref> says "allowFromAuthor": true)',
+      '  promptwheel pr-comment --report <file> ...   what the Action does with its one comment on a pull request: prints none, create or update:<id>, and writes the comment (the Action uses it)',
       '  promptwheel run --allow "<reason>"           acknowledge an intentional test/config change (or a `Promptwheel-Allow: <reason>` commit trailer; `Sawbuck-Allow:` is an alias): recorded, not flagged GAMED. With more than one thing to let through, the reason names each: --allow "tests_pass, contract-frozen: <reason>"',
       '',
       'Exit codes: 0 pass · 1 fail (a guarded metric regressed, or a mandate was violated) · 2 gamed · 3 inconclusive · 64 usage or config error (never a verdict).',

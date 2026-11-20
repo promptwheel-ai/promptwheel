@@ -18,13 +18,17 @@ inputs:
     required: false
     default: ''
   inconclusive:
-    description: 'What an inconclusive verdict does to the job: fail, or pass with the comment still posted. Use pass where tests may not run in CI. A failed or gamed verdict always fails.'
+    description: 'What an inconclusive verdict does to the job: fail, or pass. Use pass where tests may not run in CI. A failed or gamed verdict always fails.'
     required: false
     default: 'fail'
   comment:
-    description: 'Post the verdict as a PR comment'
+    description: 'true: one comment on the pull request, edited in place, and only when there is something to say (a send-back, a reason that was used, a file that lost its tests). always: the whole report on every run, in that one comment. false: no comment. The job summary has the whole report either way.'
     required: false
     default: 'true'
+  comment-only:
+    description: 'true: the job never fails. The comment says what would have been sent back. For trying the check on real pull requests before it counts.'
+    required: false
+    default: 'false'
 
 runs:
   using: 'composite'
@@ -34,52 +38,86 @@ runs:
         node-version: '20'
 
     # Runs straight from this action's own checkout: no npm install, no build.
-    # a person's approval on the PR: the newest `sawbuck-allow: <reason>` comment from someone with write access
-    # who did not open the PR. The opener counts only where the contract on the base branch says so.
-    # The endpoint lists oldest first, so every page is read: one call would stop at the oldest 100.
-    - id: approval
-      if: ${{ inputs.allow == '' && github.event_name == 'pull_request' }}
+    # The pull request's comments, read once: a person's approval is looked for in them, and this check's own earlier
+    # comment, which it edits in place. The endpoint lists oldest first, so every page is read: one call would stop
+    # at the oldest 100.
+    - id: comments
+      if: ${{ github.event_name == 'pull_request' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
         REPO: ${{ github.repository }}
         PR: ${{ github.event.pull_request.number }}
+      run: |
+        gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" --jq '.[]' > "$RUNNER_TEMP/promptwheel-comments.jsonl" 2>/dev/null || true
+
+    # a person's approval on the PR: the newest `sawbuck-allow: <reason>` comment from someone with write access
+    # who did not open the PR. The opener counts only where the contract on the base branch says so.
+    - id: approval
+      if: ${{ inputs.allow == '' && github.event_name == 'pull_request' }}
+      shell: bash
+      env:
         OPENER: ${{ github.event.pull_request.user.login }}
         BASE: ${{ inputs.base }}
       run: |
-        reason=$(gh api --paginate "repos/$REPO/issues/$PR/comments?per_page=100" --jq '.[]' 2>/dev/null | node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" pr-allow --author "$OPENER" --base "$BASE" --note "$RUNNER_TEMP/promptwheel-allow-note.md" 2>/dev/null || true)
+        reason=$(node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" pr-allow --author "$OPENER" --base "$BASE" --note "$RUNNER_TEMP/promptwheel-allow-note.md" < "$RUNNER_TEMP/promptwheel-comments.jsonl" 2>/dev/null || true)
         { echo 'allow<<SAWBUCK_ALLOW_END'; printf '%s\n' "$reason"; echo 'SAWBUCK_ALLOW_END'; } >> "$GITHUB_OUTPUT"
 
+    # The check, then what to say about it. pr-comment decides: nothing, a new comment, or an edit of the one this
+    # check already left (KEY names the workflow and job, so two workflows that use this action each keep their own).
+    # The whole report goes to the job summary on every run.
     - id: gate
       shell: bash
       env:
         ALLOW: ${{ inputs.allow || steps.approval.outputs.allow }}
+        KEY: ${{ github.workflow }}/${{ github.job }}
+        COMMENT: ${{ inputs.comment }}
+        INCONCLUSIVE: ${{ inputs.inconclusive }}
+        COMMENT_ONLY: ${{ inputs.comment-only }}
       run: |
         set +e
         node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" run \
-          --base "${{ inputs.base }}" --head HEAD --repeat "${{ inputs.repeat }}" --markdown ${ALLOW:+--allow "$ALLOW"} \
-          > "$RUNNER_TEMP/promptwheel.md"
-        echo "exit=$?" >> "$GITHUB_OUTPUT"
-        # an approval that was not counted because it came from the account that opened the PR: said in the comment
-        if [ -s "$RUNNER_TEMP/promptwheel-allow-note.md" ]; then cat "$RUNNER_TEMP/promptwheel-allow-note.md" >> "$RUNNER_TEMP/promptwheel.md"; fi
-        cat "$RUNNER_TEMP/promptwheel.md" >> "$GITHUB_STEP_SUMMARY"
+          --base "${{ inputs.base }}" --head HEAD --repeat "${{ inputs.repeat }}" --json ${ALLOW:+--allow "$ALLOW"} \
+          > "$RUNNER_TEMP/promptwheel.json" 2> "$RUNNER_TEMP/promptwheel.err"
+        code=$?
+        cat "$RUNNER_TEMP/promptwheel.err" >&2
+        echo "exit=$code" >> "$GITHUB_OUTPUT"
+        plan=$(node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" pr-comment --report "$RUNNER_TEMP/promptwheel.json" --exit "$code" --error "$RUNNER_TEMP/promptwheel.err" \
+          --comments "$RUNNER_TEMP/promptwheel-comments.jsonl" --key "$KEY" --note "$RUNNER_TEMP/promptwheel-allow-note.md" \
+          --comment "$COMMENT" --inconclusive "$INCONCLUSIVE" --comment-only "$COMMENT_ONLY" \
+          --body "$RUNNER_TEMP/promptwheel.md" --summary "$GITHUB_STEP_SUMMARY")
+        echo "plan=${plan:-none}" >> "$GITHUB_OUTPUT"
 
-    - if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+    # one comment: made the first time there is something to say, edited in place after that
+    - if: ${{ github.event_name == 'pull_request' && steps.gate.outputs.plan != 'none' }}
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
-      run: gh pr comment "${{ github.event.pull_request.number }}" --body-file "$RUNNER_TEMP/promptwheel.md" || true
+        REPO: ${{ github.repository }}
+        PR: ${{ github.event.pull_request.number }}
+        PLAN: ${{ steps.gate.outputs.plan }}
+      run: |
+        case "$PLAN" in
+          update:*) gh api -X PATCH "repos/$REPO/issues/comments/${PLAN#update:}" -F body=@"$RUNNER_TEMP/promptwheel.md" > /dev/null || gh pr comment "$PR" --body-file "$RUNNER_TEMP/promptwheel.md" || true ;;
+          create) gh pr comment "$PR" --body-file "$RUNNER_TEMP/promptwheel.md" || true ;;
+        esac
 
     # Propagate the gate's exit code: 0 pass, 1 fail (a guarded metric regressed or a mandate
     # was violated), 2 gamed, 3 inconclusive, 64 usage/config error (a broken config fails the
-    # job too, but it is never reported as a verdict).
+    # job too, but it is never reported as a verdict). With comment-only the job passes whatever
+    # the verdict, and says in a warning what it would have done.
     - shell: bash
       env:
         GATE_EXIT: ${{ steps.gate.outputs.exit }}
         INCONCLUSIVE: ${{ inputs.inconclusive }}
+        COMMENT_ONLY: ${{ inputs.comment-only }}
       run: |
         if [ "$GATE_EXIT" = 3 ] && [ "$INCONCLUSIVE" = pass ]; then
           echo "::warning::Sawbuck could not measure your tests here, so nothing was proved. Protected paths were still checked."
+          exit 0
+        fi
+        if [ "$COMMENT_ONLY" = true ]; then
+          [ "$GATE_EXIT" = 0 ] || echo "::warning::Sawbuck is in comment-only mode here, so the job passes. With comment-only off this pull request would have been sent back (exit $GATE_EXIT)."
           exit 0
         fi
         exit "$GATE_EXIT"

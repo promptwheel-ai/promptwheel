@@ -1,7 +1,8 @@
 # Example: copy this into YOUR repo as .github/workflows/promptwheel.yml (zero-config works;
 # a promptwheel.config.json at the root customizes what is measured).
-# Posts a verdict comment on every PR and fails the check on a guarded regression beyond
-# the noise band, a GAMED win (exit 2), or an inconclusive gate (exit 3).
+# Fails the check on a guarded regression beyond the noise band, a GAMED win (exit 2), or an
+# inconclusive gate (exit 3), and says why in one comment on the pull request, edited in place.
+# A pull request that passes gets no comment.
 name: PromptWheel
 
 on:
@@ -9,7 +10,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write   # needed to post the verdict comment
+  pull-requests: write   # needed to post and edit the comment
 
 jobs:
   outcome-gate:
@@ -22,4 +23,5 @@ jobs:
         with:
           repeat: '3'             # sample noisy metrics 3× before trusting a delta
           # base: ${{ github.event.pull_request.base.sha }}   # default
-          # comment: 'true'                                   # default
+          # comment: 'true'                                   # default: only when there is something to say; 'always' or 'false'
+          # comment-only: 'true'                              # to try it: the job never fails, the comment says what would have been sent back
