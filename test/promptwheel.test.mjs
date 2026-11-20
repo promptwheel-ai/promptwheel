@@ -3335,3 +3335,42 @@ test('gate.goalposts: a report whose goalposts are empty is never gamed, on ever
   assert.equal(conformsToContract({ ...r, gate: { ...r.gate, goalposts: 'calc.test.mjs' } }).ok, false, 'goalposts must be an array of paths');
   rmSync(d, { recursive: true, force: true });
 });
+
+// ---- a count that holds for the repo can still fall in one file (proof-bench/outside-repos, gates/RESULT.md: four of
+// fifteen home-made gates read per file; the released 0.8.14 passed a test emptied of its assertions when another
+// file gained as many). A note on the metric, `lostIn`; never a verdict.
+const SPEC = (name, lines) => `const { test, expect } = require('./h');\ntest('${name}', () => {\n${lines.map((l) => '  ' + l).join('\n')}\n});\n`;
+const perFileRepo = (files) => {
+  const d = repoWith({ 'package.json': JSON.stringify({ name: 'a' }), 'src/a.js': 'exports.f = () => 1\n', ...files });
+  assert.equal(pw(d, ['init', '--no-agent-block']).code, 0);
+  const f = join(d, 'promptwheel.config.json'); const c = JSON.parse(readFileSync(f, 'utf8'));
+  writeFileSync(f, JSON.stringify({ ...c, metrics: c.metrics.map((m) => (m.name === 'tests_pass' ? { ...m, cmd: 'true' } : m)) }, null, 2)); commitAll(d, 'sign');
+  return d;
+};
+const PAY = ['expect(total(3, 4)).toBe(7);', 'expect(total(0, 0)).toBe(0);', 'expect(() => total(-1, 2)).toThrow(/negative/);'];
+const lostIn = (r, name) => (r.rep.metrics.find((m) => m.name === name) || {}).lostIn;
+test('a test file emptied of its assertions while another file gains as many: the total holds, and the file is named', () => {
+  const d = perFileRepo({ 'test/pay.test.js': SPEC('pay adds up', PAY) });
+  writeFileSync(join(d, 'test/pay.test.js'), SPEC('pay adds up', ['total(3, 4);']));
+  writeFileSync(join(d, 'test/other.test.js'), SPEC('other', ['expect(1).toBe(1);', 'expect(2).toBe(2);', 'expect(3).toBe(3);']));
+  commitAll(d, 'swap');
+  const r = gateRun(d);
+  assert.equal(r.rep.verdict, 'pass', 'a note, never a verdict');
+  assert.deepEqual(lostIn(r, 'assertions'), [{ file: 'test/pay.test.js', before: 3, after: 0 }]);
+  assert.equal(lostIn(r, 'test_count'), undefined, 'the test itself is still there');
+  assert.match(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--no-auto']).out, /note: test\/pay\.test\.js has fewer assertions \(3 → 0\), though the repo's total did not fall/);
+});
+test('a test file moved, split in two, or left alone while tests are added: no file is named', () => {
+  const two = SPEC('pay adds up', PAY) + SPEC('pay refuses a bad sum', ['expect(() => total("a", 1)).toThrow(TypeError);', 'expect(() => total(null, 1)).toThrow(TypeError);']).split('\n').slice(1).join('\n');
+  let d = perFileRepo({ 'test/pay.test.js': two });
+  mkdirSync(join(d, 'test/billing')); execFileSync('git', ['mv', 'test/pay.test.js', 'test/billing/pay.test.js'], { cwd: d }); commitAll(d, 'move');
+  let r = gateRun(d); assert.equal(lostIn(r, 'assertions'), undefined, 'moved whole'); assert.equal(lostIn(r, 'test_count'), undefined);
+  d = perFileRepo({ 'test/pay.test.js': two });
+  writeFileSync(join(d, 'test/pay.test.js'), SPEC('pay adds up', PAY));
+  writeFileSync(join(d, 'test/pay-bad.test.js'), SPEC('pay refuses a bad sum', ['expect(() => total("a", 1)).toThrow(TypeError);', 'expect(() => total(null, 1)).toThrow(TypeError);']));
+  commitAll(d, 'split');
+  r = gateRun(d); assert.equal(lostIn(r, 'assertions'), undefined, 'split in two'); assert.equal(lostIn(r, 'test_count'), undefined);
+  d = perFileRepo({ 'test/pay.test.js': two });
+  writeFileSync(join(d, 'test/new.test.js'), SPEC('new', ['expect(9).toBe(9);'])); writeFileSync(join(d, 'src/a.js'), 'exports.f = () => 2\n'); commitAll(d, 'add');
+  r = gateRun(d); assert.equal(lostIn(r, 'assertions'), undefined, 'only additions');
+});

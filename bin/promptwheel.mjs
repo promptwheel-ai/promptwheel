@@ -954,6 +954,30 @@ function tripwireWhere(repo, base, head, def) {
   return worse.length ? worse.slice(0, 5) : null;
 }
 
+// A count that holds for the whole repo can still fall in one file: a test emptied of its assertions while another
+// file gains as many. For the two counts that go up (tests, assertions), when the total did NOT fall: the files that
+// stood at the base and hold fewer now. A file whose removed lines mostly turn up elsewhere in the same change was
+// moved or split, not cut, and is left out. A note for a reader (`lostIn`), never a verdict: an edit that swaps one
+// assertion for another in place is not seen by any count.
+const PER_FILE = new Set(['test_count', 'assertions']);
+function lostInFiles(repo, base, head, def) {
+  let touched = '';
+  try { touched = git(['diff', '--no-renames', '--diff-filter=MD', '--name-only', base, head], repo); } catch { return null; }
+  if (!touched.trim()) return null;   // only additions: no file that stood at the base can hold fewer
+  const worse = (tripwireWhere(repo, base, head, def) || []).filter((w) => w.before > 0);
+  if (!worse.length) return null;
+  const lines = (args, sign) => { try { return git(['diff', '--no-renames', '-U0', base, head, ...args], repo).split('\n').filter((l) => l[0] === sign && l[1] !== sign).map((l) => l.slice(1).trim()).filter((l) => l.length >= 12); } catch { return []; } };
+  const out = [];
+  for (const w of worse) {
+    const gone = lines(['--', w.file], '-');
+    const elsewhere = new Set(lines(['--', '.', `:(exclude,literal)${w.file}`], '+'));
+    const moved = gone.filter((l) => elsewhere.has(l)).length;
+    if (gone.length && moved * 2 >= gone.length) continue;
+    out.push({ file: w.file, before: w.before, after: w.after });
+  }
+  return out.length ? out : null;
+}
+
 // A change is judged by the gate that was in force before it (`baseGate`: the config at base, or the
 // zero-config gate when this change adds the first config). So a change cannot switch off the source-only
 // re-run for a metric that had it, loosen gamingThreshold, or swap the setup, env or linked dirs it is
@@ -1227,6 +1251,7 @@ function gate(repo, opts) {
   for (const m of guards) if (!m.allowed) m.allowable = true;   // failed, and a declared reason would clear it: say so in the report
   // for whoever repairs it, a person or a fix run: which files a fallen count fell in, and whether a reason in a commit is taken
   if (!opts.working) for (const m of guards) if (!m.allowed && m.status === 'regressed') { const w = tripwireWhere(repo, base, head, (cfg.metrics || []).find((c) => c && c.name === m.name)); if (w) m.where = w; }
+  if (!opts.working) for (const m of metrics) if (PER_FILE.has(m.name) && m.guard && m.status !== 'regressed') { const w = lostInFiles(repo, base, head, (cfg.metrics || []).find((c) => c && c.name === m.name)); if (w) m.lostIn = w; }
   const byCommit = opts.working || trailersOff() ? [] : guards.filter((m) => !m.allowed && mode.get(m.name) === true).map((m) => m.name);
   const mandated = mandateViolations.length > 0;
   const verdict = deriveVerdict(metrics, gateInfo, mandated);
@@ -1509,6 +1534,7 @@ function printHuman(r) {
     else if (m.inert) console.log(`      ⚠ "${m.name}" ${m.ran ? `ran and failed at the ${m.ran} ref and did not run at the other` : 'never ran (same value at both refs)'}: its command needs a build/deps first, or is not your real test command. Fix: promptwheel init, or set setup/linkDirs in promptwheel.config.json`);
     if (m.gamed === true) console.log(`      🚩 GAMED, ${m.gamingReason}`);
   }
+  for (const m of r.metrics || []) for (const w of m.lostIn || []) console.log(`  ℹ note: ${w.file} has ${PLAIN[m.name] || m.name} (${w.before} → ${w.after}), though the repo's total did not fall`);
   for (const x of r.explained || []) if (x.metric === 'environment') console.log(`  ℹ note: ${x.what}: ${x.items.join(', ')}`);
   if (r.setup) { const at = Object.keys(r.setup), f = r.setup[at[0]]; console.log(`  ⚠ setup failed (exit ${f.exit}) at the ${at.join(' and ')} ref${at.length > 1 ? 's' : ''}${f.lastLine ? ': ' + f.lastLine : ''}`); }
   if (r.gate && r.gate.weakened) for (const w of r.gate.weakened) console.log(w.change === 'measurement-edited'
