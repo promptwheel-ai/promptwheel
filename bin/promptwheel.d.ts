@@ -171,6 +171,10 @@ export interface MetricResult extends Evaluation {
   overBudget?: { gain: string; share: number; allowed: number };
   /** Present (`true`) only when this guarded metric regressed, no reason was declared, and `allowable: true` means a `--allow` / trailer reason would clear it. */
   allowable?: true;
+  /** A counting tripwire that fell, in a run between two commits: the files where it fell furthest, at most five. */
+  where?: { file: string; before: number; after: number }[];
+  /** A count of tests or assertions that held for the repo and fell in these files (a file moved or split is left out). A note for a reader, never part of a verdict. */
+  lostIn?: { file: string; before: number; after: number }[];
 }
 
 export interface MandateViolation {
@@ -295,6 +299,23 @@ export declare function deriveVerdict(metrics: ReadonlyArray<Partial<MetricResul
  * is resolved to the repository root, where the config lives. A run writes nothing to the repo.
  */
 export declare function check(options?: CheckOptions): Report;
+
+/** One counting tripwire over a change: after minus before, and each touched file's count at both ends. */
+export interface CountChange {
+  /** After minus before. Equals the change in the whole-tree count. */
+  delta: number;
+  /** Only the files the change touched that hold a match at either end: `[before, after]`. */
+  files: Record<string, [number, number]>;
+}
+
+/**
+ * The change in each counting tripwire between two commits, read from the files the change touched alone. No
+ * commit is checked out and no test is run, so every commit of a pull request can be read in the time one check
+ * takes. A metric that is not one of the counting greps `init` writes reads `null`. The whole result is `null`
+ * when the change could not be read (an object that is not in this clone). Takes `repo`, `base`, `head` and
+ * `config` as `check` does.
+ */
+export declare function changeCounts(options?: Pick<CheckOptions, 'repo' | 'base' | 'head' | 'config'>): Record<string, CountChange | null> | null;
 
 /**
  * Structurally validate any verdict object against Section 2 (shapes, the fixed vocabularies,

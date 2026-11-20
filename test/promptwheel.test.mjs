@@ -3374,3 +3374,89 @@ test('a test file moved, split in two, or left alone while tests are added: no f
   writeFileSync(join(d, 'test/new.test.js'), SPEC('new', ['expect(9).toBe(9);'])); writeFileSync(join(d, 'src/a.js'), 'exports.f = () => 2\n'); commitAll(d, 'add');
   r = gateRun(d); assert.equal(lostIn(r, 'assertions'), undefined, 'only additions');
 });
+
+// ---- 0.8.15: a change read from the files it touched alone (changeCounts). Where a count fell, and the per-file
+// note, used to check out both commits again and count the whole tree by file: 3 to 22 seconds on real pull requests
+// (proof-bench/outside-repos). A grep count is a sum over files, so the files a change did not touch cancel: only the
+// touched files are written out, as they stood at each end, and the contract's own command counts them.
+const engineNow = await import('../bin/promptwheel.mjs');
+const FOUR = ['test_count', 'skipped_tests', 'suppressions', 'assertions'];
+const readerRepo = () => {
+  const d = repoWith({
+    'package.json': JSON.stringify({ name: 'a' }), 'src/a.js': 'exports.f = () => 1\n',
+    'test/a.test.js': "test('one', () => { expect(1).toBe(1); expect(2).toBe(2); });\ntest('two', () => { expect(3).toBe(3); });\n",
+    'test/gone.test.js': "test('gone', () => { expect(4).toBe(4); });\nit('gone too', () => { assert.ok(1); });\n",
+    'test/moved.test.js': "test('moved', () => { expect(5).toBe(5); });\n",
+    'test/still.test.js': "test('still', () => { expect(6).toBe(6); });\n",
+    'docs/guide.md': 'Call it (once) and test (twice).\n',
+  });
+  assert.equal(pw(d, ['init', '--no-agent-block']).code, 0);
+  commitAll(d, 'sign');
+  return d;
+};
+const tripwireCfg = (d) => { const c = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8')); return { ...c, metrics: c.metrics.filter((m) => FOUR.includes(m.name)) }; };
+const wholeTree = (d, base, head, config) => Object.fromEntries(check({ repo: d, base, head, config, detectGaming: false }).metrics.map((m) => [m.name, m.after - m.before]));
+test('changeCounts: the change in every count is the same as counting both whole trees, and no commit is checked out', () => {
+  const d = readerRepo(); const config = tripwireCfg(d); const base = rev(d);
+  writeFileSync(join(d, 'test/a.test.js'), "test('one', () => { expect(1).toBe(1); });\n");                      // a test and two assertions gone
+  writeFileSync(join(d, 'test/new.test.js'), "test('n1', () => { expect(7).toBe(7); });\nit.skip('n2', () => {});\n");   // added, one skipped
+  rmSync(join(d, 'test/gone.test.js'));                                                                          // deleted
+  mkdirSync(join(d, 'test/sub')); execFileSync('git', ['mv', 'test/moved.test.js', 'test/sub/moved.test.js'], { cwd: d });   // moved
+  mkdirSync(join(d, 'dist')); writeFileSync(join(d, 'dist/built.test.js'), "test('built', () => { expect(8).toBe(8); });\n");   // a folder the count leaves out
+  writeFileSync(join(d, 'docs/guide.md'), 'Call it (once), test (twice), describe (it), expect (nothing).\n');    // not a code file
+  writeFileSync(join(d, 'test/ñandú más.test.js'), "test('ñ', () => { expect(9).toBe(9); });\n");                  // a name git would quote
+  symlinkSync('a.test.js', join(d, 'test/link.test.js'));                                                         // a link: grep -r does not follow one
+  writeFileSync(join(d, 'src/a.js'), '// eslint-disable-next-line no-undef\nexports.f = () => 1\n');              // one more silenced check
+  commitAll(d, 'a change of every kind');
+  const whole = wholeTree(d, base, 'HEAD', config);
+  assert.deepEqual(whole, { test_count: -1, skipped_tests: 1, suppressions: 1, assertions: -2 }, 'the fixture moves all four counts');
+  const before = execFileSync('git', ['worktree', 'list'], { cwd: d, encoding: 'utf8' });
+  const got = engineNow.changeCounts({ repo: d, base, head: 'HEAD', config });
+  assert.deepEqual(Object.fromEntries(FOUR.map((n) => [n, got[n].delta])), whole);
+  assert.deepEqual(got.test_count.files['test/a.test.js'], [2, 1]);
+  assert.deepEqual(got.test_count.files['test/gone.test.js'], [2, 0]);
+  assert.deepEqual(got.test_count.files['test/ñandú más.test.js'], [0, 1], 'a name with a space and bytes above 127 is read as it is');
+  assert.equal(got.test_count.files['dist/built.test.js'], undefined, 'a folder the contract leaves out is left out here');
+  assert.equal(got.test_count.files['test/link.test.js'], undefined, 'a link is not read');
+  assert.equal(got.test_count.files['test/still.test.js'], undefined, 'a file the change did not touch is not read at all');
+  assert.equal(execFileSync('git', ['worktree', 'list'], { cwd: d, encoding: 'utf8' }), before);
+  rmSync(d, { recursive: true, force: true });
+});
+test('changeCounts: a count that is not a counting grep is not guessed at, and a change that touches no file reads zero', () => {
+  const d = readerRepo(); const config = tripwireCfg(d);
+  config.metrics.push({ name: 'todos', cmd: 'grep -rn TODO . --include=*.js 2>/dev/null | wc -l', extract: 'number', direction: 'down', guard: true });
+  const got = engineNow.changeCounts({ repo: d, base: 'HEAD', head: 'HEAD', config });
+  assert.equal(got.todos, null, 'only the tripwires init writes are read this way');
+  assert.deepEqual(got.test_count, { delta: 0, files: {} });
+  rmSync(d, { recursive: true, force: true });
+});
+test('changeCounts: a tree made by hand to climb out of the folder writes nothing outside it', () => {
+  const d = readerRepo(); const config = tripwireCfg(d);
+  const g = (args, input) => execFileSync('git', args, { cwd: d, input, encoding: 'utf8' }).trim();
+  const blob = g(['hash-object', '-w', '--stdin'], "test('escaped', () => { expect(1).toBe(1); });\n");
+  // a tree whose one entry is named "..", holding another "..", holding a test file: git makes no such tree on its
+  // own. Two steps up from a side folder is the temp folder itself.
+  const up = (tree) => execFileSync('git', ['hash-object', '-t', 'tree', '-w', '--literally', '--stdin'], { cwd: d, input: Buffer.concat([Buffer.from('40000 ..\0'), Buffer.from(tree, 'hex')]), encoding: 'utf8' }).trim();
+  const evil = up(up(g(['mktree'], `100644 blob ${blob}\tpw-escaped-${process.pid}.test.js\n`)));
+  assert.match(g(['diff-tree', '-r', '--name-only', 'HEAD', evil]), /^\.\.\/\.\.\/pw-escaped-/m, 'git itself names the path that climbs');
+  const commit = g(['commit-tree', evil, '-p', 'HEAD', '-m', 'a tree that climbs out']);
+  const landed = join(tmpdir(), `pw-escaped-${process.pid}.test.js`);
+  let got; assert.doesNotThrow(() => { got = engineNow.changeCounts({ repo: d, base: 'HEAD', head: commit, config }); });
+  assert.equal(existsSync(landed), false, 'nothing was written beside the scratch folder');
+  assert.ok(got === null || !Object.keys((got.test_count || {}).files || {}).some((f) => f.includes('..')), 'and the path is not counted');
+  rmSync(d, { recursive: true, force: true });
+});
+test('run: where a count fell is read from the change alone, and names the same files as before', () => {
+  const d = readerRepo();
+  writeFileSync(join(d, 'test/a.test.js'), "test('one', () => { expect(1).toBe(1); });\n"); rmSync(join(d, 'test/gone.test.js'));
+  writeFileSync(join(d, 'test/new.test.js'), "test('n1', () => {});\n"); commitAll(d, 'two files lose tests, one gains');
+  const log = join(TMP_ROOT, `git-calls-${process.pid}.log`); const bin = mkdtempSync(join(TMP_ROOT, 'gitlog-'));
+  const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\necho "$*" >> ${JSON.stringify(log)}\nexec ${JSON.stringify(real)} "$@"\n`); chmodSync(join(bin, 'git'), 0o755);
+  const r = spawnSync('node', [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--json', '--no-record', '--no-auto'], { cwd: d, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  const rep = JSON.parse(r.stdout);
+  assert.deepEqual(rep.metrics.find((m) => m.name === 'test_count').where, [{ file: 'test/gone.test.js', before: 2, after: 0 }, { file: 'test/a.test.js', before: 2, after: 1 }]);
+  const adds = readFileSync(log, 'utf8').split('\n').filter((l) => /worktree add/.test(l)).length;
+  assert.equal(adds, 2, `the two commits are checked out once each, for the measure itself, and never again to say where (${adds} checkouts)`);
+  rmSync(d, { recursive: true, force: true });
+});
