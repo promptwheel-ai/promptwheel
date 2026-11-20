@@ -1797,7 +1797,8 @@ function renderMarkdown(r, o = {}) {
   const span = `${r.base} → ${r.head}`, rest = `${r.repeat > 1 ? `, ×${r.repeat}` : ''}, verdict ${r.verdict.toUpperCase()}`;
   const would = o.commentOnly && o.wouldFail;
   return [
-    `### ${would ? '✋' : MD_ICON[r.verdict] || '❌'} Sawbuck${would ? ', comment only: this would have been sent back' : `: ${MD_HEADLINE[r.verdict] || r.verdict}`}`,
+    // comment-only, on a run that would have failed the job: a send-back is called one; a check that measured nothing is not
+    `### ${would && r.verdict !== 'inconclusive' ? '✋' : MD_ICON[r.verdict] || '❌'} Sawbuck${would ? `, comment only: ${r.verdict === 'inconclusive' ? MD_HEADLINE.inconclusive : 'this would have been sent back'}` : `: ${MD_HEADLINE[r.verdict] || r.verdict}`}`,
     ...(would ? ['This check only comments here. It never fails the job.'] : []),
     ...(r.mandates ? [[...r.mandates.map((md) => `> ⛔ **Protected path touched:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : md.edited ? ' (edited in this same change; the version before the change stays in force for the change that edits it)' : ''}`), ...mdPathWayOut(r)].join('\n')] : []),
     ...(r.explained ? [[...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...mdWayOut(r)].join('\n')] : []),
@@ -1856,6 +1857,8 @@ export function commentPlan(input = {}) {
   if (speaks || mode === 'always') text = render(true);
   else if (mine) text = [`### ✅ Sawbuck: passes`, `Nothing to add on this push (\`${report.base} → ${report.head}\`). What this comment said about an earlier push is in its edit history.`, MD_FOOT].join('\n\n');
   if (!text) return { action: 'none', body: '', summary, wouldFail };
+  // GitHub takes 65,536 characters in a comment and refuses a longer one whole: cut it, and say where the rest is
+  if (text.length > 60000) text = `${text.slice(0, 60000)}\n\n(Cut short: the whole report is in the job summary.)`;
   const body = `${marker}\n${text}`;
   if (mine && String(mine.body || '').trim() === body.trim()) return { action: 'none', body: '', summary, wouldFail };
   return mine ? { action: 'update', id: mine.id, body, summary, wouldFail } : { action: 'create', body, summary, wouldFail };

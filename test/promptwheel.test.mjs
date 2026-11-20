@@ -3539,6 +3539,9 @@ test('comment-only: the comment says what would have been sent back, and that th
   assert.equal(p.action, 'create'); assert.equal(p.wouldFail, true);
   assert.match(p.body, /### ✋ Sawbuck, comment only: this would have been sent back\n\nThis check only comments here\. It never fails the job\.\n\n> ✋ \*\*Needs a look:\*\* fewer tests/);
   p = plan({ report: prRep(), exit: 0, commentOnly: true }); assert.equal(p.action, 'none'); assert.equal(p.wouldFail, false);
+  // a check that measured nothing is not called a send-back: it says what it is
+  p = plan({ report: prRep({ verdict: 'inconclusive', metrics: [{ ...prRep().metrics[0], before: 0, after: 0, inert: true }] }), exit: 3, inconclusive: 'fail', commentOnly: true });
+  assert.match(p.body, /### 🟡 Sawbuck, comment only: could not measure\n\nThis check only comments here\. It never fails the job\./);
   p = plan({ report: null, exit: 64, error: 'some warning\npromptwheel: promptwheel.config.json is not valid JSON (Unexpected token } at 12)\n', commentOnly: true });
   assert.equal(p.action, 'create'); assert.match(p.body, /### ⚠️ Sawbuck: could not run\n\nNothing was checked on this push:\n\n> promptwheel: promptwheel\.config\.json is not valid JSON \(Unexpected token \} at 12\)/);
   assert.match(plan({ report: null, exit: 64, error: '' }).body, /could not run/, 'with comment-only off too: a red job says why');
@@ -3611,4 +3614,11 @@ test('a protected path sent back on a pull request says how to accept it; one th
   // a reason was given and let it through: nothing is asked
   md = renderMarkdown(prRep({ allowed: { reason: 'the step is harmless (approved by pat)', cleared: ['mandate:workflows-frozen'] }, allowable: ['mandate:workflows-frozen'] }));
   assert.doesNotMatch(md, /To accept this/);
+});
+test('a comment longer than GitHub takes is cut short and says where the rest is, so it is still posted', () => {
+  const many = Array.from({ length: 4000 }, (_, i) => `.github/workflows/generated-workflow-number-${i}.yml`);
+  const p = plan({ report: prRep({ verdict: 'fail', mandates: [{ name: 'workflows-frozen', reason: 'workflows run with the repository secrets', files: many, allowable: 'flag' }], allowable: ['mandate:workflows-frozen'] }), exit: 1 });
+  assert.equal(p.action, 'create'); assert.ok(p.body.length < 65000, `${p.body.length} characters`);
+  assert.match(p.body, /\(Cut short: the whole report is in the job summary\.\)\n*$/);
+  assert.ok(p.summary.length > p.body.length, 'the job summary has all of it');
 });
