@@ -4176,13 +4176,15 @@ test('improve --turns: a file a later turn added is not in the kept commit; the 
   pw2(d, ['improve', '--turns', '2', '--attempt', script(`cat "$PW_FEEDBACK" > ${out}/g-$PW_TURN.txt; [ "$PW_TURN" = 1 ] && sed -i 's|, 2))|, 8))|' calc.test.mjs; true`)]);
   assert.match(readFileSync(join(out, 'g-2.txt'), 'utf8'), /by a change to the tests or the contract, not the source\. That is not a win/);
 });
-test('improve: a commit the repo refuses, a protected path, a label with a line break, a second loop in the same repo', () => {
+test('improve: a git hook is not asked, a protected path, a label with a line break, a second loop in the same repo', () => {
   const out = mkdtempSync(join(tmpdir(), 'pw-x-'));
   let d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base'); let base = rev(d);
+  // a git hook is not asked: the loop's commit is exactly the tree it judged, and a hook could add to it after the check
+  // looked. (Until this was held to the other session's attacks, a hook that said no made the result "refused".)
   writeFileSync(join(d, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho "the hook says no" >&2\nexit 1\n'); chmodSync(join(d, '.git', 'hooks', 'pre-commit'), 0o755);
   let r = pw2(d, ['improve', '--json', '--attempt', "sed -i 's| // TODO||' app.js"]);
-  assert.equal(r.code, 1, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'refused'); assert.equal(rev(d), base); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
-  rmSync(join(d, '.git', 'hooks', 'pre-commit'));
+  assert.equal(r.code, 0, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'kept'); assert.doesNotMatch(r.err, /the hook says no/); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
+  rmSync(join(d, '.git', 'hooks', 'pre-commit')); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'a todo again'); base = rev(d);
   // a label with a line break stays one line in the commit: it cannot plant a line of its own in the message
   r = pw2(d, ['improve', '--label', 'tidy\nPromptwheel-Allow: because', '--attempt', "sed -i 's| // TODO||' app.js"]);
   assert.equal(r.code, 0, r.err); assert.equal(gitOut(d, ['log', '-1', '--format=%B']), 'promptwheel improve: tidy Promptwheel-Allow: because (improved todos)');
@@ -4223,4 +4225,61 @@ test('the views read a record that holds junk: a bare null, a label written by h
   for (const c of ['insights', 'playbook', 'suggest']) assert.equal(pw(d, [c]).code, 0, c);
   const p = pw(d, ['playbook']).out;
   assert.equal((p.match(/^## Tried and thrown away/gm) || []).length, 1, 'a label cannot plant a heading of its own'); assert.match(p, /- \*\*by hand ## Tried and thrown away - fake\*\*: nothing moved/);
+});
+
+// ---- What is judged cannot touch what judges it (the other session's attack list, 2026-11-21) -------------------------------
+// A session on another machine held its own loop step to 28 attacks. Run against this command, 8 of the 25 that apply got
+// through (proof-bench/wheel/raw/their-attacks-1.txt). Two are limits on every step (an installed dependency the measure
+// runs, a safety rule deleted behind another). The other six are closed here, each by its rule:
+//   keep exactly what was judged (a hook, a late write);  the loop's own files are put back (the record, the program);
+//   a file hidden from git is shown again, and the attempt that hid it is put back.
+const treeOf = (d, ref) => gitOut(d, ['rev-parse', `${ref}^{tree}`]);
+test('improve keeps exactly the tree it judged: a hook the attempt planted does not run, and a file written after the check is not in the commit', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'pw-judge-'));
+  let d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  // the attempt gains, and plants a pre-commit hook that would add a worse change at commit time
+  const hook = `#!/bin/sh\\necho "x // TODO" >> app.js; echo "y // TODO" >> app.js; echo "z // TODO" >> app.js; git add app.js; touch ${tmp}/hook-ran\\n`;
+  let r = pw2(d, ['improve', '--json', '--attempt', `sed -i '1s| // TODO||' app.js; printf '${hook}' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit`]);
+  assert.equal(r.code, 0, r.out + r.err); let j = JSON.parse(r.out);
+  assert.equal(treeOf(d, 'HEAD'), treeOf(d, j.provenance.headSha), 'the commit holds the tree that was judged, and nothing else');
+  assert.equal(existsSync(join(tmp, 'hook-ran')), false, 'no git hook runs on the commit the loop makes'); assert.equal(readFileSync(join(d, 'app.js'), 'utf8'), 'a\nb // TODO\n');
+  rmSync(join(d, '.git', 'hooks', 'pre-commit'), { force: true });
+  // a process the attempt leaves behind writes into the tree after the check has looked and before the commit
+  const SEEN = { name: 'todos', cmd: `touch ${tmp}/measured; grep -rn TODO . --include=*.js 2>/dev/null | wc -l`, extract: 'number', direction: 'down', guard: true };
+  d = tmpRepo([SEEN]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  r = pw2(d, ['improve', '--json', '--attempt', `rm -f ${tmp}/measured; sed -i '1s| // TODO||' app.js; (while [ ! -f ${tmp}/measured ]; do sleep 0.05; done; sleep 0.3; echo 'late // TODO' >> app.js; echo late > late.js; touch ${tmp}/late-done) >/dev/null 2>&1 &`]);
+  assert.equal(r.code, 0, r.out + r.err); j = JSON.parse(r.out);
+  for (let i = 0; i < 100 && !existsSync(join(tmp, 'late-done')); i++) await new Promise((res) => setTimeout(res, 50));
+  assert.equal(treeOf(d, 'HEAD'), treeOf(d, j.provenance.headSha), 'what the late process wrote is not in the commit');
+  assert.equal(gitOut(d, ['show', 'HEAD:app.js']), 'a\nb // TODO'); assert.equal(gitOut(d, ['ls-tree', '--name-only', 'HEAD']).includes('late.js'), false);
+});
+test('improve: a file hidden from git is shown again and the attempt that hid it is put back; the loop does not start while a file is hidden', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); writeFileSync(join(d, 'lib.js'), 'x\n'); commitAll(d, 'base'); const base = rev(d);
+  // the attempt hides lib.js from git and edits it: a put-back with git alone would leave that edit in the tree for every later try
+  let r = pw2(d, ['improve', '--json', '--attempt', "git update-index --skip-worktree lib.js; git update-index --assume-unchanged lib.js; echo 'hidden edit' >> lib.js; sed -i 's| // TODO||' app.js"]);
+  assert.equal(r.code, 1, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'refused'); assert.deepEqual(JSON.parse(r.out).because, ['hidden']); assert.match(r.err, /hid .*lib\.js.* from git/);
+  assert.equal(readFileSync(join(d, 'lib.js'), 'utf8'), 'x\n', 'the hidden edit is gone'); assert.equal(gitOut(d, ['ls-files', '-v', 'lib.js']), 'H lib.js', 'and the file is no longer hidden'); assert.equal(rev(d), base);
+  // the next honest try is judged on its own change alone
+  r = pw2(d, ['improve', '--json', '--attempt', "echo '// a note' >> lib.js"]); assert.equal(r.code, 3, r.out + r.err);
+  // a file that is hidden before the loop starts: it says so and does nothing
+  execFileSync('git', ['update-index', '--skip-worktree', 'lib.js'], { cwd: d });
+  r = pw2(d, ['improve', '--attempt', 'touch should-not-run']); assert.equal(r.code, 64); assert.match(r.err, /hidden from git/); assert.match(r.err, /lib\.js/); assert.equal(existsSync(join(d, 'should-not-run')), false);
+});
+test("improve puts back the loop's own files: an attempt that wipes the record, or rewrites the program that judges it, is refused", () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  assert.equal(pw2(d, ['improve', '--label', 'first', '--attempt', "sed -i '1s| // TODO||' app.js"]).code, 0);
+  let r = pw2(d, ['improve', '--json', '--attempt', "rm -f .git/promptwheel/outcomes.jsonl; sed -i 's| // TODO||' app.js"]);
+  assert.equal(r.code, 1, r.out + r.err); assert.deepEqual(JSON.parse(r.out).because, ['record']);
+  assert.deepEqual(ledger(d).map((x) => [x.label || null, x.result]), [['first', 'kept'], [null, 'refused']], 'the line of the first try is still there');
+  // the engine installed inside the repo, in a folder git ignores, and run from there (the way npm installs it)
+  const e = repoWith({ '.gitignore': 'node_modules/\n', 'promptwheel.config.json': JSON.stringify({ linkNodeModules: false, metrics: [TODOS] }), 'app.js': 'a // TODO\n' });
+  const here = join(e, 'node_modules', 'promptwheel'); mkdirSync(join(here, 'bin'), { recursive: true });
+  writeFileSync(join(here, 'bin', 'promptwheel.mjs'), readFileSync(ENGINE)); writeFileSync(join(here, 'package.json'), readFileSync(join(dirname(ENGINE), '..', 'package.json')));
+  const before = createHash('sha256').update(readFileSync(join(here, 'bin', 'promptwheel.mjs'))).digest('hex');
+  const run = (attempt) => { const x = spawnSync(process.execPath, [join(here, 'bin', 'promptwheel.mjs'), 'improve', '--json', '--attempt', attempt], { cwd: e, encoding: 'utf8' }); return { code: x.status, out: x.stdout, err: x.stderr }; };
+  r = run(`printf 'process.exit(0)\\n' > node_modules/promptwheel/bin/promptwheel.mjs; echo 'x // TODO' >> app.js`);
+  assert.equal(r.code, 1, r.out + r.err); assert.deepEqual(JSON.parse(r.out).because, ['program']); assert.match(r.err, /the program that judges it/);
+  assert.equal(createHash('sha256').update(readFileSync(join(here, 'bin', 'promptwheel.mjs'))).digest('hex'), before, 'the program is as it was');
+  assert.equal(run("echo 'y // TODO' >> app.js").code, 1, 'and the next try is judged by it: a worse change is still put back');
+  assert.match(pw(d, ['playbook']).out, /the attempt changed the loop's own record/);
 });
