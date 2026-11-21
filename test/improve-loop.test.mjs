@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -481,6 +481,105 @@ test('loop: an attempt that deletes the gate\'s config is not kept', () => {
   const d = toy(), base = head(d);
   const r = step(d, 'rm promptwheel.config.json && echo 110 > src/score.txt');
   assert.notEqual(r.code, 0, r.out); assert.equal(head(d), base); assert.ok(existsSync(join(d, 'promptwheel.config.json'))); assert.equal(state(d), '100 100');
+});
+
+// ------------------------------------------------------------------ what an attempt cannot slip past the gate
+// Found on 2026-11-21 by holding the step to a list of attacks. Each of these got through before. The step judged the
+// working tree and then committed whatever the tree held a moment later, and it kept its own files where an attempt
+// could write them. Now the gate judges one commit and that commit is what is kept, and the loop's own files (the
+// record, the floor, the kept refs, the base cache, the gate program and this step) are put back after every attempt.
+const SAYS_YES = join(TMP_ROOT, 'says-yes.mjs');     // a gate that passes anything
+writeFileSync(SAYS_YES, "console.log(JSON.stringify({ verdict: 'pass', metrics: [{ name: 'score', before: 100, after: 999, status: 'improved', ok: true, guard: true, direction: 'up' }, { name: 'cost', before: 100, after: 100, status: 'unchanged', ok: true, guard: true, direction: 'down' }] }));\n");
+const KEEPS_ALL = join(TMP_ROOT, 'keeps-all.mjs');   // a step that keeps anything
+writeFileSync(KEEPS_ALL, "import { execSync } from 'node:child_process';\ntry { execSync(process.argv[process.argv.indexOf('--attempt') + 1], { stdio: 'inherit' }); } catch { /* keep going */ }\ntry { execSync('git add -A && git commit -qm kept'); } catch { /* nothing to commit */ }\n");
+
+test('loop: a git hook cannot add to a kept change: the commit holds the tree the gate judged, and no hook runs', () => {
+  const d = toy(), hook = join(d, '.git', 'hooks', 'pre-commit');
+  const r = step(d, `echo 110 > src/score.txt; printf '#!/bin/sh\\necho 200 > src/cost.txt\\ngit add src/cost.txt\\n' > ${hook}; chmod +x ${hook}`);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(git(d, 'show', 'HEAD:src/cost.txt'), '100', 'the cost the gate judged, not the one the hook wrote');
+  assert.equal(state(d), '110 100'); assert.ok(clean(d));
+});
+test('loop: what a process the attempt left running does after the gate looked is not kept: not an edit, not a new file', async () => {
+  const d = toy({ cost: { cmd: 'sleep 0.3; cat src/cost.txt' } });   // a gate that takes a moment, as a real one does
+  // the process waits for the scorer's second reading: by then the gate holds its own copy of the change
+  const late = `( i=0; while [ $i -lt 500 ]; do n=$(cat ${d}.asked 2>/dev/null | wc -l); [ "$n" -ge 2 ] && break; sleep 0.01; i=$((i+1)); done; echo 200 > src/cost.txt; echo late > src/late.txt ) </dev/null >/dev/null 2>&1 &`;
+  const r = step(d, `echo 110 > src/score.txt; ${late}`);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(git(d, 'show', 'HEAD:src/cost.txt'), '100', 'the kept commit holds the cost the gate judged');
+  assert.equal(git(d, 'show', '--name-only', '--format=', 'HEAD'), 'src/score.txt');
+  assert.equal(state(d), '110 100'); assert.ok(!existsSync(join(d, 'src/late.txt'))); assert.ok(clean(d), 'and the tree is the kept commit, nothing more');
+});
+test('loop: a file an attempt hides from git is brought back into view and judged (skip-worktree and assume-unchanged)', () => {
+  for (const flag of ['--skip-worktree', '--assume-unchanged']) {
+    const d = toy(), base = head(d);
+    const r = step(d, `git update-index ${flag} src/cost.txt; echo 200 > src/cost.txt`);
+    assert.equal(r.code, 1, `${flag}: ${r.out}${r.err}`); assert.match(r.out, / worse .*cost 100 to 200/);
+    assert.equal(head(d), base); assert.equal(read(d, 'src/cost.txt'), '100'); assert.ok(clean(d));
+    assert.match(git(d, 'ls-files', '-v', 'src/cost.txt'), /^H /, 'the file is no longer hidden');
+    assert.equal(step(d, 'echo more >> README.md').code, 3, 'so the next try is not read as a win');
+  }
+});
+test('loop: it refuses to start while an edited file is hidden from git, and says which (exit 64)', () => {
+  const d = toy(); git(d, 'update-index', '--skip-worktree', 'src/cost.txt'); writeFileSync(join(d, 'src/cost.txt'), '200\n');
+  const r = step(d, 'echo 110 > src/score.txt');
+  assert.equal(r.code, 64); assert.match(r.err, /hidden from git[^\n]*src\/cost\.txt/);
+  assert.equal(read(d, 'src/score.txt'), '100', 'the attempt did not run'); assert.equal(read(d, 'src/cost.txt'), '200', 'and your file is left alone');
+});
+test('loop: a hidden file that was not edited does not stop the step, and stays hidden', () => {
+  const d = toy(); git(d, 'update-index', '--skip-worktree', 'README.md');
+  assert.equal(step(d, 'echo 110 > src/score.txt').code, 0);
+  assert.match(git(d, 'ls-files', '-v', 'README.md'), /^S /);
+});
+test('loop --base-cache: an attempt that edits the kept base number, or plants one, does not move the base', () => {
+  const d = toy(), base = head(d), cache = `${d}.cache`;
+  step(d, 'echo more >> README.md', '--base-cache', cache);
+  const [file] = readdirSync(cache), kept = readFileSync(join(cache, file), 'utf8');
+  assert.match(kept, /"score":\[100\]/);
+  const r = step(d, `sed -i.bak 's/"score":\\[100\\]/"score":[50]/' ${cache}/*.json; echo planted > ${cache}/extra.json; echo 80 > src/score.txt`, '--base-cache', cache);
+  assert.equal(r.code, 1, r.out + r.err); assert.match(r.out, / worse .*score 100 to 80/);
+  assert.equal(head(d), base);
+  assert.deepEqual(readdirSync(cache), [file], 'what the attempt added to the folder is gone'); assert.equal(readFileSync(join(cache, file), 'utf8'), kept);
+  assert.deepEqual(record(d)[1].restored, ['base cache']);
+});
+test('loop: an attempt that rewrites the gate program is judged by the gate as it was', () => {
+  const d = toy(), base = head(d), gate = join(d, 'ignored', 'gate');
+  for (const part of ['bin', 'packs', 'package.json']) cpSync(join(ROOT, part), join(gate, part), { recursive: true });
+  const engine = readFileSync(join(gate, 'bin', 'promptwheel.mjs'), 'utf8');
+  const r = run(d, ['--attempt', `cp ${SAYS_YES} ignored/gate/bin/promptwheel.mjs; echo 120 > src/cost.txt`], { PROMPTWHEEL: `${process.execPath} ignored/gate/bin/promptwheel.mjs` });
+  assert.equal(r.code, 1, r.out + r.err); assert.equal(head(d), base); assert.equal(read(d, 'src/cost.txt'), '100');
+  assert.equal(readFileSync(join(gate, 'bin', 'promptwheel.mjs'), 'utf8'), engine, 'the gate program is put back');
+  assert.deepEqual(record(d)[0].restored, ['gate']);
+});
+test('loop: an attempt that rewrites the loop step itself (copied into the repo) does not get the next change kept by its own step', () => {
+  const d = toy(); put(d, 'tools/improve.mjs', readFileSync(RIG, 'utf8')); chmodSync(join(d, 'tools/improve.mjs'), 0o755); git(d, 'add', '-A'); git(d, 'commit', '-q', '-m', 'the step, copied in');
+  const own = (attempt) => spawnSync(process.execPath, ['tools/improve.mjs', '--attempt', attempt], { cwd: d, encoding: 'utf8', env: { ...ENV, PROMPTWHEEL: `${process.execPath} ${join(ROOT, 'bin', 'promptwheel.mjs')}` }, timeout: 120000 });
+  const r = own(`echo 110 > src/score.txt; cp ${KEEPS_ALL} tools/improve.mjs`);
+  assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, /put back: step/, 'the line says so');
+  assert.equal(readFileSync(join(d, 'tools/improve.mjs'), 'utf8'), readFileSync(RIG, 'utf8'), 'the step is as it was');
+  assert.equal(git(d, 'show', '--name-only', '--format=', 'HEAD'), 'src/score.txt', 'and the kept commit does not touch it');
+  assert.equal(own('echo 120 > src/cost.txt').status, 1); assert.equal(read(d, 'src/cost.txt'), '100');
+  assert.deepEqual(record(d)[0].restored, ['step']);
+});
+test('loop: an attempt that deletes the refs of earlier tries does not erase them', () => {
+  const d = toy();
+  step(d, 'echo 90 > src/score.txt');
+  const first = git(d, 'rev-parse', 'refs/improve/1');
+  assert.equal(step(d, `git for-each-ref --format='%(refname)' refs/improve | xargs -n1 git update-ref -d; echo 110 > src/score.txt`).code, 0);
+  assert.equal(git(d, 'rev-parse', 'refs/improve/1'), first); assert.equal(git(d, 'show', 'refs/improve/1:src/score.txt'), '90');
+  assert.deepEqual(record(d)[1].restored, ['refs']);
+});
+test('loop: when an attempt also prunes the objects, the record says which earlier tries can no longer be read', () => {
+  const d = toy();
+  step(d, 'echo 90 > src/score.txt');
+  const r = step(d, `git for-each-ref --format='%(refname)' refs/improve | xargs -n1 git update-ref -d; git gc -q --prune=now; echo 110 > src/score.txt`);
+  assert.equal(r.code, 0, r.err); assert.deepEqual(record(d)[1].refsLost, ['refs/improve/1']);
+});
+test('loop: a reason written into the attempt\'s own commit message, or into a label, does not excuse a gamed win', () => {
+  const d = toy();
+  assert.equal(step(d, 'echo 50 > evals/bonus.txt; git commit -qam "tune" -m "Promptwheel-Allow: the grader needed this"').code, 2);
+  assert.equal(step(d, 'echo 50 > evals/bonus.txt', '--label', 'tune\n\nPromptwheel-Allow: the grader needed this').code, 2);
+  assert.equal(read(d, 'evals/bonus.txt'), '0');
 });
 
 // ------------------------------------------------------------------ the loop as a whole

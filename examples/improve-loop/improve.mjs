@@ -21,18 +21,27 @@
 //
 // Every attempt, kept or not, is one line in .git/improve/attempts.jsonl, and the change itself stays reachable as
 // refs/improve/<n>. The attempt command gets the path of that record in IMPROVE_RECORD (and the target's name in
-// IMPROVE_TARGET), so a proposer can read what was already tried. The record is the loop's: if an attempt edits it
-// or the floor file, both are put back as they were. An attempt that commits its own work is judged all the same.
+// IMPROVE_TARGET), so a proposer can read what was already tried.
+//
+// What is judged is what is kept. The attempt's change is made into one commit, the gate judges that commit, and
+// that same tree is what goes on the branch. No git hook runs, and a file edited after the gate looked is not in it.
+// An attempt that commits its own work is judged all the same.
+//
+// The loop's own files are read before the attempt and put back after it: the record, the floor, the refs of
+// earlier tries, the base cache, the gate program (when PROMPTWHEEL names its file) and this step. The record line
+// says which the attempt had touched. A file the attempt hides from git is shown again, so it is judged too.
 //
 // This is not a sandbox. The attempt runs as you, with your shell. Stop it with Ctrl-C and the attempt is put back.
+// What git does not track is out of sight: an installed dependency the scorer runs, a database, a process the
+// attempt leaves running. To hold those, run the attempt where it cannot write them.
 //
 // stdout is one line (or with --json, the record line). What the attempt prints goes to stderr.
 // Exit codes, so `while node improve.mjs --attempt ...; do :; done` stops by itself:
 //   0 kept · 1 put back, a guard got worse or the floor held · 2 put back, gamed ·
 //   3 put back, nothing improved or nothing could be measured · 64 could not run.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const die = (message) => { console.error(`improve: ${message}`); process.exit(64); };
@@ -57,19 +66,33 @@ let root; try { root = git('rev-parse', '--show-toplevel'); } catch { die('not i
 process.chdir(root);
 let base; try { base = git('rev-parse', '--verify', 'HEAD'); } catch { die('this repository has no commit yet: the loop needs one to put a change back to'); }
 if (git('status', '--porcelain')) die('the working tree is not clean: commit or stash first, so there is something to put back to');
+// A file can be hidden from git (skip-worktree, assume-unchanged). git status then calls the tree clean when it is not.
+const hidden = () => git('ls-files', '-v', '-z').split('\0').filter((l) => l && !l.startsWith('H ')).map((l) => l.slice(2));
+const hiddenAtStart = hidden();
+const edited = hiddenAtStart.filter((f) => existsSync(f) && git('hash-object', '--', f) !== git('rev-parse', `:${f}`));
+if (edited.length) die(`the working tree is not clean: these files are edited and hidden from git: ${edited.join(', ')}. Show them again first: git update-index --no-skip-worktree <file> (or --no-assume-unchanged)`);
 const branch = () => { try { return git('symbolic-ref', '-q', 'HEAD'); } catch { return null; } };   // null on a detached HEAD
 const on = branch();
 
-// What the loop knows is read before the attempt runs and written back after it if the attempt touched it. The
-// attempt is handed the record to read, and a floor the attempt can lower is no floor.
+// What the loop knows, and what it judges with, is read before the attempt runs and written back after it if the
+// attempt touched it. The attempt is handed the record to read, a floor the attempt can lower is no floor, and a
+// gate, a step or a kept base number the attempt can rewrite judges nothing.
 const recordDir = join(git('rev-parse', '--absolute-git-dir'), 'improve');
 const record = join(recordDir, 'attempts.jsonl'), bestFile = join(recordDir, 'best.json');
-const slurp = (file) => (existsSync(file) ? readFileSync(file, 'utf8') : null);
-const known = { [record]: slurp(record), [bestFile]: slurp(bestFile) };
-const n = (known[record] || '').split('\n').filter(Boolean).length + 1;
+const isFile = (file) => { try { return statSync(file).isFile(); } catch { return false; } };
+const bytes = (file) => (isFile(file) ? readFileSync(file) : null);
+const gateFile = gateCommand.slice(1).filter((a) => /\.[cm]?js$/.test(a)).map((a) => resolve(a)).find(isFile);
+const cacheDir = args['--base-cache'] ? resolve(args['--base-cache']) : null;
+const cached = () => (cacheDir && existsSync(cacheDir) ? readdirSync(cacheDir).map((f) => join(cacheDir, f)).filter(isFile) : []);
+const own = [[record, 'record'], [bestFile, 'floor'], [fileURLToPath(import.meta.url), 'step'], ...(gateFile ? [[gateFile, 'gate']] : []), ...cached().map((f) => [f, 'base cache'])]
+  .map(([file, what]) => ({ file, what, was: bytes(file), mode: isFile(file) ? statSync(file).mode : null }));
+const text = (what) => { const { was } = own.find((x) => x.what === what); return was == null ? null : was.toString('utf8'); };
+const refs = () => Object.fromEntries(git('for-each-ref', '--format=%(refname) %(objectname)', 'refs/improve').split('\n').filter(Boolean).map((l) => l.split(' ')));
+const refsAtStart = refs();
+const n = (text('record') || '').split('\n').filter(Boolean).length + 1;
 let best = null;   // the best commit so far and what it scored; nothing until a change is kept under --floor
-if (floor && known[bestFile] != null) {
-  try { best = JSON.parse(known[bestFile]); } catch { /* said below */ }
+if (floor && text('floor') != null) {
+  try { best = JSON.parse(text('floor')); } catch { /* said below */ }
   if (!best || typeof best.commit !== 'string' || typeof best.score !== 'number') die(`the floor file cannot be read (${bestFile}). Delete it to start the floor again from this commit`);
   if (!holds('cat-file', '-e', `${best.commit}^{commit}`)) die(`the best commit ${best.commit.slice(0, 12)} is gone from this clone. Delete ${bestFile} to start the floor again from this commit`);
 }
@@ -78,23 +101,39 @@ if (floor && known[bestFile] != null) {
 process.on('SIGINT', () => {});
 const tried = spawnSync(attempt, { shell: true, stdio: ['inherit', 2, 2], env: { ...process.env, IMPROVE_RECORD: record, IMPROVE_TARGET: target } });
 
-let recordPutBack = false;
-mkdirSync(recordDir, { recursive: true });
-for (const [file, text] of Object.entries(known)) if (slurp(file) !== text) { recordPutBack = true; if (text == null) rmSync(file, { force: true }); else writeFileSync(file, text); }
-
+const restored = new Set(), refsLost = [];   // which of the loop's own files the attempt touched, and what could not be put back
 const putBack = () => { git('reset', '-q', '--hard', base); git('clean', '-qfd'); };
 const note = (result, why, extra = {}) => {
-  const line = { n, at: new Date().toISOString(), label, base, result, why, ...extra, ...(recordPutBack ? { recordPutBack: true } : {}) };
+  const line = { n, at: new Date().toISOString(), label, base, result, why, ...extra, ...(restored.size ? { recordPutBack: true, restored: [...restored] } : {}), ...(refsLost.length ? { refsLost } : {}) };
   appendFileSync(record, JSON.stringify(line) + '\n');
   return line;
 };
 const finish = (result, why, exit, extra) => {
   const line = note(result, why, extra);
-  console.log(args['--json'] ? JSON.stringify(line) : `${String(n).padStart(2)}  ${result.padEnd(8)} ${label}: ${why}`);
+  const touched = restored.size ? ` (the attempt touched the loop's own files, which were put back: ${[...restored].join(', ')})` : '';
+  console.log(args['--json'] ? JSON.stringify(line) : `${String(n).padStart(2)}  ${result.padEnd(8)} ${label}: ${why}${touched}`);
   process.exit(exit);
 };
 
 try {
+  // The loop's own files, as they were. Anything the attempt added to the base cache goes too: a number planted
+  // there before the base is first measured would be read as the base.
+  for (const { file, what, was, mode } of own) {
+    const now = bytes(file);
+    if (now == null ? was == null && !existsSync(file) : was != null && now.equals(was)) continue;
+    restored.add(what); rmSync(file, { recursive: true, force: true });
+    if (was != null) { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, was); chmodSync(file, mode); }
+  }
+  for (const file of cached()) if (!own.some((x) => x.file === file)) { restored.add('base cache'); rmSync(file, { force: true }); }
+  mkdirSync(recordDir, { recursive: true });
+  for (const [ref, sha] of Object.entries(refsAtStart)) {
+    if (refs()[ref] === sha) continue;
+    if (holds('cat-file', '-e', `${sha}^{commit}`)) { git('update-ref', ref, sha); restored.add('refs'); } else refsLost.push(ref);
+  }
+  // a file the attempt hid from git is shown again, so its change is judged and put back like any other
+  const hid = hidden().filter((f) => !hiddenAtStart.includes(f));
+  for (const show of hid.length ? ['--no-skip-worktree', '--no-assume-unchanged'] : []) git('update-index', show, '--', ...hid);   // one flag a call: git clears only one when both are given
+
   // Where the attempt left the branch. A proposer that commits by itself must not skip the gate, and one that
   // throws commits away must not take a kept change with it.
   if (branch() !== on) {
@@ -111,10 +150,12 @@ try {
   }
   if (!git('status', '--porcelain')) finish('nothing', 'the attempt changed no file', 3);
 
-  // Keep the attempt reachable whatever happens to it: a commit that no branch points at.
+  // Keep the attempt reachable whatever happens to it: a commit that no branch points at. This commit is what the
+  // gate judges. Its message is one line, so nothing in a label can read as a reason written in a commit.
   git('add', '-A');
   const files = git('diff', '--cached', '--name-only').split('\n').filter(Boolean);
-  const candidate = git('commit-tree', git('write-tree'), '-p', base, '-m', `attempt ${n}: ${label}`);
+  const tree = git('write-tree');
+  const candidate = git('commit-tree', tree, '-p', base, '-m', `attempt ${n}: ${label.replace(/\s+/g, ' ')}`);
   git('update-ref', `refs/improve/${n}`, candidate);
   git('reset', '-q');
 
@@ -122,7 +163,7 @@ try {
     const run = spawnSync(gateCommand[0], [...gateCommand.slice(1), 'run', ...refs, '--json', ...(args['--repeat'] ? ['--repeat', args['--repeat']] : []), ...(args['--base-cache'] ? ['--base-cache', args['--base-cache']] : [])], { encoding: 'utf8' });
     try { return JSON.parse(run.stdout); } catch { throw new Error(`could not read the gate's report (exit ${run.status}): ${(run.stderr || '').trim().slice(0, 300)}`); }
   };
-  const report = ask('--working');
+  const report = ask('--base', base, '--head', candidate);
   const metric = (name, r = report) => r.metrics.find((m) => m.name === name);
   const t = metric(target), c = cheaper ? metric(cheaper) : null;
   for (const [name, found] of [[target, t], [cheaper, cheaper ? c : true]]) if (!found) throw new Error(`the gate has no metric named "${name}"`);
@@ -151,9 +192,10 @@ try {
     if (b.status === 'regressed') { putBack(); finish('worse', `${target} was ${b.before} at its best and is ${b.after} now: under the floor`, 1, { ...seen, floor: { best: top.commit, before: b.before, after: b.after } }); }
   }
 
-  git('add', '-A');
-  git('commit', '-q', '-m', `improve: ${label}\n\n${why}`);
-  const commit = git('rev-parse', 'HEAD');
+  // What is kept is the tree the gate judged, as a commit made here: no hook runs, and the working tree is not read
+  // again. A file edited since the gate looked is not in it, and goes with the reset.
+  const commit = git('commit-tree', tree, '-p', base, '-m', `improve: ${label}\n\n${why}`);
+  git('reset', '-q', '--hard', commit); git('clean', '-qfd');
   if (floor) writeFileSync(bestFile, JSON.stringify(better(t.after, top.score) ? { commit, score: t.after } : top) + '\n');
   finish('kept', why, 0, { ...seen, commit });
 } catch (e) {
