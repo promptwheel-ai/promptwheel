@@ -40,6 +40,34 @@ The brakes do not get looser with more turns. They matter more: more turns are m
 fit its own tasks. The floor (no guard worse than at the start), the source-only re-run over the whole run, and
 the second look all apply at the end, and a measure the loop never sees is still missing.
 
+## What is judged cannot touch what judges it
+
+That sentence is from another session's work on its own loop step (2026-11-21). It wrote 28 attacks: an attempt
+that tries to get a bad change kept, lose earlier work, leave a mess, or bend the judge for the tries after it.
+Run against this command, 8 of the 25 that apply got through. Six were holes, and each was a place where the loop
+trusted something the attempt could write. They are closed:
+
+| | |
+|---|---|
+| keep exactly what was judged | the commit is made from the tree that was checked, with `git commit-tree`. Not from the working tree as it is a moment later (a process the attempt left behind may have written to it). **No git hook runs on it**: a hook the attempt planted could add to the commit after the check had looked |
+| a file hidden from git | `skip-worktree` and `assume-unchanged` hide a change from `git status`, and `git reset --hard` does not put such a file back. The loop does not start while a file is hidden. If an attempt hides one, it is shown again and the attempt is put back |
+| the loop's own files | the record and the program itself (this file, and the packs beside it) are put back if an attempt changed them, and that attempt is put back too. The record may grow during an attempt (a check the attempt ran adds a row). The lines that were there must still be there |
+| the contract | an attempt that changes it is put back (above) |
+
+**What this cannot hold, said plainly.** The attempt runs as you, with no wall around it.
+- **An installed dependency that a measure runs** (`node_modules`, a `vendor` folder git ignores). An attempt can
+  edit it and every later measure reads differently. Git does not see it. Got through every step that was tried.
+- **A safety rule deleted behind another one.** If two rules cover the same thing and an attempt deletes one, no
+  measure moves, and a measure of cost may even improve. What protects has to be frozen (a protected path in the
+  contract), not scored.
+- **A process the attempt leaves running.** It cannot get anything into the commit: the commit is the judged tree.
+  It can write to the tree after the loop has finished. The next run will not start on a tree that is not clean,
+  and says so.
+- **Anything outside the repo:** a database, a service, a file in your home folder.
+- **A sparse checkout** hides files the same way an attack does, so the loop does not run in one.
+A container around the attempt, or the check run again where the attempt cannot reach (a pull request), is what
+holds these. The loop does not.
+
 ## What may be said, and what may not
 
 **May be said:** the loop keeps a change only if it measured better, and puts the tree back if not. That is the

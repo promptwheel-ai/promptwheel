@@ -195,7 +195,10 @@ const MISSING_NAMED = /Cannot find (?:module|package) ['"][^'"\n]+['"][^\n]*/i;
 function whyFailed(text) {
   const t = String(text || '').replace(/\x1b\[[0-9;]*m/g, '');
   const m = t.match(MISSING_NAMED) || t.match(MISSING_DEP);
-  return m ? { cause: 'missing-dependency', detail: m[0].trim().slice(0, 200) } : { cause: 'failing' };
+  // A long path is cut in its middle, not at its end: the end is the file's name, and that is what the hint is for.
+  // (Cut at 200 characters from the left, a temp folder over 123 characters long lost the name of the missing file.)
+  const short = (p) => (p.length > 60 ? `${p.slice(0, 16)}…${p.slice(-40)}` : p);
+  return m ? { cause: 'missing-dependency', detail: m[0].trim().replace(/\/[^\s'"]+/g, short).slice(0, 300) } : { cause: 'failing' };
 }
 const failNotes = new WeakMap();   // samples -> why the last failing run failed
 function runMetric(cwd, m, env, codes, notes) {
@@ -797,7 +800,7 @@ function gateDefAtRef(repo, ref) {
     const raw = readAt(p);
     if (raw == null) return null;
     let cfg; try { cfg = JSON.parse(raw); } catch { return null; }
-    const byName = new Map(); const mandatesByName = new Map(); const scalars = {};
+    const byName = new Map(); const mandatesByName = new Map(); const scalars = {}; let inheritedRepeat;
     for (const ext of [].concat(cfg.extends || [])) {
       if (isAbsolute(ext)) { partial = true; continue; }   // outside the repo, cannot git-show; unchanged anyway
       const bp = join(dirname(p), ext).split('\\').join('/');
@@ -807,12 +810,15 @@ function gateDefAtRef(repo, ref) {
       for (const m of base.metrics.values()) byName.set(m.name, m);
       for (const md of base.scalars.mandates) mandatesByName.set(md.name, md);
       for (const k of GATE_SCALARS) if (base.scalars[k] !== undefined) scalars[k] = base.scalars[k];
+      if (typeof base.repeat === 'number') inheritedRepeat = base.repeat;
     }
     for (const m of (cfg.metrics || [])) if (m && m.name) byName.set(m.name, m);
     for (const md of (cfg.mandates || [])) if (md && md.name) mandatesByName.set(md.name, md);
     for (const k of GATE_SCALARS) if (cfg[k] !== undefined) scalars[k] = cfg[k];
     scalars.mandates = [...mandatesByName.values()];
-    return { metrics: byName, scalars };
+    // how many readings a side the contract asks for. Kept beside the scalars, not among them: it is not compared, it is used
+    const repeat = typeof cfg.repeat === 'number' ? cfg.repeat : inheritedRepeat;
+    return { metrics: byName, scalars, repeat };
   };
   const def = resolve('promptwheel.config.json');
   return def && { ...def, partial };
@@ -1239,7 +1245,6 @@ export function deriveVerdict(metrics, gateInfo = null, mandated = false) {
 function gate(repo, opts) {
   selfHeal(repo);
   const cfg = opts.config ?? loadConfig(repo);
-  const repeat = Math.max(1, opts.repeat ?? cfg.repeat ?? 1);
 
   let base, head;
   if (opts.working) {
@@ -1257,6 +1262,11 @@ function gate(repo, opts) {
     ensureCommit(repo, head, 'head');
   }
 
+  // Judge by the rules as they stood before the change. Fewer readings a side is a wider band, so a change that lowers
+  // its own repeat count is measured with the count the base held. A change may raise it, and the flag (the person)
+  // decides over both.
+  const baseRepeat = opts.config ? undefined : (gateDefAtRef(repo, base) || {}).repeat;
+  const repeat = Math.max(1, opts.repeat ?? Math.max(cfg.repeat ?? 1, typeof baseRepeat === 'number' ? baseRepeat : 1));
   const before = measureAt(repo, base, cfg, repeat);
   const after = measureAt(repo, head, cfg, repeat);
   // a guard this change adds has no value at base, because its scanner did not exist there. That is adoption,

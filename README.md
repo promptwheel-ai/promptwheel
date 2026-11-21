@@ -198,6 +198,10 @@ agent could edit files and could not run the tests, and it said so. The loop ran
   what the contract counts (skips, suppressions) is a win. `--goal <measure>` says which measure an attempt is for,
   and then only that one makes a win.
 - **A commit the agent makes is still checked.** Its commits are folded back and checked as one change.
+- **What is kept is exactly what was checked.** The commit is made from the tree that was judged. No git hook runs
+  on it, and a file written after the check is not in it.
+- **What judges is put back.** An attempt that changes the contract, hides a file from git, or touches the loop's
+  record or the engine's own files is put back, whatever else it did.
 - **Start from a clean tree.** A thrown-away attempt is undone with `git reset` and `git clean`.
 
 **Over a number of turns.** One attempt judged alone is put back unless it improved by itself. Under a pass-or-fail
@@ -214,6 +218,10 @@ A run ends early when a turn ends by itself having changed nothing, when nothing
 `--patience` turns (3) with no new best once there is one. An interrupt puts the tree back, and keeps a best turn
 that had passed its check. Inside the loop the contract is yours: an attempt that changes `promptwheel.config.json`
 is put back, whatever else it did.
+
+What the loop cannot hold: an installed dependency your measure runs, a safety rule deleted behind another one, a
+process the attempt leaves running, anything outside the repo. The attempt runs as you. A container, or the check
+run again on a pull request, holds those ([docs/LEARNING.md](docs/LEARNING.md)).
 
 What this is not: a promise that more turns do better. In our own first runs with a real agent the count of work
 left fell in steps, not slopes: most turns that were cut short had saved nothing ([docs/LEARNING.md](docs/LEARNING.md)).

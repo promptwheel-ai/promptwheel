@@ -3182,11 +3182,16 @@ test('run: the missing-dependency hint names the file, not the bare error code a
   writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x', version: '1.0.0', type: 'module', scripts: { test: 'node run.mjs' } }));
   writeFileSync(join(d, 'run.mjs'), "import './not-here.mjs';\n"); commitAll(d, 'a');
   writeFileSync(join(d, 'note.txt'), 'x'); commitAll(d, 'b');
-  const m = runJson(d).rep.metrics.find((x) => x.name === 'tests_pass');
+  let m = runJson(d).rep.metrics.find((x) => x.name === 'tests_pass');
   assert.equal(m.cause, 'missing-dependency');
+  assert.match(m.detail, /^Cannot find module .*not-here\.mjs/, m.detail);
+  // and under a temp folder with a long path (a Mac's, a sandbox's, another session's scoreboard: 126 characters there).
+  // Cut at 200 from the left, the hint lost the file's name once the path passed 123. It is cut in its middle now.
+  const long = join(mkdtempSync(join(tmpdir(), 'pw-long-')), 'long'.repeat(30)); mkdirSync(long);
+  m = JSON.parse(spawnSync(process.execPath, [ENGINE, 'run', '--json', '--no-record'], { cwd: d, encoding: 'utf8', env: { ...process.env, TMPDIR: long } }).stdout).metrics.find((x) => x.name === 'tests_pass');
   // the hint is cut at 200 characters, and where the temp folder's path is long (a Mac's, a sandbox's) the cut falls
   // before the importing file. The file that is missing comes first, and that is what the hint is for.
-  assert.match(m.detail, /^Cannot find module .*not-here\.mjs/, m.detail);
+  assert.match(m.detail, /^Cannot find module .*not-here\.mjs/, m.detail); assert.ok(m.detail.length <= 300, 'and the hint stays short');
   rmSync(d, { recursive: true, force: true });
 });
 
@@ -4282,4 +4287,32 @@ test("improve puts back the loop's own files: an attempt that wipes the record, 
   assert.equal(createHash('sha256').update(readFileSync(join(here, 'bin', 'promptwheel.mjs'))).digest('hex'), before, 'the program is as it was');
   assert.equal(run("echo 'y // TODO' >> app.js").code, 1, 'and the next try is judged by it: a worse change is still put back');
   assert.match(pw(d, ['playbook']).out, /the attempt changed the loop's own record/);
+});
+
+// Judge by the rules as they stood before the change. The repeat count is one of them: fewer readings a side is a wider
+// band, so a change that lowered its own count was measured more loosely than the base asked (another session's lead S21).
+test('run: a change that lowers its own repeat count is measured with the count the base held; a change may raise it', () => {
+  const mk = (repeat) => JSON.stringify({ linkNodeModules: false, ...(repeat ? { repeat } : {}), metrics: [TODOS] });
+  const d = repoWith({ 'promptwheel.config.json': mk(3), 'app.js': 'a // TODO\n' });
+  writeFileSync(join(d, 'promptwheel.config.json'), mk(1)); writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'fewer readings, and a change');
+  assert.equal(JSON.parse(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json', '--no-record']).out).repeat, 3, 'the base said 3');
+  writeFileSync(join(d, 'promptwheel.config.json'), mk(5)); commitAll(d, 'more readings');
+  assert.equal(JSON.parse(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json', '--no-record']).out).repeat, 5, 'a change may ask for more');
+  assert.equal(JSON.parse(pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--repeat', '2', '--json', '--no-record']).out).repeat, 2, 'the flag is the person, and it decides');
+  writeFileSync(join(d, 'promptwheel.config.json'), mk(1)); writeFileSync(join(d, 'app.js'), 'a\nb\n');
+  assert.equal(JSON.parse(pw(d, ['run', '--working', '--json', '--no-record']).out).repeat, 5, 'the same for work that is not committed');
+});
+test('improve: a check the attempt runs itself adds a row and is no tampering; a commit that cannot be made is said, and the tree is put back', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  assert.equal(pw2(d, ['improve', '--attempt', 'true']).code, 3);                        // one row is there
+  // an agent that follows a rule "run the check before you finish" runs the engine inside its own attempt: the record grows
+  let r = pw2(d, ['improve', '--json', '--attempt', `sed -i '1s| // TODO||' app.js; node ${ENGINE} run --working > /dev/null 2>&1; true`]);
+  assert.equal(r.code, 0, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'kept'); assert.equal(ledger(d).length, 3, 'the first row, the row of the check the attempt ran, and the row of the attempt');
+  // git cannot make the commit (nobody to sign it as): the loop says so and leaves the tree as it was
+  const base = rev(d);
+  for (const k of ['user.name', 'user.email']) execFileSync('git', ['config', '--unset', k], { cwd: d }); execFileSync('git', ['config', 'user.useConfigOnly', 'true'], { cwd: d });
+  const env = { ...process.env }; for (const k of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'EMAIL']) delete env[k];
+  const x = spawnSync(process.execPath, [ENGINE, 'improve', '--json', '--attempt', "sed -i 's| // TODO||' app.js"], { cwd: d, encoding: 'utf8', env });
+  assert.equal(x.status, 1, x.stdout + x.stderr); assert.equal(JSON.parse(x.stdout).result, 'refused'); assert.deepEqual(JSON.parse(x.stdout).because, ['commit']); assert.match(x.stderr, /the commit could not be made/);
+  assert.equal(rev(d), base); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
 });
