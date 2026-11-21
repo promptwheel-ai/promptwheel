@@ -3772,8 +3772,8 @@ test('improve: more tests and nothing else gained is not a win (a count that gua
     { name: 'test_count', cmd: 'grep -rIoE "\\btest ?\\(" --include="*.mjs" . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false }]);
   writeFileSync(join(d, 'a.test.mjs'), "import { test } from 'node:test';\ntest('a', () => {});\n"); commitAll(d, 'base'); const base = rev(d);
   const r = pw2(d, ['improve', '--json', '--attempt', "printf \"test('b', () => {});\\n\" >> a.test.mjs"]);
-  assert.equal(r.code, 3, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'plateau'); assert.match(r.err, /only test_count moved/); assert.equal(rev(d), base, 'put back: nothing was earned from the source');
-  assert.deepEqual(ledger(d)[0].because, ['test_count']);
+  assert.equal(r.code, 3, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'plateau'); assert.match(r.err, /only test_count went up, and more of it alone is not a win/); assert.equal(rev(d), base, 'put back: nothing was earned from the source');
+  assert.deepEqual(ledger(d)[0].because, ['count:test_count']);
 });
 test('improve: an attempt that makes commits of its own is still checked, as one change', () => {
   const d = tmpRepo([TODOS]);
@@ -3896,7 +3896,45 @@ test('suggest offers no arm for a measure that is gone from the contract, or for
   assert.deepEqual([...new Set(s.arms.map((a) => a.metric))], ['todos'], 'only a measure of the contract that can be a goal');
   assert.equal(s.retired, 1, 'one measure in the record is gone from the contract');
   const p = pw(d, ['playbook']).out;
-  assert.match(p, /\*\*test_count\*\*: .* · a count that guards, not a goal/); assert.doesNotMatch(p, /\*\*todos.* · a count that guards/);
+  assert.match(p, /\*\*test_count\*\*: .* · more of it alone is not a win/); assert.doesNotMatch(p, /\*\*todos.* · more of it alone/);
   const j = JSON.parse(pw(d, ['playbook', '--json']).out);
-  assert.equal(j.entries.find((e) => e.key === 'bundle_kb').retired, true); assert.equal(j.entries.find((e) => e.key === 'test_count').tripwire, true);
+  assert.equal(j.entries.find((e) => e.key === 'bundle_kb').retired, true); assert.equal(j.entries.find((e) => e.key === 'test_count').guardOnly, true);
+});
+
+// Found in the first run with a real agent (proof-bench/wheel/raw/live, 2026-11-21): three attempts each rewrote em
+// dashes out of the repo (91 to 86, to 81, to 2, no line deleted), the contract counts em dashes and wants fewer, and
+// the loop threw all three away. The rule "a count that only guards is not a win" had been written for a count that
+// goes UP for free (more tests, more assertions) and it took every count the source-only re-run leaves alone.
+const DASHES = { name: 'dashes', cmd: 'grep -rIo -- "--" --include="*.txt" . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false };
+test('improve: fewer of what the contract counts is a win, also for a count the source-only re-run leaves alone', () => {
+  const d = tmpRepo([DASHES]);
+  writeFileSync(join(d, 'notes.txt'), 'one -- two\nthree -- four\n'); commitAll(d, 'base'); const base = rev(d);
+  const r = pw2(d, ['improve', '--json', '--attempt', "sed -i '1s/ -- /, /' notes.txt"]);
+  assert.equal(r.code, 0, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'kept'); assert.notEqual(rev(d), base);
+});
+test('improve --goal: only the named measure makes a win, a goal the contract does not hold is a usage error, and the person may name a count', () => {
+  const NOTES = { name: 'notes', cmd: 'grep -rn NOTE . --include=*.js 2>/dev/null | wc -l', extract: 'number', direction: 'down', guard: true };
+  const COUNT = { name: 'test_count', cmd: 'grep -rIoE "\\btest ?\\(" --include="*.mjs" . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false };
+  const d = tmpRepo([TODOS, NOTES, COUNT]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // NOTE\n'); writeFileSync(join(d, 'a.test.mjs'), "test('a', () => {});\n"); commitAll(d, 'base'); const base = rev(d);
+  let r = pw2(d, ['improve', '--goal', 'nosuch', '--attempt', 'touch should-not-run']);
+  assert.equal(r.code, 64); assert.match(r.err, /no measure of that name/); assert.equal(existsSync(join(d, 'should-not-run')), false, 'refused before the attempt ran');
+  r = pw2(d, ['improve', '--json', '--goal', 'todos', '--attempt', "sed -i 's| // NOTE||' app.js"]);          // another measure improved
+  assert.equal(r.code, 3, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'plateau'); assert.deepEqual(JSON.parse(r.out).because, ['off-goal:notes']); assert.equal(rev(d), base);
+  assert.match(r.err, /notes improved, but the goal was todos/);
+  r = pw2(d, ['improve', '--json', '--goal', 'todos', '--attempt', "sed -i 's| // TODO||' app.js"]);          // the goal improved
+  assert.equal(r.code, 0, r.out + r.err); assert.deepEqual(ledger(d).pop().goal, ['todos']);
+  r = pw2(d, ['improve', '--json', '--goal', 'test_count', '--attempt', "printf \"test('b', () => {});\\n\" >> a.test.mjs"]);   // the person asked for more tests
+  assert.equal(r.code, 0, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'kept');
+  assert.match(pw(d, ['playbook']).out, /`notes` improved, and it was not the goal/);
+});
+test('suggest offers a count that should go down, and no guard that already passes', () => {
+  const PARSES = { name: 'parses', cmd: 'true', extract: 'exit', direction: 'pass', guard: true };
+  const SUITE = { name: 'suite', cmd: 'test -f ok.txt', extract: 'exit', direction: 'pass', guard: true };
+  const d = tmpRepo([DASHES, PARSES, SUITE]);
+  writeFileSync(join(d, 'notes.txt'), 'one -- two\nthree -- four\nfive -- six\n'); commitAll(d, 'base');
+  for (const n of [1, 2]) { writeFileSync(join(d, 'notes.txt'), readFileSync(join(d, 'notes.txt'), 'utf8').replace(' -- ', ', ')); commitAll(d, `less ${n}`); pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']); }
+  const s = JSON.parse(pw(d, ['suggest', '--json']).out);
+  const offered = [...new Set(s.arms.map((a) => a.metric))].sort();
+  assert.deepEqual(offered, ['dashes', 'suite'], 'the count that should fall and the guard that fails are offered; the guard that passes is not');
 });

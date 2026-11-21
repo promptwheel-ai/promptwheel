@@ -191,13 +191,15 @@ promptwheel improve --attempt "claude -p 'fix the failing test' < /dev/null"
 - **Kept means one commit. Anything else means the tree is put back as it was.** Exit `0` kept, `1` a guard got
   worse, `2` the win came from a change to the tests, `3` nothing improved. So this stops by itself:
   `while promptwheel improve --attempt "..."; do :; done`
-- **More tests is not a win.** A count that only guards (tests, assertions) can go up with nothing earned from the source.
+- **More tests is not a win.** A count of tests or assertions can go up with nothing earned from the source. Fewer of
+  what the contract counts (skips, suppressions) is a win. `--goal <measure>` says which measure an attempt is for,
+  and then only that one makes a win.
 - **A commit the agent makes is still checked.** Its commits are folded back and checked as one change.
 - **Start from a clean tree.** A thrown-away attempt is undone with `git reset` and `git clean`.
 
 Every checked run adds one short row to a record in the repo's git folder (never the working tree; `run --no-record`
 adds none). Three commands read it: `insights` (how each measure responds), `playbook` (what has paid here, and what
-was tried and thrown away, with the measured reason) and `suggest` (where to spend the next attempt). `backfill`
+was tried and thrown away, with the measured reason) and `suggest` (where to spend the next attempt: `--goal` takes its answer). `backfill`
 fills the record from past commits.
 
 We do not say the loop gets better with use. That has a test, and the test has not been passed:

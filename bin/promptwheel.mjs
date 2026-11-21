@@ -1479,6 +1479,7 @@ function recordRun(repo, report, cfg, extra = {}) {
       ...(extra.result ? { result: extra.result } : {}),
       ...(extra.because && extra.because.length ? { because: extra.because.slice(0, 10).map((x) => oneLine(x, 60)) } : {}),
       ...(extra.commit ? { commit: extra.commit } : {}),
+      ...(extra.goal && extra.goal.length ? { goal: extra.goal.slice(0, 5).map((x) => oneLine(x, 60)) } : {}),
     };
     let line = JSON.stringify(row);
     if (line.length > ROW_MAX) { row.metrics = row.metrics.filter((m) => m.status !== 'unchanged'); row.cut = true; line = JSON.stringify(row); }
@@ -1489,6 +1490,10 @@ function recordRun(repo, report, cfg, extra = {}) {
     appendFileSync(f, line + '\n');
   } catch { /* the record must never break a check */ }
 }
+
+// a count that can go up with nothing earned: the source-only re-run leaves it alone (its gain lives in test files)
+// and more of it is the good direction. Tests and assertions are the two the presets hold.
+const freeCount = (m) => (m.tripwire === true || m.gamingCheck === false) && (m.direction || 'up') === 'up';
 
 // put the tree back where an attempt started. Only what the attempt made is removed: improve does not start on a tree
 // that holds work of the person's, tracked or not.
@@ -1508,6 +1513,13 @@ function improve(argv) {
   const repo = repoRoot(process.cwd());
   let config;
   if (!hasConfigFile(repo) && !args.noAuto) config = autoConfig(repo);
+  // --goal names the measure this attempt is for: then only that measure makes a win. Refused before the attempt runs.
+  const goal = args.goal ? String(args.goal).split(',').map((g) => g.trim()).filter(Boolean) : null;
+  if (goal) {
+    const have = new Set(((config ?? loadConfig(repo)).metrics || []).map((m) => m && m.name));
+    const missing = goal.filter((g) => !have.has(g));
+    if (missing.length) bad(`promptwheel improve: --goal names ${missing.join(', ')}, and the contract holds no measure of that name`);
+  }
   const here = () => {
     let branch = ''; try { branch = git(['symbolic-ref', '-q', 'HEAD'], repo); } catch { /* no branch */ }
     return { sha: git(['rev-parse', '--verify', 'HEAD'], repo), branch };
@@ -1534,9 +1546,14 @@ function improve(argv) {
   }
 
   const report = gate(repo, { working: true, repeat: args.repeat, detectGaming: args.detectGaming, config });
-  // a count that only guards (tests, assertions) going up is not a win: nothing was earned from the source
-  const wins = report.metrics.filter((m) => m.status === 'improved' && !m.tripwire).map((m) => m.name);
-  const counts = report.metrics.filter((m) => m.status === 'improved' && m.tripwire).map((m) => m.name);
+  // What a win is. More of a count that can go up for free (tests, assertions: the source-only re-run leaves it alone
+  // and its direction is up) is not one: an empty test raises it. FEWER of what the contract counts is one, also where
+  // the re-run leaves the count alone: the first run with a real agent rewrote 89 of 91 em dashes and was thrown away
+  // by a rule that did not ask which way the count runs. With --goal only the named measure makes a win, whatever it is.
+  const improved = report.metrics.filter((m) => m.status === 'improved');
+  const wins = (goal ? improved.filter((m) => goal.includes(m.name)) : improved.filter((m) => !freeCount(m))).map((m) => m.name);
+  const counts = goal ? [] : improved.filter(freeCount).map((m) => m.name);
+  const offGoal = goal ? improved.filter((m) => !goal.includes(m.name)).map((m) => m.name) : [];
   let result, exit, note, because = [], commit;
   if (report.verdict === 'fail') {
     result = 'regression'; exit = 1; note = '✗ a guard got worse, or a protected path was changed: put back';
@@ -1548,8 +1565,9 @@ function improve(argv) {
     result = 'inconclusive'; exit = 3; note = '≈ inconclusive, a guard could tell nothing (it failed or could not run both before and after, or its win could not be re-run from the source alone): put back';
     because = report.metrics.filter((m) => m.inert || m.unprovable || m.status === 'inconclusive').map((m) => m.name);
   } else if (!wins.length) {
-    result = 'plateau'; exit = 3; because = counts;
-    note = counts.length ? `= only ${counts.join(', ')} moved, a count that guards and is not a goal: put back` : '= nothing improved: put back';
+    result = 'plateau'; exit = 3; because = [...counts.map((n) => `count:${n}`), ...offGoal.map((n) => `off-goal:${n}`)];
+    note = counts.length ? `= only ${counts.join(', ')} went up, and more of it alone is not a win: put back`
+      : offGoal.length ? `= ${offGoal.join(', ')} improved, but the goal was ${goal.join(', ')}: put back` : '= nothing improved: put back';
   } else {
     git(['add', '-A'], repo);
     let staged = true; try { git(['diff', '--cached', '--quiet'], repo); staged = false; } catch { /* something is staged */ }
@@ -1564,7 +1582,7 @@ function improve(argv) {
     }
   }
   if (result !== 'kept') revert(repo, start.sha);
-  if (!args.noRecord) recordRun(repo, report, config ?? loadConfig(repo), { label: args.label, result, because, commit });
+  if (!args.noRecord) recordRun(repo, report, config ?? loadConfig(repo), { label: args.label, result, because, commit, goal });
 
   // stdout carries the report (JSON, or the table); the decision line goes to stderr, so a loop's driver reads clean
   // stdout. The code is set and the process ends by itself, so a large report is written whole (see run).
@@ -1646,14 +1664,18 @@ function cohortNote(k) {
   return signs.size > 1 ? ` · ⚠ differs by where it ran (${cs.map(([n]) => n).join(' against ')})` : '';
 }
 
-// The contract as it is now. A view offers no arm for a measure that is gone from it, and a count that only guards
-// (gamingCheck: false: tests, assertions) is never offered as a goal. Found on the first real record the views met.
+// The contract as it is now. A view offers no arm for a measure that is gone from it, for a count that can go up
+// for free, or for a pass/fail guard that already passes (there is nothing to gain there). Found on the first real
+// record the views met, and in the first run with a real agent.
 function contractNow(repo) {
   try {
     const cfg = hasConfigFile(repo) ? loadConfig(repo) : autoConfig(repo);
-    const names = new Set(), guards = new Set();
-    for (const m of cfg.metrics || []) { if (!m || typeof m.name !== 'string') continue; names.add(m.name); if (m.gamingCheck === false) guards.add(m.name); }
-    return { names, guards };
+    const names = new Set(), free = new Set(), pass = new Set();
+    for (const m of cfg.metrics || []) {
+      if (!m || typeof m.name !== 'string') continue;
+      names.add(m.name); if (freeCount(m)) free.add(m.name); if (m.direction === 'pass') pass.add(m.name);
+    }
+    return { names, free, pass };
   } catch { return null; }   // no contract that can be read: nothing is left out
 }
 
@@ -1663,7 +1685,12 @@ function loadEntries(repo, cmd) {
   const keys = foldOutcomes(runs);
   const totalW = keys.filter((k) => k.key === k.metric).reduce((s, k) => s + k.w, 0);
   const now = contractNow(repo);
-  const entries = keys.map((k) => ({ ...k, ...scoreKey(k, totalW), sufficient: k.moved >= MIN_MOVED, ...(now && !now.names.has(k.metric) ? { retired: true } : {}), ...(now && now.guards.has(k.metric) ? { tripwire: true } : {}) }))
+  // each measure's newest value, to know a pass/fail guard that passes now
+  const lastAfter = new Map();
+  for (const r of runs) for (const m of (Array.isArray(r.metrics) ? r.metrics : [])) if (m && typeof m.name === 'string') lastAfter.set(oneLine(m.name, 60), m.after ?? null);
+  const entries = keys.map((k) => ({ ...k, ...scoreKey(k, totalW), sufficient: k.moved >= MIN_MOVED,
+    ...(now && !now.names.has(k.metric) ? { retired: true } : {}), ...(now && now.free.has(k.metric) ? { guardOnly: true } : {}),
+    ...(now && now.pass.has(k.metric) && lastAfter.get(k.metric) === 1 ? { passes: true } : {}) }))
     .sort((a, b) => b.lever - a.lever || b.w - a.w);
   return { runs, entries };
 }
@@ -1687,7 +1714,10 @@ function whyThrown(t) {
   if (t.result === 'gamed') return guards.length ? `${tick(guards)} went up by a change to the tests or the contract, not the source` : 'the win came from a change to the tests or the contract, not the source';
   if (t.result === 'inconclusive') return guards.length ? `${tick(guards)} could tell nothing (it failed or could not run both before and after, or its win could not be re-run from the source alone)` : 'nothing could be measured';
   if (t.result === 'refused') return "the repo's own commit hook refused it";
-  return guards.length ? `only ${tick(guards)} moved, a count that guards and is not a goal` : 'nothing moved';
+  const cnt = t.because.filter((n) => n.startsWith('count:')).map((n) => n.slice(6)), off = t.because.filter((n) => n.startsWith('off-goal:')).map((n) => n.slice(9));
+  if (cnt.length) return `only ${tick(cnt)} went up, and more of it alone is not a win`;
+  if (off.length) return `${tick(off)} improved, and it was not the goal`;
+  return 'nothing moved';
 }
 const whereThrown = (t) => (t.subsystems.length ? t.subsystems.join(', ') : t.files ? 'no source file' : 'nothing changed');
 
@@ -1705,7 +1735,7 @@ function playbook(argv) {
   out.push('Every line below was measured by the check. Nothing here is a guess, and a line fades unless new runs earn it again.', '');
   if (!suff.length) out.push(`_Nothing has earned a line yet. A key needs ${MIN_MOVED} weighted runs in which it moved. ${entries.length} keys are being counted._`);
   else {
-    for (const e of suff.slice(0, 20)) out.push(`- **${e.key}**: helped ${pct(e.p)} of the times it moved (${e.imp.toFixed(1)} better, ${e.reg.toFixed(1)} worse, weighted), moved in ${pct(e.move)} of runs, middle effect ${e.effect}${cohortNote(e)}${e.retired ? ' · no longer in the contract' : ''}${e.tripwire ? ' · a count that guards, not a goal' : ''}`);
+    for (const e of suff.slice(0, 20)) out.push(`- **${e.key}**: helped ${pct(e.p)} of the times it moved (${e.imp.toFixed(1)} better, ${e.reg.toFixed(1)} worse, weighted), moved in ${pct(e.move)} of runs, middle effect ${e.effect}${cohortNote(e)}${e.retired ? ' · no longer in the contract' : ''}${e.guardOnly ? ' · more of it alone is not a win' : ''}`);
     const hidden = entries.length - suff.length;
     if (hidden > 0) out.push('', `_${hidden} more keys have too few runs to earn a line. They are counted, not claimed._`);
   }
@@ -1725,7 +1755,7 @@ function suggest(argv) {
   const args = parseArgs(argv);
   const repo = repoRoot(process.cwd());
   const { runs, entries } = loadEntries(repo, 'suggest');
-  const arms = entries.filter((e) => (e.key === e.metric || e.key.includes(' @ ')) && !e.retired && !e.tripwire).sort((a, b) => b.ucb - a.ucb);
+  const arms = entries.filter((e) => (e.key === e.metric || e.key.includes(' @ ')) && !e.retired && !e.guardOnly && !e.passes).sort((a, b) => b.ucb - a.ucb);
   const retired = new Set(entries.filter((e) => e.retired).map((e) => e.metric)).size;
   const attempts = runs.filter((r) => typeof r.result === 'string');
   const stalled = attempts.length >= STALL_W && attempts.slice(-STALL_W).every((r) => r.result !== 'kept');
@@ -1734,7 +1764,7 @@ function suggest(argv) {
   console.log(`\nPromptWheel suggest, over ${runs.length} checked runs${runs.length < 10 ? '  (a thin record: mostly a guess, the bonus for what is untried decides)' : ''}\n`);
   if (stalled) console.log(`  The last ${STALL_W} attempts kept nothing. Try what the record has seen least: ${leastTried}\n`);
   for (const a of arms.slice(0, 5)) console.log(`  ${a.ucb.toFixed(3)}  ${a.key.padEnd(28)} lever ${a.lever.toFixed(3)} (helped ${a.p}, moved ${a.move}) · moved in ${a.moved.toFixed(1)} of ${a.n} runs${a.sufficient ? '' : ' · too few to earn a line'}`);
-  if (!arms.length) console.log('  (no measure of the contract that can be a goal is in the record yet)');
+  if (!arms.length) console.log('  (nothing in the record yet that an attempt could improve: every measure is gone from the contract, already passes, or is a count that more of alone is not a win)');
   console.log(`\n  score = lever + a bonus for what was tried least. A high score is a lever that has paid, or an arm tried little.${retired ? `\n  Left out: ${retired} measure${retired === 1 ? '' : 's'} in the record that the contract no longer holds.` : ''}\n`);
 }
 
@@ -2243,6 +2273,7 @@ function parseArgs(argv) {
     else if (argv[i] === '--no-record') a.noRecord = true;
     else if (argv[i] === '--label') a.label = argv[++i];
     else if (argv[i] === '--attempt') a.attempt = argv[++i];
+    else if (argv[i] === '--goal') a.goal = argv[++i];
     else if (argv[i] === '--since') a.since = argv[++i];
     else if (argv[i] === '-n' || argv[i] === '--limit') a.n = parseInt(argv[++i], 10);
     else if (argv[i] === '--allow') a.allow = argv[++i];
@@ -2451,7 +2482,7 @@ export function conformsToContract(report) {
 const GATE_FLAGS = ['--base', '--head', '--repeat', '--working', '--no-record', '--no-auto', '--allow', '--detect-gaming', '--no-detect-gaming', '--json', '--markdown', '--label'];
 const COMMAND_FLAGS = {
   run: GATE_FLAGS, init: ['--preset', '--list', '--force', '--no-agent-block'], lock: [],
-  improve: ['--attempt', '--label', '--repeat', '--no-record', '--no-auto', '--detect-gaming', '--no-detect-gaming', '--json'],
+  improve: ['--attempt', '--label', '--goal', '--repeat', '--no-record', '--no-auto', '--detect-gaming', '--no-detect-gaming', '--json'],
   insights: ['--json'], playbook: ['--json'], suggest: ['--json'],
   backfill: ['-n', '--limit', '--since', '--repeat', '--no-auto', '--detect-gaming', '--no-detect-gaming'],
 };
@@ -2459,6 +2490,7 @@ const COMMAND_FLAGS = {
 // measure nothing and read FAIL, and `--allow` with nothing after it must not run as if no reason was asked for.
 const VALUED_FLAGS = { '--base': 'a ref', '--head': 'a ref', '--repeat': 'a whole number, 1 or more', '--allow': 'a reason, e.g. --allow "the spec changed"', '--preset': 'a preset name (see promptwheel init --list)',
   '--attempt': 'a command that changes the repo, e.g. --attempt "claude -p \'fix the failing test\'"', '--label': 'a short name for this change, e.g. --label "cache the lookup"',
+  '--goal': 'the name of a measure in the contract, e.g. --goal lint_errors',
   '--since': 'a ref', '-n': 'a whole number, 1 or more', '--limit': 'a whole number, 1 or more' };
 function checkFlags(cmd, argv) {
   const known = new Set(COMMAND_FLAGS[cmd]);
@@ -2557,8 +2589,9 @@ function dispatch() {
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',
       '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
-      '  promptwheel improve --attempt "<cmd>" [--label "<name>"] [--json]   the loop: run any agent or script, check what it changed, and keep it (one commit) only if a measure improved;',
+      '  promptwheel improve --attempt "<cmd>" [--goal <measure>] [--label "<name>"] [--json]   the loop: run any agent or script, check what it changed, and keep it (one commit) only if a measure improved;',
       '                                               if not, the tree is put back. Exit 0 kept · 1 a guard got worse · 2 gamed · 3 nothing improved. The tree must be clean first.',
+      '                                               More tests alone is not a win. --goal: only that measure makes a win.',
       '  promptwheel insights [--json]                how each measure has responded, from the record of checked runs (kept in the git folder, never in the tree; run --no-record adds no row)',
       '  promptwheel playbook [--json]                what has paid here, and what the loop tried and threw away, with the measured reason',
       '  promptwheel suggest [--json]                 where to spend the next attempt (a lever that has paid, or what was tried least)',

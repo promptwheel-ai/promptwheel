@@ -8,10 +8,10 @@ gets better with use, because that has not been shown. This file says what would
 | | what it does |
 |---|---|
 | the record | every checked run adds one short row: the verdict, each measure before and after, and the top folders the change landed in. It is in the repo's git folder (`promptwheel/outcomes.jsonl` under `git rev-parse --git-common-dir`), so it is never in the working tree, never in a commit, and one record serves every worktree of the repo. Nothing a person typed is in a row. A label is there only when `--label` gave one. `run --no-record` adds no row |
-| `improve --attempt "<cmd>"` | the loop's one step. Run any agent or script, check what it changed, and keep it as one commit only if a measure improved. If a guard got worse, if the win came from a change to the tests, or if nothing improved, the tree is put back as it was. A count that only guards (tests, assertions) going up is not a win. Commits the attempt made itself are folded back and checked as one change |
+| `improve --attempt "<cmd>"` | the loop's one step. Run any agent or script, check what it changed, and keep it as one commit only if a measure improved. If a guard got worse, if the win came from a change to the tests, or if nothing improved, the tree is put back as it was. More of a count that can go up for free (tests, assertions) is not a win; fewer of what the contract counts is. With `--goal <measure>` only that measure makes a win. Commits the attempt made itself are folded back and checked as one change |
 | `insights` | how each measure has responded, straight from the record |
 | `playbook` | what has paid here: for each measure, and each measure in each folder, how often a change helped when it moved. A row counts half as much every 20 runs. A line is shown only past 3 weighted runs in which the key moved. Then the list of what the loop tried and threw away, newest first, each with the measured reason |
-| `suggest` | where to spend the next attempt: a lever that has paid, or what was tried least (UCB). When the last 3 attempts kept nothing, it names the least tried arm first. It offers no measure that is gone from the contract, and no count that only guards |
+| `suggest` | where to spend the next attempt: a lever that has paid, or what was tried least (UCB). When the last 3 attempts kept nothing, it names the least tried arm first. It offers nothing an attempt could not improve: no measure that is gone from the contract, no count that more of alone is not a win, no pass or fail guard that already passes |
 | `backfill` | fills the record from past commits, each checked against its parent with the measures as they are now. Rows are marked `backfill`, and a commit's type (fix, feat, ...) becomes its label |
 
 The record is read as a hint and never changes a verdict. Anything that can write to the repo can write to it.
@@ -46,7 +46,7 @@ agent held fixed. The parts line up, and where they do not, it is said.
 
 | RRSI | here |
 |---|---|
-| a candidate: a bundle of edits, each with a hypothesis | one attempt: whatever the command changed, with a label if the driver gives one |
+| a candidate: a bundle of edits, each with a hypothesis | one attempt: whatever the command changed, with a label and a goal if the driver gives them |
 | score on the task set, several trials | the contract's measures, each run `repeat` times, the middle value taken |
 | a noise band from re-running the unchanged base | the spread of the repeats. A move inside it is not a move |
 | the floor: no worse than the best so far, less the noise | a guard may not get worse than the base, and the base is the last kept commit |
@@ -66,3 +66,6 @@ and the record in 0.8.0. Neither cut followed a measurement, and the compounding
 use. When the record was cut it held 224 rows across six repos, and none of them was an attempt of the loop: the
 loop itself had not been given real work. Put back in November 2026, with the changes named at the top of the
 engine's section "The wheel".
+
+The first run with a real agent (three attempts, 2026-11-21) found a fault in the rule on counts the same night:
+it threw away three real improvements, because it did not ask which way a count runs. Fixed, with the test.
