@@ -4085,18 +4085,18 @@ test('the wheel is here on purpose: its commands and its tests', () => {
   assert.ok(mine.length >= 30, `only ${mine.length} of the loop's tests are left. ${why}`); assert.equal(skipped.length, 0, `a test of the loop is skipped. ${why}`);
   assert.match(readFileSync(join(dirname(ENGINE), '..', 'CLAUDE.md'), 'utf8'), /The wheel turns/, `CLAUDE.md no longer says the loop is kept on purpose. ${why}`);
 });
-test('improve: an attempt that leaves a contract nobody can read is put back, not left in the tree with a crash; over several turns the next turn is told and can mend it', () => {
+test('improve: an attempt that breaks or deletes the contract is put back, not left in the tree with a crash; over several turns the next turn is told and can mend it', () => {
   const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base'); const base = rev(d);
   const contract = readFileSync(join(d, 'promptwheel.config.json'), 'utf8');
   let r = pw2(d, ['improve', '--json', '--attempt', "printf '}' >> promptwheel.config.json; sed -i 's| // TODO||' app.js"]);
-  assert.equal(r.code, 1, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'refused'); assert.deepEqual(JSON.parse(r.out).because, ['contract']); assert.match(r.err, /a contract that cannot be read/);
+  assert.equal(r.code, 1, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'refused'); assert.deepEqual(JSON.parse(r.out).because, ['contract']); assert.match(r.err, /the attempt changed the contract/);
   assert.equal(rev(d), base); assert.equal(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'), contract); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
   assert.equal(pw2(d, ['improve', '--attempt', 'rm promptwheel.config.json']).code, 1, 'a deleted contract is the same'); assert.equal(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'), contract);
   const out = mkdtempSync(join(tmpdir(), 'pw-fb-'));
   r = pw2(d, ['improve', '--json', '--turns', '2', '--attempt', script(`cat "$PW_FEEDBACK" > ${out}/fb-$PW_TURN.txt; case "$PW_TURN" in 1) printf '}' >> promptwheel.config.json;; 2) git checkout -q -- promptwheel.config.json; sed -i 's| // TODO||' app.js;; esac`)]);
   assert.equal(r.code, 0, r.out + r.err); assert.deepEqual(JSON.parse(r.out).path.map((p) => p.standing), ['worse', 'win']);
-  assert.match(readFileSync(join(out, 'fb-2.txt'), 'utf8'), /THE CONTRACT COULD NOT BE READ after turn 1/);
-  assert.match(pw(d, ['playbook']).out, /the attempt left a contract that cannot be read/);
+  assert.match(readFileSync(join(out, 'fb-2.txt'), 'utf8'), /THE CONTRACT WAS CHANGED at turn 1/);
+  assert.match(pw(d, ['playbook']).out, /the attempt changed the contract/);
 });
 // Found in the first run of --turns with a real agent (proof-bench/wheel/raw/t1, 2026-11-21): every attempt was cut off by
 // a time limit before it had written anything, the rule "a turn that changes nothing ends the run" read that as "done",
@@ -4111,4 +4111,29 @@ test('improve --turns: a turn that was cut off or failed before it changed anyth
   assert.match(readFileSync(join(out, 'fb-2.txt'), 'utf8'), /The command of turn 1 ended with code 124 and changed nothing on disk/);
   // a command that ends by itself and changes nothing is still the end of the run
   assert.equal(JSON.parse(pw2(d, ['improve', '--json', '--turns', '5', '--attempt', 'true']).out).turns, 1);
+});
+// Found by a second reader of the code (2026-11-21), then run: an attempt added a measure of its own to the contract,
+// satisfied it with one line of source, and was kept, the changed contract with it. Two rules close it. In the loop the
+// contract is the person's: an attempt that changes it is put back, whatever else it did. And a win is a gain on a
+// measure the contract held when the run STARTED (a contract can also change through a file outside the repo).
+test('improve: an attempt may not change the contract, and a measure that was not in the contract at the start cannot make a win', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base'); const base = rev(d);
+  const contract = readFileSync(join(d, 'promptwheel.config.json'), 'utf8');
+  const addTo = (file) => `node -e 'const fs=require("fs");const f=process.argv[1];const c=JSON.parse(fs.readFileSync(f,"utf8"));c.metrics.push({name:"wins",cmd:"grep -c WIN app.js || true",extract:"number",direction:"up",guard:true});fs.writeFileSync(f,JSON.stringify(c));' ${file}; echo "// WIN" >> app.js`;
+  let r = pw2(d, ['improve', '--json', '--attempt', script(addTo('promptwheel.config.json'))]);
+  assert.equal(r.code, 1, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'refused'); assert.deepEqual(JSON.parse(r.out).because, ['contract']);
+  assert.match(r.err, /the attempt changed the contract \(promptwheel\.config\.json\)/); assert.equal(rev(d), base); assert.equal(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'), contract);
+  // a change to the contract cannot ride in on a real gain either
+  r = pw2(d, ['improve', '--json', '--attempt', script(`${addTo('promptwheel.config.json')}; sed -i 's| // TODO||' app.js`)]);
+  assert.equal(r.code, 1, r.out + r.err); assert.equal(rev(d), base);
+  // where there is no contract file, an attempt may not write one
+  const z = repoWith({ 'package.json': '{"name":"z","version":"1.0.0","scripts":{"test":"node --test"}}\n', 'z.test.js': "require('node:test').test('z', () => {});\n" });
+  r = pw2(z, ['improve', '--json', '--attempt', `printf '{"metrics":[{"name":"x","cmd":"echo 1","direction":"up"}]}' > promptwheel.config.json`]);
+  assert.equal(r.code, 1, r.out + r.err); assert.equal(existsSync(join(z, 'promptwheel.config.json')), false);
+  // a contract that extends a file OUTSIDE the repo: git cannot show that file changing, so the second rule holds the line
+  const outside = join(mkdtempSync(join(tmpdir(), 'pw-base-')), 'base.json'); writeFileSync(outside, JSON.stringify({ metrics: [TODOS] }));
+  const e = repoWith({ 'promptwheel.config.json': JSON.stringify({ linkNodeModules: false, extends: outside, metrics: [{ name: 'lines', cmd: 'wc -l < app.js', extract: 'number', direction: 'down', guard: false }] }), 'app.js': 'a // TODO\n' });
+  r = pw2(e, ['improve', '--json', '--attempt', script(addTo(outside))]);
+  assert.equal(r.code, 3, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'plateau'); assert.deepEqual(JSON.parse(r.out).because, ['new-measure:wins']);
+  assert.match(r.err, /a measure that was not in the contract when the run started/); assert.match(pw(e, ['playbook']).out, /only `wins` improved, a measure that was not in the contract when the run started/);
 });

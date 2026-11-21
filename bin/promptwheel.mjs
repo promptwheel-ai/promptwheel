@@ -1512,8 +1512,13 @@ const freeCount = (m) => (m.tripwire === true || m.gamingCheck === false) && (m.
 // is up) is not a win: an empty test raises it. FEWER of what the contract counts is one, also where the re-run leaves
 // the count alone: the first run with a real agent rewrote 89 of 91 em dashes and was thrown away by a rule that did
 // not ask which way the count runs. With --goal only the named measure makes a win, whatever it is.
-function standingOf(report, goal) {
-  const improved = report.metrics.filter((m) => m.status === 'improved');
+// `known` is the names of the measures the contract held when the run started. A gain on any other measure cannot
+// make a win: an attempt added a measure of its own, satisfied it with one line, and was kept (found by a second reader
+// of this code, then run). An attempt that changes the contract file is put back before this is asked; this rule is
+// for a contract that changes where git cannot see it (a file it extends, outside the repo).
+function standingOf(report, goal, known) {
+  const fresh = known ? report.metrics.filter((m) => m.status === 'improved' && !known.has(m.name)).map((m) => m.name) : [];
+  const improved = report.metrics.filter((m) => m.status === 'improved' && (!known || known.has(m.name)));
   const wins = goal ? improved.filter((m) => goal.includes(m.name)) : improved.filter((m) => !freeCount(m));
   const counts = goal ? [] : improved.filter(freeCount).map((m) => m.name);
   const offGoal = goal ? improved.filter((m) => !goal.includes(m.name)).map((m) => m.name) : [];
@@ -1523,7 +1528,7 @@ function standingOf(report, goal) {
   // nothing more can be gained when every measure that could make a win is a pass-or-fail one that passes
   const can = report.metrics.filter((m) => (goal ? goal.includes(m.name) : !freeCount(m)) && m.status !== 'unmeasurable');
   const topped = can.length > 0 && can.every((m) => m.direction === 'pass' && m.after === 1);
-  return { standing, wins: wins.map((m) => m.name), counts, offGoal, gain, topped };
+  return { standing, wins: wins.map((m) => m.name), counts, offGoal, fresh, gain, topped };
 }
 // why a run that kept nothing kept nothing, as names a view can print
 function becauseOf(report, s) {
@@ -1531,7 +1536,7 @@ function becauseOf(report, s) {
   if (s.standing === 'worse') return [...report.metrics.filter((m) => m.guard && !m.ok).map((m) => m.name), ...(report.mandates || []).map((v) => `mandate:${v.name}`)];
   if (s.standing === 'gamed') return [...report.metrics.filter((m) => m.gamed || m.unprovable).map((m) => m.name), ...(report.gate && report.gate.weakened && !report.gate.allowed ? ['gate'] : [])];
   if (s.standing === 'unsure') return report.metrics.filter((m) => m.inert || m.unprovable || m.status === 'inconclusive').map((m) => m.name);
-  return [...s.counts.map((n) => `count:${n}`), ...s.offGoal.map((n) => `off-goal:${n}`)];
+  return [...s.counts.map((n) => `count:${n}`), ...s.offGoal.map((n) => `off-goal:${n}`), ...(s.fresh || []).map((n) => `new-measure:${n}`)];
 }
 
 // a report for a turn that could not be measured at all: the attempt left a contract nobody can read, or moved the
@@ -1556,7 +1561,7 @@ function feedbackText(turn, turns, last) {
       out.push(`  ${m.name}: ${m.before ?? '?'} at the start, ${m.after ?? '?'} now (${word})`);
     }
     const worse = [...last.report.metrics.filter((m) => m.guard && !m.ok).map((m) => m.name), ...(last.report.mandates || []).map((v) => `a protected path (${v.name})`)];
-    if (last.report.stub === 'contract') out.push(`THE CONTRACT COULD NOT BE READ after turn ${last.t}: ${last.report.why}. Put promptwheel.config.json back as it was at the start.`);
+    if (last.report.stub === 'contract') out.push(`THE CONTRACT WAS CHANGED at turn ${last.t}: ${last.report.why}. Put it back as it was at the start. In the loop the contract is not the attempt's to change.`);
     if (worse.length) out.push(`WORSE THAN AT THE START: ${worse.join(', ')}. The run is kept only if nothing is worse at its end.`);
     if (last.s.standing === 'gamed') out.push('A measure went up by a change to the tests or the contract, not the source. That is not a win, at this turn or a later one.');
     if (last.s.standing === 'win') out.push('As it stands this would be kept. A later turn may gain more. The best turn is the one that is kept.');
@@ -1623,6 +1628,14 @@ async function improve(argv) {
     if (missing.length) bad(`promptwheel improve: --goal names ${missing.join(', ')}, and the contract holds no measure of that name`);
   }
   const turns = args.turns ?? 1, patience = args.patience ?? STALL_W;
+  // The contract as it stands NOW, before any attempt, is the one that counts. Only its measures can make a win, and
+  // an attempt may not change it: not the file, not a file inside the repo that it extends, not a file it names as part
+  // of the gate (evaluatorPaths). In the loop the contract is the person's.
+  const startCfg = config ?? loadConfig(repo);
+  const known = new Set((startCfg.metrics || []).map((m) => m && m.name).filter((n) => typeof n === 'string'));
+  const extended = (() => { try { return [].concat(JSON.parse(readFileSync(join(repo, 'promptwheel.config.json'), 'utf8')).extends || []).filter((x) => typeof x === 'string').map((x) => relative(repo, resolve(repo, x))).filter((x) => x && !x.startsWith('..')); } catch { return []; } })();
+  const isGateFile = evaluatorMatcher(startCfg);
+  const isContract = (p) => p === 'promptwheel.config.json' || extended.includes(p) || isGateFile(p);
   const here = () => {
     let branch = ''; try { branch = git(['symbolic-ref', '-q', 'HEAD'], repo); } catch { /* no branch */ }
     return { sha: git(['rev-parse', '--verify', 'HEAD'], repo), branch };
@@ -1672,12 +1685,16 @@ async function improve(argv) {
 
       // an attempt can leave a contract nobody can read (or delete it). That is not a crash with the change left in
       // the tree: it is a turn that stands worse than the start, and the next turn is told.
-      let report; try { report = gate(repo, { working: true, repeat: args.repeat, detectGaming: args.detectGaming, config }); }
-      catch (e) { if (!e || e.name !== 'ConfigError') throw e; report = stubReport(repo, start.sha, 'contract', e.message); }
+      const snap0 = workingSnapshot(repo);
+      const hit = snap0 === 'HEAD' ? [] : gitNames(['diff', '--name-only', '--no-renames', start.sha, snap0], repo).filter(isContract);
+      let report;
+      if (hit.length) report = stubReport(repo, start.sha, 'contract', `the attempt changed the contract (${hit.slice(0, 3).join(', ')})`);
+      else try { report = gate(repo, { working: true, repeat: args.repeat, detectGaming: args.detectGaming, config }); }
+      catch (e) { if (!e || e.name !== 'ConfigError') throw e; report = stubReport(repo, start.sha, 'contract', `the contract cannot be read (${e.message})`); }
       await breath(); if (stopped) break;   // a check that was cut short measured nothing that can be trusted
       turnsRun = t;
       const snap = report.provenance.headSha === 'HEAD' ? start.sha : report.provenance.headSha;
-      const s = standingOf(report, goal);
+      const s = standingOf(report, goal, known);
       const treeNow = tree(snap);
       last = { t, report, s, snap, code, same: treeNow === prevTree };
       path.push({ turn: t, standing: s.standing, gain: s.gain });
@@ -1710,7 +1727,7 @@ async function improve(argv) {
     if (best && turnsRun > 1 && !stopped) {
       treeAt(repo, best.snap);
       const again = gate(repo, { working: true, repeat: args.repeat, detectGaming: args.detectGaming, config });
-      const s2 = standingOf(again, goal);
+      const s2 = standingOf(again, goal, known);
       if (s2.standing === 'win') best = { ...best, report: again, s: s2 };
       else { because = best.s.wins.map((n) => `unconfirmed:${n}`); shown = again; note = `= turn ${best.t} had improved ${best.s.wins.join(', ')}, and the gain did not show again when it was measured once more: put back`; best = null; result = 'plateau'; exit = 3; }
     }
@@ -1723,7 +1740,7 @@ async function improve(argv) {
       else {
         const what = `improved ${best.s.wins.join(', ')}${turnsRun > 1 ? `; turn ${best.t} of ${turnsRun}` : ''}`;
         try {
-          execFileSync('git', ['commit', '-qm', `promptwheel improve: ${args.label ? oneLine(args.label, 80) : 'kept'} (${what})`], { cwd: repo, stdio: ['ignore', 2, 2] });
+          execFileSync('git', ['commit', '-qm', oneLine(`promptwheel improve: ${args.label ? oneLine(args.label, 80) : 'kept'} (${what})`, 300)], { cwd: repo, stdio: ['ignore', 2, 2] });
           commit = git(['rev-parse', '--short', 'HEAD'], repo);
           result = 'kept'; exit = 0;
           note = turnsRun > 1 ? `✓ kept the best of ${turnsRun} turns (turn ${best.t}), committed ${commit} (improved ${best.s.wins.join(', ')})` : `✓ kept, committed ${commit} (improved ${best.s.wins.join(', ')})`;
@@ -1731,17 +1748,18 @@ async function improve(argv) {
       }
     }
     if (!result) {
-      const s = last ? last.s : { standing: 'level', counts: [], offGoal: [] };
+      const s = last ? last.s : { standing: 'level', counts: [], offGoal: [], fresh: [] };
       because = last ? becauseOf(last.report, s) : [];
       if (!last) { result = 'plateau'; exit = 3; note = '= nothing was measured: put back'; }
-      else if (last.report.stub === 'contract') { result = 'refused'; exit = 1; note = `✗ the attempt left a contract that cannot be read (${last.report.why}): put back`; }
+      else if (last.report.stub === 'contract') { result = 'refused'; exit = 1; note = `✗ ${last.report.why}. In the loop the contract is the person's: put back`; }
       else if (s.standing === 'worse') { result = 'regression'; exit = 1; note = '✗ a guard got worse, or a protected path was changed: put back'; }
       else if (s.standing === 'gamed') { result = 'gamed'; exit = 2; note = '🚩 gamed, a measure went up by a change to the tests or the contract and not the source: put back'; }
       else if (s.standing === 'unsure') { result = 'inconclusive'; exit = 3; note = '≈ inconclusive, a guard could tell nothing (it failed or could not run both before and after, or its win could not be re-run from the source alone): put back'; }
       else {
         result = 'plateau'; exit = 3;
         note = s.counts.length ? `= only ${s.counts.join(', ')} went up, and more of it alone is not a win: put back`
-          : s.offGoal.length ? `= ${s.offGoal.join(', ')} improved, but the goal was ${goal.join(', ')}: put back` : '= nothing improved: put back';
+          : s.offGoal.length ? `= ${s.offGoal.join(', ')} improved, but the goal was ${goal.join(', ')}: put back`
+          : s.fresh.length ? `= only ${s.fresh.map((n) => oneLine(n, 60)).join(', ')} improved, a measure that was not in the contract when the run started: put back` : '= nothing improved: put back';
       }
     }
     if (result !== 'kept') revert(repo, start.sha, start.branch);
@@ -1890,12 +1908,14 @@ function whyThrown(t) {
   if (t.result === 'regression') return [guards.length ? `${tick(guards)} got worse` : '', paths.length ? `a protected path was changed (${tick(paths)})` : ''].filter(Boolean).join('; ') || 'a guard got worse';
   if (t.result === 'gamed') return guards.length ? `${tick(guards)} went up by a change to the tests or the contract, not the source` : 'the win came from a change to the tests or the contract, not the source';
   if (t.result === 'inconclusive') return guards.length ? `${tick(guards)} could tell nothing (it failed or could not run both before and after, or its win could not be re-run from the source alone)` : 'nothing could be measured';
-  if (t.result === 'refused') return t.because.includes('branch') ? 'the attempt moved the branch off the commit it started on' : t.because.includes('contract') ? 'the attempt left a contract that cannot be read' : "the repo's own commit hook refused it";
+  if (t.result === 'refused') return t.because.includes('branch') ? 'the attempt moved the branch off the commit it started on' : t.because.includes('contract') ? 'the attempt changed the contract' : "the repo's own commit hook refused it";
   const unc = t.because.filter((n) => n.startsWith('unconfirmed:')).map((n) => n.slice(12));
   if (unc.length) return `${tick(unc)} had improved, and the gain did not show again when it was measured once more`;
   const cnt = t.because.filter((n) => n.startsWith('count:')).map((n) => n.slice(6)), off = t.because.filter((n) => n.startsWith('off-goal:')).map((n) => n.slice(9));
   if (cnt.length) return `only ${tick(cnt)} went up, and more of it alone is not a win`;
   if (off.length) return `${tick(off)} improved, and it was not the goal`;
+  const made = t.because.filter((n) => n.startsWith('new-measure:')).map((n) => n.slice(12));
+  if (made.length) return `only ${tick(made)} improved, a measure that was not in the contract when the run started`;
   return 'nothing moved';
 }
 const whereThrown = (t) => (t.subsystems.length ? t.subsystems.join(', ') : t.files ? 'no source file' : 'nothing changed');
