@@ -4098,3 +4098,17 @@ test('improve: an attempt that leaves a contract nobody can read is put back, no
   assert.match(readFileSync(join(out, 'fb-2.txt'), 'utf8'), /THE CONTRACT COULD NOT BE READ after turn 1/);
   assert.match(pw(d, ['playbook']).out, /the attempt left a contract that cannot be read/);
 });
+// Found in the first run of --turns with a real agent (proof-bench/wheel/raw/t1, 2026-11-21): every attempt was cut off by
+// a time limit before it had written anything, the rule "a turn that changes nothing ends the run" read that as "done",
+// and all three runs ended after one turn. A turn that changed nothing is the end only when its command ended by itself.
+test('improve --turns: a turn that was cut off or failed before it changed anything does not end the run, and the next turn is told', () => {
+  const out = mkdtempSync(join(tmpdir(), 'pw-fb-'));
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  const step = script(`cat "$PW_FEEDBACK" > ${out}/fb-$PW_TURN.txt; case "$PW_TURN" in 1) exit 124;; 2) sed -i 's| // TODO||' app.js;; esac`);
+  const r = pw2(d, ['improve', '--json', '--turns', '3', '--attempt', step]);
+  assert.equal(r.code, 0, r.out + r.err); const j = JSON.parse(r.out);
+  assert.equal(j.best, 2, 'the run went on past the turn that was cut off'); assert.deepEqual(j.path.slice(0, 2).map((p) => p.standing), ['level', 'win']);
+  assert.match(readFileSync(join(out, 'fb-2.txt'), 'utf8'), /The command of turn 1 ended with code 124 and changed nothing on disk/);
+  // a command that ends by itself and changes nothing is still the end of the run
+  assert.equal(JSON.parse(pw2(d, ['improve', '--json', '--turns', '5', '--attempt', 'true']).out).turns, 1);
+});

@@ -16,10 +16,36 @@ gets better with use, because that has not been shown. This file says what would
 
 The record is read as a hint and never changes a verdict. Anything that can write to the repo can write to it.
 
+## Over a number of turns
+
+`improve --attempt "<cmd>" --turns N`. One attempt judged alone is a greedy step: improved, or put back. A change
+that needs a level step first (or a worse one) can never be kept that way, and under a pass-or-fail measure a fix
+bigger than one attempt shows nothing until it is whole. So the rule that judges each step alone gets small sure
+steps and nothing else. With `--turns`:
+
+| | |
+|---|---|
+| between turns | nothing is put back. Each turn goes on from where the last left the tree |
+| what is measured | after every turn, the whole change so far against the commit the run STARTED from. The same check, the source-only re-run included. A test edited at turn 2 cannot make a win at turn 4 |
+| what is kept | the best turn (the largest gain on the measures that make a win), not the last. One commit |
+| the second look | the best turn is measured once more before it is kept. N turns are N tries at a measure that may be noisy |
+| what the next turn is told | a short file: each measure at the start and now, what is worse than at the start, which turn this is. `PW_FEEDBACK` holds its path. Nothing a person typed is in it |
+| when it ends | after N turns; when a turn changes nothing; when nothing more can be gained; after `--patience` turns (3) with no new best, once there is a best |
+| where the best so far is held | in the running process. There is no file an attempt could delete or rewrite to lower the bar |
+| an interrupt | the tree is put back. A best turn that had passed its check is kept |
+| the record | a row a turn, then a row for the run. `playbook` prints each run's path. Counts over the record are over runs |
+
+The brakes do not get looser with more turns. They matter more: more turns are more tries, and RRSI's plain loop
+fit its own tasks. The floor (no guard worse than at the start), the source-only re-run over the whole run, and
+the second look all apply at the end, and a measure the loop never sees is still missing.
+
 ## What may be said, and what may not
 
 **May be said:** the loop keeps a change only if it measured better, and puts the tree back if not. That is the
 check, run on an attempt. It is tested.
+
+**May be said:** with `--turns`, a change that takes more than one turn can be kept, and a run that ends with
+nothing gained leaves the tree as it was. Tested.
 
 **May not be said, until it is shown:** that the loop gets better with use, that the playbook makes later attempts
 better, or that the list of what was thrown away keeps an attempt from being tried twice.
@@ -55,6 +81,7 @@ agent held fixed. The parts line up, and where they do not, it is said.
 | the edit log: every edit tried, with what it did and whether it was kept | the record, and the playbook's list of what was thrown away |
 | the exploration slot when the search stalls (3 rounds) | `suggest`: the least tried arm, named first after 3 attempts with nothing kept |
 | the edit budget that shrinks over the rounds | not here. The size of an attempt is the agent's |
+| the round: the same harness scored over 20 rounds, the curve reported | `--turns`: one run judged over its turns, its path in the record. RRSI's within-band rule (a level edit may be accepted) has its counterpart here: a level turn is not put back |
 | the pruner, which removes parts that stopped paying | not here. A line in the playbook fades unless it is earned again. Nothing is removed from the repo |
 | a held-out set the search never sees | not here, and it is the largest gap. A loop that improves the repo's own tests can fit those tests. The source-only re-run stops the cheapest way and no other |
 

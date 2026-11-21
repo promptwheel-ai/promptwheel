@@ -1548,6 +1548,8 @@ function feedbackText(turn, turns, last) {
   const out = [`Turn ${turn} of ${turns}. What is measured is the whole change since this run started, against the commit it started from.`];
   if (!last) out.push('Nothing is measured yet.');
   else {
+    if (last.code !== 0 && last.same) out.push(`The command of turn ${last.t} ended with code ${last.code} and changed nothing on disk: it was stopped, or it failed, before anything was saved. Save each file as soon as it is done.`);
+    else if (last.code !== 0) out.push(`The command of turn ${last.t} ended with code ${last.code}: it was stopped, or it failed. What it had saved by then is in the tree.`);
     out.push(`After turn ${last.t}:`);
     for (const m of last.report.metrics) {
       const word = m.status === 'improved' ? 'better' : m.status === 'regressed' ? 'worse' : m.status === 'unchanged' ? 'the same' : 'not measured';
@@ -1650,8 +1652,9 @@ async function improve(argv) {
       try { writeFileSync(feedback, feedbackText(t, turns, last)); } catch { /* the attempt runs without it */ }
       // the attempt's own output goes to stderr, so stdout carries the report and nothing else; it reads no input
       console.error(turns > 1 ? `▶ turn ${t} of ${turns}: ${args.attempt}` : `▶ attempt: ${args.attempt}`);
+      let code = 0;   // how the attempt's own command ended: 0 is "it finished", anything else is "it was cut off, or it failed"
       try { execSync(args.attempt, { cwd: repo, stdio: ['ignore', 2, 2], env: { ...process.env, PW_TURN: String(t), PW_TURNS: String(turns), PW_FEEDBACK: feedback } }); }
-      catch (e) { if (e.signal === 'SIGINT' || e.signal === 'SIGTERM' || e.status === 130) stopped = stopped || 'SIGINT'; else console.error(`  (the attempt ended with code ${e.status ?? 1}; checking whatever it changed)`); }
+      catch (e) { code = e.status ?? 1; if (e.signal === 'SIGINT' || e.signal === 'SIGTERM' || e.status === 130) stopped = stopped || 'SIGINT'; else console.error(`  (the attempt ended with code ${code}; checking whatever it changed)`); }
       await breath(); if (stopped) break;
 
       const now = here();
@@ -1675,7 +1678,8 @@ async function improve(argv) {
       turnsRun = t;
       const snap = report.provenance.headSha === 'HEAD' ? start.sha : report.provenance.headSha;
       const s = standingOf(report, goal);
-      last = { t, report, s, snap };
+      const treeNow = tree(snap);
+      last = { t, report, s, snap, code, same: treeNow === prevTree };
       path.push({ turn: t, standing: s.standing, gain: s.gain });
       if (turns > 1) {
         console.error(`  turn ${t}: ${s.standing === 'win' ? `ahead (${s.wins.join(', ')})` : s.standing === 'level' ? 'level with the start' : s.standing === 'worse' ? 'a guard is worse than at the start' : s.standing === 'gamed' ? 'gamed' : 'nothing could be told'}`);
@@ -1683,8 +1687,10 @@ async function improve(argv) {
       }
       if (s.standing === 'win' && (!best || s.gain > best.s.gain)) { best = last; sinceBest = 0; } else if (best) sinceBest++;
       if (turns === 1) break;
-      const treeNow = tree(snap);
-      if (treeNow === prevTree) { why = 'a turn changed nothing'; break; }
+      // A turn that changed nothing ends the run only when its command ended by itself: that is an agent saying it is
+      // done. One that was cut off by a limit, or failed, has said nothing of the kind (the first run with a real agent:
+      // every attempt was stopped at its time limit before it had written a thing, and each run ended after one turn).
+      if (last.same && code === 0) { why = 'a turn changed nothing'; break; }
       prevTree = treeNow;
       if (best && s.topped) { why = 'nothing more can be gained'; break; }
       if (best && sinceBest >= patience) { why = `${patience} turn${patience === 1 ? '' : 's'} in a row with no new best`; break; }

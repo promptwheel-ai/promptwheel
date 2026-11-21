@@ -200,6 +200,19 @@ agent could edit files and could not run the tests, and it said so. The loop ran
 - **A commit the agent makes is still checked.** Its commits are folded back and checked as one change.
 - **Start from a clean tree.** A thrown-away attempt is undone with `git reset` and `git clean`.
 
+**Over a number of turns.** One attempt judged alone is put back unless it improved by itself. Under a pass-or-fail
+measure (do the tests pass) that loses any fix bigger than one attempt: the first attempt shows nothing yet, it is put
+back, and the next starts from nothing. `--turns N` judges the whole run instead:
+
+- each turn goes on from where the last one left the tree;
+- after every turn the whole change so far is checked against the commit the run started from, so a test edited at
+  one turn makes no win at a later one;
+- the next turn is told the reading: its path is in `PW_FEEDBACK` (`PW_TURN` and `PW_TURNS` say where the run is);
+- the best turn is kept, as one commit, after it is measured once more. If no turn won, the tree is put back.
+
+A run ends early when a turn changes nothing, when nothing more can be gained, or after `--patience` turns (3) with
+no new best once there is one. An interrupt puts the tree back, and keeps a best turn that had passed its check.
+
 Every checked run adds one short row to a record in the repo's git folder (never the working tree; `run --no-record`
 adds none). Three commands read it: `insights` (how each measure responds), `playbook` (what has paid here, and what
 was tried and thrown away, with the measured reason) and `suggest` (where to spend the next attempt: `--goal` takes its answer). `backfill`
