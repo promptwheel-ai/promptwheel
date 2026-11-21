@@ -181,12 +181,15 @@ Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommit
 `improve` runs any agent or script, checks what it changed, and keeps it only if a measure improved.
 
 ```
-promptwheel improve --attempt "claude -p 'fix the failing test' < /dev/null"
+promptwheel improve --attempt "claude -p 'fix the failing test' --permission-mode acceptEdits < /dev/null"
 
 #   ▲ tests_pass                0 →        1  (+1, improved) [guard✓, high]
 #   VERDICT: PASS
-#   ✓ kept, committed ee9ee9b (improved tests_pass)
+#   ✓ kept, committed 508f6d9 (improved tests_pass)
 ```
+
+That line was run as written (Claude Code 2.1.318, a repo with one failing test and no config). In that mode the
+agent could edit files and could not run the tests, and it said so. The loop ran them.
 
 - **Kept means one commit. Anything else means the tree is put back as it was.** Exit `0` kept, `1` a guard got
   worse, `2` the win came from a change to the tests, `3` nothing improved. So this stops by itself:
