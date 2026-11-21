@@ -1,0 +1,512 @@
+// The improve loop's tests (node:test, no dependencies). Run: npm test  (or: node --test)
+//
+// Why this file exists. The engine had this loop as `promptwheel improve --attempt` from 0.0.2. Version 0.8.0
+// (ed4fb3c, 2026-11-05) removed it, with its four tests, as a command nothing relied on. On 2026-11-21 the owner
+// asked for it back. It lives in examples/improve-loop now: outside the engine and outside the npm package. These
+// tests are what holds it there. Ask the owner before removing the loop or thinning this file.
+//
+// Every test builds its own small repo, runs the real loop step against the real engine in this checkout, and
+// reads what is left behind: the exit code, the line it printed, the commits, the files and the record.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const RIG = join(ROOT, 'examples', 'improve-loop', 'improve.mjs');
+const TMP_ROOT = mkdtempSync(join(tmpdir(), 'pw-loop-'));
+process.env.TMPDIR = TMP_ROOT;   // the engine's clean copies go under it too, and all of it is removed at exit
+process.on('exit', () => rmSync(TMP_ROOT, { recursive: true, force: true }));
+// PROMPTWHEEL empty: the loop uses the engine in this checkout, whatever the shell that runs the suite has set
+const ENV = { ...process.env, PROMPTWHEEL: '' };
+
+const git = (d, ...a) => execFileSync('git', a, { cwd: d, encoding: 'utf8' }).trim();
+const put = (d, f, text) => { mkdirSync(dirname(join(d, f)), { recursive: true }); writeFileSync(join(d, f), text); };
+const read = (d, f) => readFileSync(join(d, f), 'utf8').trim();
+const head = (d) => git(d, 'rev-parse', 'HEAD');
+const clean = (d) => git(d, 'status', '--porcelain') === '';
+const state = (d) => `${read(d, 'src/score.txt')} ${read(d, 'src/cost.txt')}`;
+const asks = (d) => (existsSync(`${d}.asked`) ? readFileSync(`${d}.asked`, 'utf8').split('\n').filter(Boolean).length : 0);
+const record = (d) => { const f = join(d, '.git', 'improve', 'attempts.jsonl'); return existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []; };
+const bestOf = (d) => JSON.parse(readFileSync(join(d, '.git', 'improve', 'best.json'), 'utf8'));
+
+// Helpers the attempts call. They sit outside every repo, so they are never part of a change.
+const BUMP = join(TMP_ROOT, 'bump.sh');        // bump.sh <file> <by>: add a number to the number in a file
+writeFileSync(BUMP, 'v=$(cat "$1"); echo $(( v + $2 )) > "$1"\n');
+const CFG = join(TMP_ROOT, 'cfg.mjs');         // cfg.mjs "<statement on c>": edit the gate's own config
+writeFileSync(CFG, "import { readFileSync, writeFileSync } from 'node:fs';\nconst f = 'promptwheel.config.json', c = JSON.parse(readFileSync(f, 'utf8'));\nnew Function('c', process.argv[2])(c);\nwriteFileSync(f, JSON.stringify(c, null, 2) + '\\n');\n");
+const trade = (score, cost) => `sh ${BUMP} src/score.txt ${score} && sh ${BUMP} src/cost.txt ${cost}`;
+
+// A small repo with a score and a cost. The score is what the source says plus what the grader's own file says, so
+// a change can win by the source (honest) or by the grader's file (gamed). Every reading of the score is counted in
+// a file beside the repo. `over` changes a metric, adds more metrics, or adds a top-level setting.
+function toy(over = {}) {
+  const d = mkdtempSync(join(TMP_ROOT, 'repo-'));
+  git(d, 'init', '-q', '-b', 'main', '.'); git(d, 'config', 'user.email', 't@example.com'); git(d, 'config', 'user.name', 't');
+  put(d, 'src/score.txt', '100\n'); put(d, 'src/cost.txt', '100\n'); put(d, 'evals/bonus.txt', '0\n'); put(d, 'README.md', 'toy\n'); put(d, '.gitignore', 'ignored/\n');
+  const score = { name: 'score', cmd: `echo x >> ${d}.asked; echo $(( $(cat src/score.txt) + $(cat evals/bonus.txt) ))`, extract: 'number', direction: 'up', guard: true, ...(over.score || {}) };
+  const cost = { name: 'cost', cmd: 'cat src/cost.txt', extract: 'number', direction: 'down', guard: true, ...(over.cost || {}) };
+  put(d, 'promptwheel.config.json', JSON.stringify({ metrics: [score, cost, ...(over.more || [])], evaluatorPaths: ['evals/bonus.txt', 'promptwheel.config.json'], ...(over.top || {}) }, null, 2) + '\n');
+  git(d, 'add', '-A'); git(d, 'commit', '-q', '-m', 'start: score 100, cost 100');
+  return d;
+}
+const run = (d, args, env = {}) => { const r = spawnSync(process.execPath, [RIG, ...args], { cwd: d, encoding: 'utf8', env: { ...ENV, ...env }, timeout: 120000 }); return { code: r.status, out: r.stdout, err: r.stderr }; };
+const step = (d, attempt, ...flags) => run(d, ['--attempt', attempt, ...flags]);
+const banded = () => toy({ score: { noise: 10 } });
+// the same small trade again and again: 5 off the score, 10 off the cost. Returns each step's exit code.
+const walk = (d, times, attempt, ...flags) => Array.from({ length: times }, () => step(d, attempt, '--cheaper', 'cost', ...flags).code);
+
+// ------------------------------------------------------------------ what a step decides
+test('loop: a real win is kept as one commit, and the step exits 0', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'echo 110 > src/score.txt', '--label', 'raise the score');
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^ 1 {2}kept {5}raise the score: score 100 to 110\n$/);
+  assert.equal(git(d, 'rev-list', '--count', 'HEAD'), '2', 'one new commit'); assert.equal(git(d, 'rev-parse', 'HEAD^'), base);
+  assert.equal(git(d, 'log', '-1', '--format=%B'), 'improve: raise the score\n\nscore 100 to 110');
+  assert.equal(read(d, 'src/score.txt'), '110'); assert.ok(clean(d));
+});
+test('loop: a change that makes a guard worse is put back: no commit, the file as it was, exit 1', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'echo 90 > src/score.txt');
+  assert.equal(r.code, 1); assert.match(r.out, / worse {3}.*score 100 to 90/);
+  assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100'); assert.ok(clean(d));
+});
+test('loop: after a kept win, a worse change is put back to the win, not to the start', () => {
+  const d = toy();
+  assert.equal(step(d, 'echo 110 > src/score.txt').code, 0);
+  const kept = head(d);
+  assert.equal(step(d, 'echo 105 > src/score.txt').code, 1);
+  assert.equal(head(d), kept); assert.equal(read(d, 'src/score.txt'), '110'); assert.ok(clean(d));
+});
+test('loop: a kept change that adds a new file keeps the file (the old loop once deleted it with clean -fd)', () => {
+  const d = toy();
+  assert.equal(step(d, 'echo 110 > src/score.txt && echo notes > src/new.txt').code, 0);
+  assert.equal(read(d, 'src/new.txt'), 'notes'); assert.equal(git(d, 'ls-files', 'src/new.txt'), 'src/new.txt', 'and it is in the commit');
+});
+test('loop: a win made only by a new file is seen by the gate and kept', () => {
+  const d = toy({ score: { cmd: 'ls src | wc -l' } });   // the score is how many files src holds: two at the start
+  const r = step(d, 'echo more > src/extra.txt');
+  assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, /score 2 to 3/); assert.equal(git(d, 'ls-files', 'src/extra.txt'), 'src/extra.txt');
+});
+test('loop: a new file from a change that is put back is removed', () => {
+  const d = toy();
+  assert.equal(step(d, 'echo 90 > src/score.txt && echo notes > src/new.txt && mkdir -p deep/er && echo x > deep/er/file.txt').code, 1);
+  assert.ok(!existsSync(join(d, 'src/new.txt'))); assert.ok(!existsSync(join(d, 'deep'))); assert.ok(clean(d));
+});
+test('loop: a win made by the grader\'s own file, with the source untouched, is put back as gamed, exit 2', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'echo 50 > evals/bonus.txt');
+  assert.equal(r.code, 2); assert.match(r.out, / gamed {3}.*score moved by changing what it is measured with/);
+  assert.equal(head(d), base); assert.equal(read(d, 'evals/bonus.txt'), '0'); assert.ok(clean(d));
+});
+test('loop: a win that is mostly the grader\'s file is put back as gamed too', () => {
+  const d = toy(), base = head(d);
+  assert.equal(step(d, 'echo 105 > src/score.txt && echo 50 > evals/bonus.txt').code, 2);   // 5 of the 55 came from the source
+  assert.equal(head(d), base); assert.equal(state(d), '100 100'); assert.ok(clean(d));
+});
+test('loop: a gamed win beside a guard that got worse reads gamed, exit 2, though the gate\'s own word is fail', () => {
+  const d = toy();
+  const r = step(d, 'echo 50 > evals/bonus.txt && echo 150 > src/cost.txt');
+  assert.equal(r.code, 2, r.out); assert.equal(record(d)[0].result, 'gamed'); assert.equal(record(d)[0].verdict, 'fail'); assert.ok(clean(d));
+});
+test('loop: a change that passes the gate and improves nothing is not kept, exit 3', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'echo more >> README.md');
+  assert.equal(r.code, 3); assert.match(r.out, / flat {4}.*score did not improve \(unchanged\)/);
+  assert.equal(record(d)[0].verdict, 'pass', 'the gate passed it: a pass is not a win');
+  assert.equal(head(d), base); assert.equal(read(d, 'README.md'), 'toy'); assert.ok(clean(d));
+});
+test('loop: an attempt that changes no file is on record as nothing, exit 3', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'true');
+  assert.equal(r.code, 3); assert.match(r.out, / nothing .*the attempt changed no file/);
+  assert.equal(head(d), base); assert.equal(record(d).length, 1); assert.equal(asks(d), 0, 'and the gate is not asked');
+});
+test('loop: a win that costs more is put back when the gate has no rate for the cost, exit 1', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'echo 110 > src/score.txt && echo 120 > src/cost.txt');
+  assert.equal(r.code, 1); assert.match(r.out, / worse {3}.*cost 100 to 120/); assert.equal(head(d), base); assert.equal(state(d), '100 100');
+});
+test('loop: a change that leaves a guard unreadable is put back, and the line says which, exit 1', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'rm src/cost.txt && echo 110 > src/score.txt');   // the cost command prints no number now
+  assert.equal(r.code, 1, r.out + r.err); assert.match(r.out, / worse {3}.*cost could not be read after the change/);
+  assert.equal(head(d), base); assert.equal(state(d), '100 100'); assert.ok(clean(d));
+});
+test('loop: a guard that cannot be read on either side is not a pass: the change is put back, exit 1', () => {
+  const d = toy({ cost: { cmd: 'true' } }), base = head(d);   // a cost command that prints no number at all
+  const r = step(d, 'echo 110 > src/score.txt');
+  assert.equal(r.code, 1, r.out + r.err); assert.match(r.out, / worse {3}.*: cost could not be read\n$/);
+  assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100'); assert.ok(clean(d));
+});
+test('loop: when the gate is unsure (a pass-or-fail guard is failing on both sides and nothing improved), the change is not kept, exit 3', () => {
+  const d = toy({ more: [{ name: 'tests_pass', cmd: 'false', extract: 'exit', direction: 'pass', guard: true }] }), base = head(d);
+  const r = step(d, 'echo more >> README.md');
+  assert.equal(r.code, 3, r.out + r.err); assert.match(r.out, / unsure {2}.*the gate could not measure it/); assert.equal(record(d)[0].verdict, 'inconclusive');
+  assert.equal(head(d), base); assert.equal(read(d, 'README.md'), 'toy'); assert.ok(clean(d));
+});
+test('loop: an attempt command that exits non-zero is still judged by what it changed', () => {
+  const d = toy();
+  assert.equal(step(d, 'echo 110 > src/score.txt; exit 7').code, 0, 'a good change from a command that failed is kept');
+  assert.equal(step(d, 'echo 90 > src/score.txt; exit 7').code, 1, 'and a bad one is put back');
+  assert.equal(read(d, 'src/score.txt'), '110');
+});
+test('loop: the step prints one line on stdout whatever the attempt prints, so a driver can read it', () => {
+  const d = toy();
+  const r = step(d, 'echo chatter from the proposer; echo 110 > src/score.txt');
+  assert.equal(r.out, ' 1  kept     echo chatter from the proposer; echo 110 > src/score.txt: score 100 to 110\n');
+  assert.match(r.err, /chatter from the proposer/, 'the attempt\'s own words go to stderr');
+});
+test('loop --json: the step prints its record line as JSON instead', () => {
+  const d = toy();
+  const kept = JSON.parse(step(d, 'echo 110 > src/score.txt', '--json', '--label', 'up').out);
+  assert.deepEqual([kept.n, kept.label, kept.result, kept.why, kept.commit], [1, 'up', 'kept', 'score 100 to 110', head(d)]);
+  const back = JSON.parse(step(d, 'echo 90 > src/score.txt', '--json').out);
+  assert.deepEqual([back.n, back.result, back.verdict], [2, 'worse', 'fail']); assert.deepEqual(back, record(d)[1], 'the same line the record holds');
+});
+test('loop: it runs from a folder inside the repo, and the attempt runs at the top', () => {
+  const d = toy();
+  const r = run(join(d, 'src'), ['--attempt', 'echo 110 > src/score.txt']);
+  assert.equal(r.code, 0, r.err); assert.equal(read(d, 'src/score.txt'), '110');
+});
+
+// ------------------------------------------------------------------ what it will not do to your work
+test('loop: it refuses a tree with an uncommitted edit: nothing runs and the edit is left alone (exit 64)', () => {
+  const d = toy(), base = head(d); put(d, 'src/cost.txt', '77\n');
+  const r = step(d, `echo ran > ${d}.ran; echo 110 > src/score.txt`);
+  assert.equal(r.code, 64); assert.match(r.err, /working tree is not clean/);
+  assert.equal(state(d), '100 77', 'the edit is still there, and the attempt changed nothing'); assert.ok(!existsSync(`${d}.ran`), 'the attempt never ran');
+  assert.equal(head(d), base); assert.equal(record(d).length, 0);
+});
+test('loop: it refuses a tree with an untracked file and leaves the file alone (exit 64)', () => {
+  const d = toy(); put(d, 'notes-of-mine.txt', 'keep me\n');
+  assert.equal(step(d, 'echo 90 > src/score.txt').code, 64);
+  assert.equal(read(d, 'notes-of-mine.txt'), 'keep me'); assert.equal(read(d, 'src/score.txt'), '100');
+});
+test('loop: putting a change back leaves ignored files alone', () => {
+  const d = toy(); put(d, 'ignored/mine.txt', 'keep me\n');   // .gitignore lists ignored/
+  assert.equal(step(d, 'echo 90 > src/score.txt').code, 1);
+  assert.equal(read(d, 'ignored/mine.txt'), 'keep me');
+});
+test('loop: outside a git repository it exits 64', () => {
+  const d = mkdtempSync(join(TMP_ROOT, 'plain-'));
+  const r = run(d, ['--attempt', 'true'], { GIT_CEILING_DIRECTORIES: TMP_ROOT });
+  assert.equal(r.code, 64); assert.match(r.err, /not inside a git repository/);
+});
+test('loop: with no --attempt it exits 64 and says what it needs', () => {
+  const r = run(toy(), ['--label', 'x']);
+  assert.equal(r.code, 64); assert.match(r.err, /--attempt "<command that changes the repo>" is required/);
+});
+test('loop: a flag it does not know is exit 64, not a flag that is quietly dropped (a mistyped --floor would turn the floor off)', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, `echo ran > ${d}.ran; echo 110 > src/score.txt`, '--flor');
+  assert.equal(r.code, 64); assert.match(r.err, /unknown flag --flor/); assert.ok(!existsSync(`${d}.ran`), 'the attempt never ran'); assert.equal(head(d), base);
+});
+test('loop: a flag that needs a value and has none is exit 64', () => {
+  const r = run(toy(), ['--attempt', 'true', '--target']);
+  assert.equal(r.code, 64); assert.match(r.err, /--target needs a value/);
+});
+test('loop: in a repository with no commit yet it exits 64: there is nothing to put a change back to', () => {
+  const d = mkdtempSync(join(TMP_ROOT, 'empty-')); git(d, 'init', '-q', '-b', 'main', '.');
+  const r = step(d, 'echo x > file.txt');
+  assert.equal(r.code, 64); assert.match(r.err, /no commit yet/); assert.ok(!existsSync(join(d, 'file.txt')), 'the attempt never ran');
+});
+test('loop: when git cannot make a commit (no name is set), the attempt is put back and the step exits 64', () => {
+  const d = toy(), base = head(d);
+  git(d, 'config', '--unset', 'user.name'); git(d, 'config', '--unset', 'user.email'); git(d, 'config', 'user.useConfigOnly', 'true');
+  const r = run(d, ['--attempt', 'echo 110 > src/score.txt'], { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_AUTHOR_NAME: '', GIT_AUTHOR_EMAIL: '', GIT_COMMITTER_NAME: '', GIT_COMMITTER_EMAIL: '' });
+  assert.equal(r.code, 64, r.out + r.err); assert.equal(r.out, '');
+  assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100'); assert.ok(clean(d));
+});
+test('loop: it works on a detached HEAD, and keeps the win there', () => {
+  const d = toy(), base = head(d); git(d, 'checkout', '-q', '--detach');
+  assert.equal(step(d, 'echo 110 > src/score.txt').code, 0);
+  assert.equal(git(d, 'rev-parse', 'HEAD^'), base); assert.equal(git(d, 'rev-parse', 'main'), base, 'main is not moved');
+});
+test('loop: a target the gate does not measure is exit 64, and the attempt is put back', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'echo 110 > src/score.txt', '--target', 'speed');
+  assert.equal(r.code, 64); assert.match(r.err, /no metric named "speed"/);
+  assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100'); assert.ok(clean(d));
+});
+test('loop --cheaper: a metric the gate does not measure is exit 64 too, not a flag that is quietly dropped', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'echo 110 > src/score.txt', '--cheaper', 'tokens');
+  assert.equal(r.code, 64, r.out + r.err); assert.match(r.err, /no metric named "tokens"/);
+  assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100'); assert.ok(clean(d));
+});
+test('loop: when the gate cannot be run, the attempt is put back and the step exits 64', () => {
+  const d = toy(), base = head(d);
+  const r = run(d, ['--attempt', 'echo 110 > src/score.txt'], { PROMPTWHEEL: `${process.execPath} ${join(TMP_ROOT, 'no-such-engine.mjs')}` });
+  assert.equal(r.code, 64); assert.match(r.err, /could not read the gate's report/);
+  assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100'); assert.ok(clean(d));
+});
+test('loop: stopped in the middle of an attempt (Ctrl-C), it puts the attempt back, notes it, and exits 64', async () => {
+  const d = toy(), base = head(d);
+  // its own process group, so the signal reaches the step and the attempt together, as Ctrl-C in a terminal does
+  const child = spawn(process.execPath, [RIG, '--attempt', 'echo 90 > src/score.txt; echo new > src/new.txt; sleep 30'], { cwd: d, env: ENV, detached: true, stdio: 'ignore' });
+  const ended = new Promise((done) => child.on('exit', (code, signal) => done(code ?? signal)));
+  for (let i = 0; i < 200 && !existsSync(join(d, 'src/new.txt')); i++) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(existsSync(join(d, 'src/new.txt')), 'the attempt is under way');
+  process.kill(-child.pid, 'SIGINT');
+  assert.equal(await ended, 64, 'the step ends by itself with the code for "could not run", so a while loop stops');
+  assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100'); assert.ok(!existsSync(join(d, 'src/new.txt'))); assert.ok(clean(d));
+  assert.deepEqual(record(d).map((x) => x.result), ['stopped']);
+});
+test('loop: an attempt that commits its own bad work is still judged, and the commit is taken back', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'echo 90 > src/score.txt && git commit -qam "the proposer commits by itself"');
+  assert.equal(r.code, 1, `judged worse, not waved through as a change to no file: ${r.out}${r.err}`);
+  assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100'); assert.ok(clean(d));
+});
+test('loop: an attempt that commits its own good work is kept as one commit made by the loop', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'echo 110 > src/score.txt && git commit -qam "step one" && echo 120 > src/score.txt', '--label', 'two steps');
+  assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, /score 100 to 120/, 'the committed step and the uncommitted one are judged together');
+  assert.equal(git(d, 'rev-list', '--count', 'HEAD'), '2'); assert.equal(git(d, 'rev-parse', 'HEAD^'), base);
+  assert.equal(git(d, 'log', '-1', '--format=%s'), 'improve: two steps'); assert.ok(clean(d));
+});
+test('loop: an attempt that leaves the repo on another branch is not judged or kept (exit 64)', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'git checkout -q -b elsewhere && echo 110 > src/score.txt && git commit -qam "on another branch"');
+  assert.equal(r.code, 64, r.out + r.err); assert.match(r.err, /another branch/);
+  assert.equal(git(d, 'rev-parse', 'main'), base, 'main is where it was');
+});
+test('loop: an attempt that throws away earlier commits is put back to where the step began (exit 64)', () => {
+  const d = toy();
+  assert.equal(step(d, 'echo 110 > src/score.txt').code, 0);
+  const kept = head(d);
+  const r = step(d, 'git reset -q --hard HEAD~1');   // the proposer drops the win the loop kept
+  assert.equal(r.code, 64, r.out + r.err);
+  assert.equal(head(d), kept, 'the kept win is still there'); assert.equal(read(d, 'src/score.txt'), '110'); assert.ok(clean(d));
+  assert.equal(record(d)[1].result, 'rewrote');
+});
+
+// ------------------------------------------------------------------ the record
+test('loop: every attempt, kept or not, is on record with what the gate saw', () => {
+  const d = toy();
+  step(d, 'echo 110 > src/score.txt', '--label', 'a'); step(d, 'echo 90 > src/score.txt', '--label', 'b'); step(d, 'echo 50 > evals/bonus.txt', '--label', 'c'); step(d, 'true', '--label', 'd');
+  const rec = record(d);
+  assert.deepEqual(rec.map((x) => [x.n, x.label, x.result]), [[1, 'a', 'kept'], [2, 'b', 'worse'], [3, 'c', 'gamed'], [4, 'd', 'nothing']]);
+  assert.equal(rec[0].commit, head(d)); assert.equal(rec[1].base, rec[0].commit, 'the second attempt started from the kept commit');
+  assert.deepEqual(rec[1].files, ['src/score.txt']); assert.equal(rec[1].verdict, 'fail');
+  assert.deepEqual(rec[1].metrics.find((m) => m.name === 'score'), { name: 'score', before: 110, after: 90, status: 'regressed', ok: false });
+  assert.equal(rec[2].metrics.find((m) => m.name === 'score').gamed, true);
+  assert.ok(rec.every((x) => !Number.isNaN(Date.parse(x.at))));
+});
+test('loop: a change that was put back stays reachable under refs/improve', () => {
+  const d = toy(), base = head(d);
+  step(d, 'echo 90 > src/score.txt && echo try > src/new.txt');
+  const ref = git(d, 'rev-parse', 'refs/improve/1');
+  assert.equal(git(d, 'rev-parse', `${ref}^`), base); assert.equal(record(d)[0].candidate, ref);
+  assert.equal(git(d, 'show', `${ref}:src/score.txt`), '90'); assert.equal(git(d, 'show', `${ref}:src/new.txt`), 'try');
+});
+test('loop: the record lives in the git folder, so it is in no commit and never makes the tree dirty', () => {
+  const d = toy();
+  step(d, 'echo 110 > src/score.txt'); step(d, 'echo 90 > src/score.txt');
+  assert.ok(existsSync(join(d, '.git', 'improve', 'attempts.jsonl'))); assert.ok(clean(d));
+  assert.equal(git(d, 'ls-files').split('\n').filter((f) => /improve|attempts/.test(f)).length, 0);
+});
+test('loop: the attempt is handed the record and the target, so a proposer can read what was already tried', () => {
+  const d = toy(), seen = `${d}.seen`, peek = join(TMP_ROOT, 'peek.sh');
+  writeFileSync(peek, 'n=0; [ -f "$IMPROVE_RECORD" ] && n=$(grep -c . "$IMPROVE_RECORD")\necho "$IMPROVE_TARGET $n $IMPROVE_RECORD" >> "$1"\necho 90 > src/score.txt\n');
+  step(d, `sh ${peek} ${seen}`); step(d, `sh ${peek} ${seen}`);
+  const file = join(git(d, 'rev-parse', '--absolute-git-dir'), 'improve', 'attempts.jsonl');
+  assert.deepEqual(readFileSync(seen, 'utf8').trim().split('\n'), [`score 0 ${file}`, `score 1 ${file}`]);
+});
+test('loop: a label is kept as given, quotes and all, and with no label the attempt command is the label', () => {
+  const d = toy();
+  step(d, 'echo 90 > src/score.txt', '--label', 'try "plan B", it\'s the 2nd'); step(d, 'echo 91 > src/score.txt');
+  assert.deepEqual(record(d).map((x) => x.label), ['try "plan B", it\'s the 2nd', 'echo 91 > src/score.txt']);
+});
+test('loop: an attempt that deletes or rewrites the record does not erase what was tried', () => {
+  const d = toy();
+  step(d, 'echo 90 > src/score.txt', '--label', 'first');
+  step(d, 'rm -f "$IMPROVE_RECORD"; echo 80 > src/score.txt', '--label', 'second');
+  step(d, 'echo "{}" > "$IMPROVE_RECORD"; echo 70 > src/score.txt', '--label', 'third');
+  assert.deepEqual(record(d).map((x) => [x.n, x.label]), [[1, 'first'], [2, 'second'], [3, 'third']]);
+  assert.deepEqual([1, 2, 3].map((n) => git(d, 'show', `refs/improve/${n}:src/score.txt`)), ['90', '80', '70'], 'and each change is still under its own ref');
+  assert.deepEqual(record(d).map((x) => x.recordPutBack === true), [false, true, true], 'the line says the record was put back');
+});
+
+// ------------------------------------------------------------------ --cheaper: the same score for less
+test('loop --cheaper: a change that holds the score and lowers the cost is kept', () => {
+  const d = toy();
+  const r = step(d, 'echo 90 > src/cost.txt', '--cheaper', 'cost');
+  assert.equal(r.code, 0); assert.match(r.out, /kept .*score held at 100, cost 100 to 90/); assert.equal(state(d), '100 90');
+});
+test('loop: without --cheaper the same change is not kept: nothing the loop was asked to raise went up', () => {
+  const d = toy();
+  assert.equal(step(d, 'echo 90 > src/cost.txt').code, 3); assert.equal(state(d), '100 100');
+});
+test('loop --cheaper: a change that holds the score and does not lower the cost is not kept', () => {
+  const d = toy();
+  assert.equal(step(d, 'echo more >> README.md', '--cheaper', 'cost').code, 3); assert.ok(clean(d));
+});
+test('loop --cheaper: a lower cost does not buy a score that fell', () => {
+  const d = toy();
+  assert.equal(step(d, trade(-20, -10), '--cheaper', 'cost').code, 1); assert.equal(state(d), '100 100');
+});
+test('loop --cheaper: with a band on the score, a move inside the band beside a lower cost is kept, and the line says so', () => {
+  const d = banded();
+  const r = step(d, trade(-5, -10), '--cheaper', 'cost');
+  assert.equal(r.code, 0); assert.match(r.out, /score 100 to 95, inside its band, cost 100 to 90/);
+});
+test('loop --cheaper: a move outside the band is put back, lower cost or not', () => {
+  const d = banded();
+  assert.equal(step(d, trade(-11, -50), '--cheaper', 'cost').code, 1); assert.equal(state(d), '100 100');
+});
+test('loop --cheaper: a score gain the cost rule pays for is kept, and the line says it was paid for', () => {
+  const d = toy({ cost: { budget: { gain: 'score', base: 0.10, rate: 0.01 } } });   // a gain of 10 allows a 20% rise
+  const r = step(d, 'echo 110 > src/score.txt && echo 115 > src/cost.txt', '--cheaper', 'cost');
+  assert.equal(r.code, 0, r.out); assert.match(r.out, /score 100 to 110, cost 100 to 115 paid for/); assert.equal(state(d), '110 115');
+});
+test('loop --cheaper: a cost rise over what the rule allows is put back', () => {
+  const d = toy({ cost: { budget: { gain: 'score', base: 0.10, rate: 0.01 } } });
+  assert.equal(step(d, 'echo 110 > src/score.txt && echo 150 > src/cost.txt', '--cheaper', 'cost').code, 1); assert.equal(state(d), '100 100');
+});
+
+// ------------------------------------------------------------------ --floor: the downhill walk
+test('loop: without --floor, small drops inside the band are each kept, and the score walks downhill', () => {
+  const d = banded();
+  assert.deepEqual(walk(d, 4, trade(-5, -10)), [0, 0, 0, 0]); assert.equal(state(d), '80 60', 'four passes, 20 points gone');
+});
+test('loop --floor: the same walk stops at the edge of the band', () => {
+  const d = banded();
+  assert.deepEqual(walk(d, 4, trade(-5, -10), '--floor'), [0, 0, 1, 1]); assert.equal(state(d), '90 80');
+  assert.equal(record(d)[2].why, 'score was 100 at its best and is 85 now: under the floor'); assert.ok(clean(d));
+});
+test('loop --floor: a new best moves the floor up, and a kept change that scores under the best does not become the best', () => {
+  const d = banded();
+  assert.equal(step(d, 'echo 120 > src/score.txt', '--floor').code, 0);
+  const top = head(d);
+  assert.deepEqual(bestOf(d), { commit: top, score: 120 });
+  assert.deepEqual(walk(d, 3, trade(-8, -10), '--floor'), [0, 1, 1], '112 is inside the band of 120, 104 is not');
+  assert.equal(state(d), '112 90'); assert.deepEqual(bestOf(d), { commit: top, score: 120 }, 'the best is still the 120 commit');
+});
+test('loop --floor: on a target where lower is better, small rises inside the band are stopped the same way', () => {
+  const d = toy({ score: { direction: 'down', noise: 10 } });   // read "score" as an error count here
+  assert.deepEqual(walk(d, 4, trade(5, -10), '--floor'), [0, 0, 1, 1]); assert.equal(state(d), '110 80');
+  assert.equal(record(d)[2].why, 'score was 100 at its best and is 115 now: under the floor');
+});
+test('loop --floor: a real gain on a lower-is-better target becomes the best', () => {
+  const d = toy({ score: { direction: 'down', noise: 10 } });
+  assert.equal(step(d, 'echo 70 > src/score.txt', '--floor').code, 0);
+  assert.deepEqual(bestOf(d), { commit: head(d), score: 70 });
+});
+test('loop --floor: an attempt that deletes the floor file does not lower the floor', () => {
+  const d = banded();
+  assert.deepEqual(walk(d, 4, `${trade(-5, -10)} && rm -f .git/improve/best.json`, '--floor'), [0, 0, 1, 1]); assert.equal(state(d), '90 80');
+});
+test('loop --floor: an attempt that rewrites the floor file to name its own parent does not lower the floor', () => {
+  const d = banded();
+  const cheat = `${trade(-5, -10)} && printf '{"commit":"%s","score":0}' "$(git rev-parse HEAD)" > .git/improve/best.json`;
+  assert.deepEqual(walk(d, 4, cheat, '--floor'), [0, 0, 1, 1]); assert.equal(state(d), '90 80');
+  assert.equal(bestOf(d).score, 100, 'and the file is put back as it was');
+});
+test('loop --floor: a best commit that is gone stops the step (exit 64) and does not quietly start the floor again', () => {
+  const d = banded();
+  walk(d, 2, trade(-5, -10), '--floor');
+  const base = head(d);
+  writeFileSync(join(d, '.git', 'improve', 'best.json'), JSON.stringify({ commit: 'f'.repeat(40), score: 100 }) + '\n');
+  const r = step(d, trade(-5, -10), '--cheaper', 'cost', '--floor');
+  assert.equal(r.code, 64, r.out + r.err); assert.match(r.err, /best commit .* is gone/);
+  assert.equal(head(d), base); assert.equal(state(d), '90 80'); assert.ok(clean(d));
+});
+test('loop --floor: a floor file that cannot be read stops the step (exit 64)', () => {
+  const d = banded();
+  walk(d, 2, trade(-5, -10), '--floor');
+  const base = head(d);
+  writeFileSync(join(d, '.git', 'improve', 'best.json'), 'not json\n');
+  const r = step(d, trade(-5, -10), '--cheaper', 'cost', '--floor');
+  assert.equal(r.code, 64, r.out + r.err); assert.match(r.err, /floor/);
+  assert.equal(head(d), base); assert.equal(state(d), '90 80'); assert.ok(clean(d));
+});
+test('loop --floor: on the first step, before anything is kept, the parent is the best and the gate is asked once', () => {
+  const d = banded();
+  assert.equal(step(d, trade(-5, -10), '--cheaper', 'cost', '--floor').code, 0); assert.equal(asks(d), 2);
+  assert.deepEqual(bestOf(d), { commit: git(d, 'rev-parse', 'HEAD^'), score: 100 }, 'the start stays the best: 95 is under it');
+});
+test('loop --floor: a win that also clears the floor is kept and becomes the best', () => {
+  const d = banded();
+  walk(d, 2, trade(-5, -10), '--floor');   // at 90, best 100
+  assert.equal(step(d, 'echo 130 > src/score.txt', '--floor').code, 0);
+  assert.deepEqual(bestOf(d), { commit: head(d), score: 130 });
+});
+
+// ------------------------------------------------------------------ what a step costs
+test('loop: how often the scorer is asked: 2 a step, 2 more for the floor once the parent is not the best, fewer with --base-cache', () => {
+  const plain = banded(); walk(plain, 4, trade(-5, -10));
+  assert.equal(asks(plain), 8, 'no floor: base and head, four times');
+  const floored = banded(); walk(floored, 4, trade(-5, -10), '--floor');
+  assert.equal(asks(floored), 14, 'the first step asks once, the next three ask twice');
+  const kept = banded(), cache = `${kept}.cache`; walk(kept, 4, trade(-5, -10), '--floor', '--base-cache', cache);
+  assert.equal(asks(kept), 10, 'a base that was already measured is not measured again');
+  assert.equal(state(kept), '90 80', 'and the answer is the same'); assert.ok(readdirSync(cache).length >= 2);
+});
+test('loop --base-cache: a folder inside the repo is refused by the gate: exit 64, the attempt put back', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'echo 110 > src/score.txt', '--base-cache', join(d, 'kept'));
+  assert.equal(r.code, 64); assert.match(r.err, /outside the repository/);
+  assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100'); assert.ok(clean(d));
+});
+test('loop --repeat: the count is handed to the gate', () => {
+  const d = toy();
+  assert.equal(step(d, 'echo 110 > src/score.txt', '--repeat', '3').code, 0); assert.equal(asks(d), 6, 'three readings a side');
+});
+
+// ------------------------------------------------------------------ the gate's own goalposts
+test('loop: an attempt cannot widen the score\'s band for itself', () => {
+  const d = banded(), base = head(d);
+  const r = step(d, `node ${CFG} "c.metrics[0].noise = 1000" && ${trade(-50, -10)}`, '--cheaper', 'cost');
+  assert.notEqual(r.code, 0, r.out); assert.equal(head(d), base); assert.equal(state(d), '100 100');
+  assert.equal(JSON.parse(read(d, 'promptwheel.config.json')).metrics[0].noise, 10); assert.ok(clean(d));
+});
+test('loop: an attempt cannot switch a guard off for itself', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, `node ${CFG} "c.metrics[0].guard = false" && ${trade(-50, -10)}`, '--cheaper', 'cost');
+  assert.notEqual(r.code, 0, r.out); assert.equal(head(d), base); assert.equal(state(d), '100 100'); assert.ok(clean(d));
+});
+test('loop: an attempt cannot point the score at an easier command', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, `node ${CFG} "c.metrics[0].cmd = 'echo 999'"`);
+  assert.notEqual(r.code, 0, r.out); assert.equal(head(d), base); assert.ok(clean(d));
+  assert.match(JSON.parse(read(d, 'promptwheel.config.json')).metrics[0].cmd, /bonus/);
+});
+test('loop: an attempt that deletes the gate\'s config is not kept', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'rm promptwheel.config.json && echo 110 > src/score.txt');
+  assert.notEqual(r.code, 0, r.out); assert.equal(head(d), base); assert.ok(existsSync(join(d, 'promptwheel.config.json'))); assert.equal(state(d), '100 100');
+});
+
+// ------------------------------------------------------------------ the loop as a whole
+test('loop: `while improve; do :; done` stops by itself when the proposer runs out of wins', () => {
+  const d = toy(), tries = `${d}.tries`, proposer = join(TMP_ROOT, 'three-wins.sh');
+  writeFileSync(proposer, `n=$(cat "$1" 2>/dev/null || echo 0); n=$(( n + 1 )); echo $n > "$1"\n[ $n -le 3 ] && sh ${BUMP} src/score.txt 1\ntrue\n`);
+  const r = spawnSync('bash', ['-c', `while "${process.execPath}" "${RIG}" --attempt "sh ${proposer} ${tries}"; do :; done`], { cwd: d, encoding: 'utf8', env: ENV, timeout: 120000 });
+  assert.equal(r.signal, null, 'the loop ended by itself');
+  assert.equal(readFileSync(tries, 'utf8').trim(), '4', 'three wins, and the empty try that ended it');
+  assert.deepEqual(record(d).map((x) => x.result), ['kept', 'kept', 'kept', 'nothing']);
+  assert.equal(read(d, 'src/score.txt'), '103'); assert.equal(git(d, 'rev-list', '--count', 'HEAD'), '4'); assert.ok(clean(d));
+});
+test('loop: a run of mixed attempts ends with only the honest changes on the branch', () => {
+  const d = toy();
+  const codes = [['echo 110 > src/score.txt'], ['echo 50 > evals/bonus.txt'], ['echo 90 > src/score.txt'], ['echo more >> README.md'], ['echo 90 > src/cost.txt', '--cheaper', 'cost'], ['true']].map(([a, ...f]) => step(d, a, ...f).code);
+  assert.deepEqual(codes, [0, 2, 1, 3, 0, 3]);
+  assert.equal(state(d), '110 90'); assert.equal(read(d, 'evals/bonus.txt'), '0'); assert.equal(read(d, 'README.md'), 'toy');
+  assert.equal(git(d, 'rev-list', '--count', 'HEAD'), '3', 'the start and the two kept changes');
+  assert.equal(git(d, 'for-each-ref', 'refs/improve').split('\n').length, 5, 'all five changes are still reachable'); assert.ok(clean(d));
+});
+test('loop: the demo script shows the walk without a floor, the stop with one, and what --base-cache saves', () => {
+  const r = spawnSync('bash', [join(ROOT, 'examples', 'improve-loop', 'run-demo.sh')], { encoding: 'utf8', env: ENV, timeout: 120000 });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(r.stdout.split('\n').filter((l) => l.includes('ends at')).map((l) => l.trim()), [
+    'ends at: score 80, cost 60. The scorer was asked 8 times.',
+    'ends at: score 90, cost 80. The scorer was asked 14 times.',
+    'ends at: score 90, cost 80. The scorer was asked 10 times.',
+  ]);
+});

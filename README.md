@@ -179,6 +179,10 @@ The Action runs straight from its own checkout, no npm install, no build. See [`
 
 Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommitted changes). See [`plugins/promptwheel/`](plugins/promptwheel/). A Stop-hook that refuses to let an agent end a turn on a `GAMED` win ships at [`examples/detect-gaming-stop.sh`](examples/detect-gaming-stop.sh).
 
+## In a loop
+
+PromptWheel is the check a loop consumes. It is not the loop. For one worked loop step, see [`examples/improve-loop/`](examples/improve-loop/): it runs an attempt, asks the check, and keeps the change or puts it back. `--floor` stops a score from sliding downhill in steps that each pass. It is an example to copy, not part of the npm package, and it has only been run on small scripted scorers so far.
+
 ## Trust model
 
 **What it catches.** After the normal gate, every *win* is re-proven using the agent's source edits alone. A change that moved no test, grader or config has nothing to set aside: its source-only tree is the tree that was just measured, so that measurement stands and nothing is run a second time. If the win only survived by skipping or deleting a test, mocking the grader, editing a golden, relaxing a declared config, or touching zero source files, the verdict is `GAMED` (exit 2). A grader is recognized by its file name in a scripting language (`eval.py`, `grader.sh`, `score.js`, `scoring.ts`) or by an `evals/` or `grader(s)/` directory; a production file with one of those names (`src/score.py`) is treated as a grader too, so a fix there needs `--allow`, and a grader with any other name (`evaluate.py`, `check.py`) is source unless you list it in `evaluatorPaths`. On top of that:

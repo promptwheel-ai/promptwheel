@@ -17,6 +17,7 @@
 
 - `bin/promptwheel.mjs` - the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict + the source-only re-run, evaluatorPaths auto-fail and gate integrity; commands run/init/lock/pr-allow). ~1500 LOC. `bin/promptwheel.d.ts` is its hand-written type declaration (no build step; a test keeps it in step with the export list).
 - `promptwheel.config.json` - example metrics config.
+- `examples/improve-loop/` - one keep-or-put-back loop step built on the check (`improve.mjs`), with its tests in `test/improve-loop.test.mjs`. **Kept on purpose (owner's decision, 2026-11-21).** The engine had it as `improve --attempt`, 0.8.0 removed it as unused, and the owner asked for it back. It is not the retired orchestrator: it only consumes the gate. It stays out of the engine and out of the npm package.
 - `docs/ARCHITECTURE.md` - how the engine works, schemas, the trust model.
 - `docs/history/` - the original pivot rationale (`VISION.md`) and the phased plan (`ROADMAP.md`); historical, not maintained.
 
@@ -27,10 +28,11 @@ node bin/promptwheel.mjs run --base <ref> --head <ref> [--repeat N] [--json]
 npm test          # 168 dep-free node:test tests (unit + integration)
 ```
 
-Tests live in `test/promptwheel.test.mjs` - keep them **dep-free** (`node:test`): import the pure helpers for unit tests, shell out to the CLI for integration. `bin/promptwheel.mjs` is the single source of behavior; **add/adjust a test with every behavior change**. The engine is importable (pure helpers exported; the CLI runs only when invoked directly) - don't break that, the tests rely on it.
+Tests live in `test/promptwheel.test.mjs` (the engine) and `test/improve-loop.test.mjs` (the loop example) - keep them **dep-free** (`node:test`): import the pure helpers for unit tests, shell out to the CLI for integration. `bin/promptwheel.mjs` is the single source of behavior; **add/adjust a test with every behavior change**. The engine is importable (pure helpers exported; the CLI runs only when invoked directly) - don't break that, the tests rely on it.
 
 ## Don'ts
 
+- Don't remove `examples/improve-loop` or thin its tests in a cleanup. It was removed once (0.8.0) and brought back (2026-11-21). Ask the owner first.
 - Don't re-add orchestration, "spin", trajectories, or formulas - that lineage was retired in June 2026 and is not in this repo (it survives only in git history before the pivot).
 - Don't add heavy deps, a framework, or a build pipeline.
 - Don't let a guard fail on a within-noise delta.

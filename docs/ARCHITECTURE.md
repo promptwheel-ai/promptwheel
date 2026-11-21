@@ -113,8 +113,11 @@ Exit code: `0` = pass · `1` = fail (a guarded metric had a trusted regression, 
 
 `npm test` (= `node --test`) runs `test/promptwheel.test.mjs` - **154 dep-free tests**: unit coverage of `extract`, `median`/`spread`, the `evaluate` noise/confidence logic, `renderMarkdown`, the source/non-source classifier and `judgeGaming` (imported directly), plus integration tests that spawn the real CLI or call `check()` against throwaway git repos (run pass/fail, `--working` + tree-untouched, gaming detection, evaluatorPaths, mandates, gate integrity and fingerprints, the allow trailer, zero-config, `init` presets, exit 64 on a broken config, `--version`/`--help`). No test dependencies.
 
+`npm test` also runs `test/improve-loop.test.mjs`: the tests of the loop step in `examples/improve-loop`. Each builds a small repo and runs the real step against the real engine. One test in the main file fails, and says why, if the loop or its tests go missing.
+
 ## Design constraints
 - **Zero runtime dependencies, no build.** Node 18+, ESM, runs straight from source.
 - **Never mutate the working tree.** Throwaway worktrees only.
 - **Deterministic-friendly, noise-honest.** Prefer cheap deterministic metrics; for noisy ones, demand `--repeat`.
 - **Importable + tested.** Pure helpers exported; CLI guarded behind a direct-invocation check.
+- **The loop is not in the engine.** `examples/improve-loop` is one keep-or-put-back step that shells `run --json`. The engine had it as `improve` until 0.8.0 removed it as unused, and it came back on 2026-11-21 as an example, at the owner's ask. The engine's surface stays the check. The floor against the best score so far lives in the loop too: the gate compares two commits and keeps no history.

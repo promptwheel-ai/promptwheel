@@ -3883,3 +3883,17 @@ test('a comment longer than GitHub takes is cut short and says where the rest is
   assert.match(p.body, /\(Cut short: the whole report is in the job summary\.\)\n*$/);
   assert.ok(p.summary.length > p.body.length, 'the job summary has all of it');
 });
+
+// ------------------------------------------------ the improve loop is kept on purpose
+// 0.8.0 (ed4fb3c) removed `promptwheel improve` and its four tests, as a command nothing relied on. On 2026-11-21
+// the owner asked for the loop back. It lives in examples/improve-loop, outside the engine, with its own test file.
+// This is the tripwire: if the loop or its tests go missing, thin out or get skipped, it fails here and says why.
+test('the improve loop example and its tests are still here (0.8.0 removed the loop once, and the owner asked for it back on 2026-11-21: ask before removing either)', () => {
+  const top = join(dirname(ENGINE), '..'), rig = join(top, 'examples', 'improve-loop', 'improve.mjs'), tests = join(top, 'test', 'improve-loop.test.mjs');
+  const why = 'The loop was removed once, in 0.8.0, and the owner asked for it back on 2026-11-21. Ask the owner before removing it or its tests.';
+  assert.ok(existsSync(rig), `examples/improve-loop/improve.mjs is gone. ${why}`);
+  assert.ok(existsSync(tests), `test/improve-loop.test.mjs is gone. ${why}`);
+  const text = readFileSync(tests, 'utf8'), count = (text.match(/^test\(/gm) || []).length;
+  assert.ok(count >= 60, `test/improve-loop.test.mjs holds ${count} tests, and it is held to 60 or more. ${why}`);
+  assert.ok(!/^test\.(skip|todo)\(|\{ *(skip|todo):/m.test(text), `a test in test/improve-loop.test.mjs is skipped or marked todo. ${why}`);
+});

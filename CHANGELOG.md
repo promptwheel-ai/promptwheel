@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased: a score that wobbles
+## Unreleased: a score that wobbles, and the loop is back
 
 On the branch `feat/noisy-scorer-gate`. Not released, and no version is set.
 
@@ -12,10 +12,13 @@ The gate was built for tests that pass or fail. An eval score moves between runs
 - **Measured with a calibrated band** (same scorer, the band from 200 runs at the base). Nothing changed, one run a side: a win 31 times in 1,000 and a loss 27 times, where it was 496 and 504. A gain of three standard deviations was seen 877 times in 1,000 at three repeats, 488 in 500 at five, and 499 in 500 at eight. More repeats now help. A gain of one standard deviation at five repeats: 135 in 500, where it was 19.
 - **`run --base-cache <dir>`.** Keeps the base's measurement in a folder and uses it again for the same tree measured the same way, so a loop asks a slow or paid scorer about the base once. Off unless asked for. The folder must sit outside the repository: a kept number the change can reach is a goalpost. Only a clean measurement is kept, and the report says when a kept one was used (`baseMeasured`).
 - **The counts read PHP.** PHPUnit test methods, `#[Test]`, a docblock `@test`, and skipped or incomplete tests. On a real Drupal module with 489 PHP files the counts read 0 tests and 0 skips before. Now they read 984 and 5. By hand it is 982 test methods and 5 skips: the other 2 are the word in a comment and in a string.
+- **The improve loop is back, as an example.** 0.8.0 removed `promptwheel improve` and its four tests, as a command nothing relied on. The owner asked for it back. It is `examples/improve-loop/improve.mjs` now: one step that runs an attempt, asks the check, and keeps the change or puts it back. It is not in the engine and not in the npm package. New in it is `--floor`, which holds each kept change against the best score so far. Without it, four small drops that each sat inside the band were all kept, and a score went from 100 to 80. With it the walk stopped at 90.
+- **The loop has 72 tests**, in `test/improve-loop.test.mjs`. The first 62 were written before the loop was touched, and 13 of them failed. The three that mattered most: an attempt that committed its own work skipped the check, an attempt could throw away an earlier kept commit, and an attempt could delete the floor file and so lower the floor. All are closed. So is a fourth, found later: stopping the loop with Ctrl-C left a half-made change in the tree. To test the tests, the loop was then broken in 37 small ways, one at a time. The tests caught 37.
+- **One test in the main suite is a tripwire.** It fails, and says why, if the loop or its tests go missing, drop under 60, or get skipped.
 - **One existing test changed on purpose.** It pinned three setup runs for a change that moved no goalpost. That is two now.
 - New command: `calibrate`. New exports: `calibrate`, `noiseBand`. New in a report: `spread` on a metric with a declared band, and `baseMeasured`.
 - **Not built:** when a goalpost did move, the second measurement is still read without the band, so a noisy score beside an edited test can still read `gamed`. The repeat count is still read from the change's own config. PHP lint silencers and Pest's `->skip(` are not counted.
-- **Not run:** on a real eval. The scorer here is made up, with normal noise. Not run on Windows or macOS.
+- **Not run:** the loop on a real scorer with a real proposer. Everything here ran on small scripted scorers. Those test the mechanics. They do not show that a loop makes anything better over time. Not run on Windows or macOS.
 
 ## 0.8.15 (2026-11-20): a good guest on a pull request
 
