@@ -210,8 +210,13 @@ back, and the next starts from nothing. `--turns N` judges the whole run instead
 - the next turn is told the reading: its path is in `PW_FEEDBACK` (`PW_TURN` and `PW_TURNS` say where the run is);
 - the best turn is kept, as one commit, after it is measured once more. If no turn won, the tree is put back.
 
-A run ends early when a turn changes nothing, when nothing more can be gained, or after `--patience` turns (3) with
-no new best once there is one. An interrupt puts the tree back, and keeps a best turn that had passed its check.
+A run ends early when a turn ends by itself having changed nothing, when nothing more can be gained, or after
+`--patience` turns (3) with no new best once there is one. An interrupt puts the tree back, and keeps a best turn
+that had passed its check. Inside the loop the contract is yours: an attempt that changes `promptwheel.config.json`
+is put back, whatever else it did.
+
+What this is not: a promise that more turns do better. In our own first runs with a real agent the count of work
+left fell in steps, not slopes: most turns that were cut short had saved nothing ([docs/LEARNING.md](docs/LEARNING.md)).
 
 Every checked run adds one short row to a record in the repo's git folder (never the working tree; `run --no-record`
 adds none). Three commands read it: `insights` (how each measure responds), `playbook` (what has paid here, and what

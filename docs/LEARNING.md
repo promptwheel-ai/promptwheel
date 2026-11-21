@@ -30,7 +30,8 @@ steps and nothing else. With `--turns`:
 | what is kept | the best turn (the largest gain on the measures that make a win), not the last. One commit |
 | the second look | the best turn is measured once more before it is kept. N turns are N tries at a measure that may be noisy |
 | what the next turn is told | a short file: each measure at the start and now, what is worse than at the start, which turn this is. `PW_FEEDBACK` holds its path. Nothing a person typed is in it |
-| when it ends | after N turns; when a turn changes nothing; when nothing more can be gained; after `--patience` turns (3) with no new best, once there is a best |
+| when it ends | after N turns; when a turn ends by itself having changed nothing (one that was cut off, or failed, does not end the run); when nothing more can be gained; after `--patience` turns (3) with no new best, once there is a best |
+| the contract | the person's. An attempt that changes `promptwheel.config.json`, a file it extends or a file it names as part of the gate is put back. A win is a gain on a measure the contract held when the run started |
 | where the best so far is held | in the running process. There is no file an attempt could delete or rewrite to lower the bar |
 | an interrupt | the tree is put back. A best turn that had passed its check is kept |
 | the record | a row a turn, then a row for the run. `playbook` prints each run's path. Counts over the record are over runs |
@@ -45,7 +46,14 @@ the second look all apply at the end, and a measure the loop never sees is still
 check, run on an attempt. It is tested.
 
 **May be said:** with `--turns`, a change that takes more than one turn can be kept, and a run that ends with
-nothing gained leaves the tree as it was. Tested.
+nothing gained leaves the tree as it was. Tested, with scripted attempts.
+
+**May not be said:** that `--turns` helps a real agent. Three runs on 2026-11-21 (Haiku 5.5, 45 seconds a turn, a
+job that takes one unhurried attempt 135 seconds, a pass-or-fail measure) did not show it. The count of work left,
+after each turn, read like this: `89 89 89 89 81 81 81 81 81`, or `89 89 89 74 74 0`. Staircases: most turns that
+were cut short had saved nothing, a small step that was saved was kept and not built on, and then one turn did the
+rest. The same job took that agent anything from 23 seconds to over 180. For it, the finished job was the unit of
+progress, not the turn. Judging over turns was no worse than judging each attempt alone, and no better.
 
 **May not be said, until it is shown:** that the loop gets better with use, that the playbook makes later attempts
 better, or that the list of what was thrown away keeps an attempt from being tried twice.
