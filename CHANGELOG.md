@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.16 (2026-11-20): a report that arrived cut
+
+`run` printed its report and called `process.exit()` at once. Node writes to a pipe in the background, and an exit drops what the pipe has not taken yet. So a report larger than a pipe holds arrived cut, with the verdict's exit code: at 146,176 bytes where the reader was quick, at 65,536 where it was slow. Found by running the Action's own two commands on every commit of 994 pull requests. One of them changed 10,753 files, and its report came to 812,136 bytes.
+
+- **`run` ends by itself once its report is written.** The exit code is set, and nothing is cut. The report lists every test, fixture and config file a change touches (`gate.goalposts`), so the cut began at a change of a few thousand of them.
+- **The Action was not affected.** It writes the report to a file. A tool that reads `run --json` through a pipe was. Sawbuck's `check` and its commit hook do, and Sawbuck 0.2.3 has the tests for what each of them then did.
+- Not run on a Mac.
+
 ## 0.8.15 (2026-11-20): a good guest on a pull request
 
 The Action left a new comment on every run, a pass included, under the name PromptWheel. Run with its own steps: ten passing pushes, ten comments. A check that speaks on every push gets muted, and then its one real sentence is not read either.
