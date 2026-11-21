@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint,
-  allowFromComments, check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION, deriveVerdict, applyBudgets } from '../bin/promptwheel.mjs';
+  allowFromComments, check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION, deriveVerdict, applyBudgets, testsIn, testsTakenOut } from '../bin/promptwheel.mjs';
 import { createHash } from 'node:crypto';
 import { realpathSync, chmodSync } from 'node:fs';
 
@@ -3659,4 +3659,399 @@ test('a report larger than a pipe holds arrives whole through a reader that star
   r = lateReader(); rep = whole(r);
   assert.ok(rep, `the failing report did not arrive whole: ${Buffer.byteLength(r.text)} bytes came`);
   assert.equal(rep.verdict, 'fail'); assert.equal(r.code, 1); assert.equal(rep.gate.goalposts.length, 900);
+});
+
+// ---- 0.8.17: each test by its name, and the tests a change added and took out again -------------------------------
+// The check holds the head against the base. An agent that writes tests early in a pull request, sees them go red and
+// deletes them in a later commit ends with as many tests as the base has, and every count reads "nothing changed". It
+// is the most common shape of "you removed the tests" on real pull requests (proof-bench/outside-repos, 2026-11-19:
+// 29 of 45 such objections that no tool sent back). Read by name and scored on 994 pull requests
+// (proof-bench/per-test): a note when every test an earlier commit of the change had added is gone.
+const names = (p, t) => testsIn(p, t).map((x) => x.name);
+const one = (p, t, n) => testsIn(p, t).find((x) => x.name === n);
+
+test('names: JavaScript and TypeScript: the string given to it, test and specify; chains; not a member call, not a group', () => {
+  const t = `
+describe('math', () => {
+  it('adds', () => { expect(add(2, 2)).toBe(4); });
+  it.skip("subtracts", () => { expect(sub(2, 2)).toBe(0); expect(1).toBe(1); });
+  test.each([[1, 2], [3, 4]])('multiplies %i by %i', (a, b) => { expect(mul(a, b)).toBe(a * b); });
+  xit('divides', () => {});
+  it(\`handles \${x}\`, async () => { assert.equal(1, 1); });
+  test.describe('a group', () => {});
+  if (/x/.test('abc')) schema.describe('nope');
+  obj.it('not a test');
+  t.test('tap style', (t) => { t.equal(1, 1); });
+  Deno.test('deno style', () => {});
+  test('no assertion here', () => { run(); });
+  it(
+    'a long name that the formatter put on its own line',
+    async () => { expect(1).toBe(1); },
+  );
+  it.each([
+    ['a', 1],
+    ['b', 2],
+  ])('reads %s from a table over several lines', (k, v) => { expect(get(k)).toBe(v); });
+  test.each\`
+    a | b
+    \${1} | \${2}
+  \`('adds $a and $b', ({ a, b }) => { expect(a + b).toBe(3); });
+});`;
+  assert.deepEqual(names('a.test.ts', t), ['adds', 'subtracts', 'multiplies %i by %i', 'divides', 'handles ${x}', 'tap style', 'deno style', 'no assertion here', 'a long name that the formatter put on its own line',
+    'reads %s from a table over several lines', 'adds $a and $b']);
+  assert.equal(one('a.test.ts', t, 'adds').asserts, 1); assert.equal(one('a.test.ts', t, 'subtracts').asserts, 2);
+  assert.equal(one('a.test.ts', t, 'subtracts').skipped, true); assert.equal(one('a.test.ts', t, 'divides').skipped, true); assert.equal(one('a.test.ts', t, 'adds').skipped, false);
+  assert.equal(one('a.test.ts', t, 'no assertion here').asserts, 0);
+});
+test('names: Python: def test_ with its class, async, decorators, a skip mark', () => {
+  const t = `
+import pytest
+
+def test_plain():
+    assert add(2, 2) == 4
+
+class TestMath:
+    def test_adds(self):
+        self.assertEqual(add(2, 2), 4)
+        assert True
+
+    @pytest.mark.skip(reason="later")
+    @pytest.mark.parametrize("a", [1, 2])
+    def test_skipped(self, a):
+        pass
+
+    async def test_async(self):
+        with pytest.raises(ValueError):
+            boom()
+
+def helper():
+    pass
+
+def test_after_class():
+    helper()
+`;
+  assert.deepEqual(names('test_x.py', t), ['test_plain', 'TestMath.test_adds', 'TestMath.test_skipped', 'TestMath.test_async', 'test_after_class']);
+  assert.equal(one('test_x.py', t, 'TestMath.test_adds').asserts, 2); assert.equal(one('test_x.py', t, 'TestMath.test_skipped').skipped, true);
+  assert.equal(one('test_x.py', t, 'TestMath.test_async').asserts, 1); assert.equal(one('test_x.py', t, 'test_after_class').asserts, 0);
+});
+test('names: Go: func TestX, a suite method, t.Run by its string, t.Skip', () => {
+  const t = `
+func TestAdd(t *testing.T) {
+	if add(2, 2) != 4 { t.Errorf("no") }
+	t.Run("zero", func(t *testing.T) { require.Equal(t, 0, add(0, 0)) })
+	t.Run(tc.name, func(t *testing.T) {})
+}
+func (s *Suite) TestSub() { s.Equal(0, sub(2, 2)) }
+func TestLater(t *testing.T) { t.Skip("later") }
+func helper() {}
+func FuzzParse(f *testing.F) {}
+`;
+  assert.deepEqual(names('x_test.go', t), ['TestAdd', 'TestAdd/zero', 'TestSub', 'TestLater', 'FuzzParse']);
+  // a table-driven test: each row is a sub-test by its name field, and holds no assertion count of its own
+  const table = `
+func TestParse(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{name: "empty", in: ""},
+		{
+			name: "one word",
+			in:   "a",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { if parse(tt.in) == nil { t.Fatal("nil") } })
+	}
+}
+func TestNoTable(t *testing.T) {
+	cfg := Config{
+		name: "not a row",
+	}
+	_ = cfg
+}
+func TestByAddress(t *testing.T) {
+	tests := []struct{ address, want string }{
+		{address: "a@b", want: "b"},
+		{
+			address: "c@d",
+			want:    "d",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.address, func(t *testing.T) { assert.Equal(t, tt.want, host(tt.address)) })
+	}
+}
+`;
+  assert.deepEqual(names('p_test.go', table), ['TestParse', 'TestParse/empty', 'TestParse/one word', 'TestNoTable', 'TestByAddress', 'TestByAddress/a@b', 'TestByAddress/c@d']);
+  // rows written without field names: the first value, when the table's first field is the one the loop names
+  const bare = `
+func TestMalformed(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+	}{
+		{"missing timestamp", []string{"done-intent:COMPLETED"}},
+		{"empty labels", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) { if got(tt.labels) != nil { t.Errorf("no") } })
+	}
+}
+func TestOtherFirst(t *testing.T) {
+	tests := []struct {
+		in   string
+		name string
+	}{
+		{"x", "the name is second"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {})
+	}
+}
+`;
+  assert.deepEqual(names('m_test.go', bare), ['TestMalformed', 'TestMalformed/missing timestamp', 'TestMalformed/empty labels', 'TestOtherFirst']);
+  assert.equal(one('p_test.go', table, 'TestParse/one word').asserts, -1);
+  assert.equal(one('x_test.go', t, 'TestAdd').asserts, 1); assert.equal(one('x_test.go', t, 'TestAdd/zero').asserts, 1); assert.equal(one('x_test.go', t, 'TestLater').skipped, true);
+});
+test('names: Rust: an attribute and the fn after it, ignore, an attribute that is not on a fn', () => {
+  const t = `
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn adds() { assert_eq!(add(2, 2), 4); }
+
+    #[tokio::test]
+    #[ignore]
+    async fn later() {}
+
+    #[test_case(1, 2)]
+    #[test_case(3, 4)]
+    fn cases(a: i32, b: i32) { assert!(a < b); }
+
+    fn helper() {}
+
+    #[test]
+    #[should_panic]
+    fn panics() { boom(); }
+}`;
+  assert.deepEqual(names('lib.rs', t), ['adds', 'later', 'cases', 'panics']);
+  assert.equal(one('lib.rs', t, 'later').skipped, true); assert.equal(one('lib.rs', t, 'adds').asserts, 1); assert.equal(one('lib.rs', t, 'panics').asserts, 1);
+});
+test('names: Ruby: it and test with a string, def test_, a bare it, xit', () => {
+  const t = `
+describe Calc do
+  it "adds" do
+    expect(add(2, 2)).to eq 4
+  end
+  xit 'subtracts' do
+  end
+  it { is_expected.to be_valid }
+  test "rails style" do
+    assert true
+  end
+  def test_minitest
+    assert_equal 4, add(2, 2)
+  end
+  it "is pending" do
+    skip "later"
+  end
+end`;
+  assert.deepEqual(names('calc_spec.rb', t), ['adds', 'subtracts', 'it { is_expected.to be_valid }', 'rails style', 'test_minitest', 'is pending']);
+  assert.equal(one('calc_spec.rb', t, 'subtracts').skipped, true); assert.equal(one('calc_spec.rb', t, 'is pending').skipped, true); assert.equal(one('calc_spec.rb', t, 'adds').asserts, 1);
+});
+test('names: Java and Kotlin: @Test and the method after it, other annotations between, @Disabled', () => {
+  const j = `
+class CalcTest {
+    @Test
+    void adds() { assertEquals(4, add(2, 2)); }
+
+    @Test
+    @DisplayName("subtracts two numbers")
+    public void subtracts() throws Exception {
+        assertThat(sub(2, 2)).isEqualTo(0);
+    }
+
+    @Disabled("later")
+    @Test
+    void later() {}
+
+    @ParameterizedTest @ValueSource(ints = {1, 2}) void many(int a) { verify(mock).call(a); }
+
+    private void helper() {}
+}`;
+  assert.deepEqual(names('CalcTest.java', j), ['adds', 'subtracts', 'later', 'many']);
+  assert.equal(one('CalcTest.java', j, 'later').skipped, true); assert.equal(one('CalcTest.java', j, 'subtracts').asserts, 1); assert.equal(one('CalcTest.java', j, 'many').asserts, 1);
+  const k = "class CalcTest {\n    @Test\n    fun `adds two numbers`() { assertEquals(4, add(2, 2)) }\n    @Test fun subtracts() = runTest { }\n}";
+  assert.deepEqual(names('CalcTest.kt', k), ['adds two numbers', 'subtracts']);
+});
+test('names: C#: [Fact] [Theory] [Test] [TestMethod] and the method after it, with its class; Skip; data rows are one test', () => {
+  const t = `
+namespace X {
+  public class AddTests {
+    [Fact]
+    public void Adds() { Assert.Equal(4, Calc.Add(2, 2)); }
+
+    [Theory]
+    [InlineData(1, 2)]
+    [InlineData(3, 4)]
+    public async Task Adds_Many(int a, int b)
+    {
+        (a + b).Should().Be(Calc.Add(a, b));
+    }
+
+    [Fact(Skip = "later")] public void Later() { }
+
+    [TestMethod, TestCategory("x")]
+    public void MsTest() { Assert.IsTrue(true); Assert.AreEqual(1, 1); }
+
+    private static void Helper() { }
+  }
+  public class OtherTests {
+    [Test] public void Adds() { }
+  }
+}`;
+  assert.deepEqual(names('AddTests.cs', t), ['AddTests.Adds', 'AddTests.Adds_Many', 'AddTests.Later', 'AddTests.MsTest', 'OtherTests.Adds']);
+  assert.equal(one('AddTests.cs', t, 'AddTests.Later').skipped, true); assert.equal(one('AddTests.cs', t, 'AddTests.MsTest').asserts, 2); assert.equal(one('AddTests.cs', t, 'AddTests.Adds_Many').asserts, 1);
+  assert.equal(one('AddTests.cs', t, 'OtherTests.Adds').asserts, 0);
+});
+test('names: an attribute whose arguments hold brackets, or run over several lines, is still followed to its function', () => {
+  const cs = `
+public class CommandLineApplicationTests {
+    [Theory]
+    [InlineData(new string[0], new string[0], null)]
+    [InlineData(new[] { "--" }, new string[0], null)]
+    [InlineData(new[] { "-t", "val", "--", "a" }, new[] { "a" }, "val")]
+    public void ArgumentSeparator(string[] input, string[] expectedRemaining, string? topLevelValue)
+    {
+        Assert.Equal(expectedRemaining, app.RemainingArguments.ToArray());
+    }
+
+    [Fact]
+    [Trait("kind", "slow")] public void Later() { }
+
+    [Theory, MemberData(nameof(Cases),
+        MemberType = typeof(Data))]
+    public async Task Many(int a) { Assert.True(a > 0); }
+}`;
+  assert.deepEqual(names('A.cs', cs), ['CommandLineApplicationTests.ArgumentSeparator', 'CommandLineApplicationTests.Later', 'CommandLineApplicationTests.Many']);
+  const rs = `
+    #[rstest]
+    #[case::renamed(
+        "advanced-tool-use-2025-11-20",
+        BetaProvider::Bedrock,
+        Some(AnthropicBeta::ToolSearchTool20251019)
+    )]
+    #[case::kept("oauth-2025-04-20", BetaProvider::Anthropic, Some(AnthropicBeta::Oauth20250420))]
+    fn maps_a_beta(#[case] header: &str, #[case] provider: BetaProvider, #[case] want: Option<AnthropicBeta>) {
+        assert_eq!(map(header, provider), want);
+    }
+    #[derive(Debug)]
+    struct NotATest { a: i32 }
+    #[test]
+    fn plain() { assert!(true); }
+`;
+  assert.deepEqual(names('beta.rs', rs), ['maps_a_beta', 'plain']);
+  const jv = `
+class GatewayAddressCacheTest {
+    @Test(groups = { "direct" },
+            dataProvider = "openAsyncTargetAndTargetPartitionsKeyRangeAndCollectionLinkParams",
+            timeOut = TIMEOUT)
+    public void tryGetAddresses_ForDataPartitions(
+            List<String> allPartitionKeyRangeIds,
+            String partitionKeyRangeId) throws Exception {
+        assertThat(x).isNotNull();
+    }
+
+    @Ignore("later")
+    @Test(groups = { "direct" }, timeOut = TIMEOUT)
+    public void later() { }
+
+    @Override
+    public String toString() { return ""; }
+
+    @Test public void oneLine() { verify(a).b(); }
+}`;
+  assert.deepEqual(names('G.java', jv), ['tryGetAddresses_ForDataPartitions', 'later', 'oneLine']);
+  assert.equal(one('G.java', jv, 'later').skipped, true); assert.equal(one('G.java', jv, 'oneLine').skipped, false);
+});
+test('names: Swift and Elixir', () => {
+  const s = "final class CalcTests: XCTestCase {\n  func testAdds() { XCTAssertEqual(add(2, 2), 4) }\n  func helper() {}\n}\n@Test func subtracts() { #expect(sub(2, 2) == 0) }\n@Test(\"multiplies\")\nfunc mul() {}\n";
+  assert.deepEqual(names('CalcTests.swift', s), ['testAdds', 'subtracts', 'mul']);
+  const e = 'defmodule CalcTest do\n  test "adds" do\n    assert add(2, 2) == 4\n  end\n  @tag :skip\n  test "later" do\n  end\nend\n';
+  assert.deepEqual(names('calc_test.exs', e), ['adds', 'later']); assert.equal(one('calc_test.exs', e, 'later').skipped, true); assert.equal(one('calc_test.exs', e, 'adds').asserts, 1);
+});
+test('names: a file of another kind holds no test', () => {
+  assert.deepEqual(testsIn('README.md', "it('x', () => {})"), []);
+});
+
+const T3 = "const t=require('node:test'),a=require('node:assert');\nt.test('adds two', () => a.equal(1 + 1, 2));\nt.test('adds three', () => a.equal(1 + 2, 3));\nt.test('adds four', () => a.equal(2 + 2, 4));\n";
+const prRepo = () => repoWith({ 'package.json': JSON.stringify({ name: 'a', scripts: { test: 'node --test test/a.test.js' } }), 'src/a.js': 'exports.f = () => 1\n', 'test/a.test.js': NODE_TEST("require('../src/a.js').f(), 1") });
+const put = (d, f, text) => { mkdirSync(join(d, dirname(f)), { recursive: true }); writeFileSync(join(d, f), text); };
+const gitIn = (d, ...a) => execFileSync('git', a, { cwd: d, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+const range = (d, base, head = 'HEAD', ...extra) => { const r = pw(d, ['run', '--base', base, '--head', head, '--no-record', '--json', ...extra]); return { code: r.code, rep: JSON.parse(r.out) }; };
+test('tests an earlier commit of the change added, all gone now: a note with their names, never a verdict; and the comment speaks', () => {
+  const d = prRepo(); const base = rev(d);
+  put(d, 'test/more.test.js', T3); commitAll(d, 'three more tests'); const c1 = gitIn(d, 'rev-parse', '--short', 'HEAD');
+  put(d, 'src/a.js', 'exports.f = () => 1 // tidied\n'); commitAll(d, 'tidy');
+  unlinkSync(join(d, 'test/more.test.js')); commitAll(d, 'drop the tests that went red');
+  const { code, rep } = range(d, base);
+  assert.equal(code, 0); assert.equal(rep.verdict, 'pass', 'the head holds what the base holds: nothing fails');
+  assert.deepEqual(rep.testsTakenOut, { added: 3, names: ['adds four', 'adds three', 'adds two'], more: 0, at: c1 });
+  const md = renderMarkdown(rep);
+  assert.match(md, /> ℹ️ \*\*Note:\*\* an earlier commit of this pull request \(`[0-9a-f]{7,}`\) added 3 tests\. None of them is in it now: `adds four`, `adds three`, `adds two`\./);
+  assert.match(md, /^### ✅ Sawbuck: passes/);
+  const p = plan({ report: rep, exit: 0, comments: [], key: 'Sawbuck/contract' });
+  assert.equal(p.action, 'create', 'a pass with this note is not a plain pass: the one comment is left'); assert.match(p.body, /None of them is in it now/);
+  const human = pw(d, ['run', '--base', base, '--head', 'HEAD', '--no-record']).out;
+  assert.match(human, /ℹ note: an earlier commit of this change \([0-9a-f]{7,}\) added 3 tests, and none of them is in it now: adds four, adds three, adds two/);
+  // one test added and taken out reads in the singular
+  const e = prRepo(); const eb = rev(e); put(e, 'test/one.test.js', "const { test } = require('node:test');\ntest('only one', () => {});\n"); commitAll(e, 'one test'); unlinkSync(join(e, 'test/one.test.js')); commitAll(e, 'and out');
+  assert.match(renderMarkdown(range(e, eb).rep), /added 1 test\. It is not in it now: `only one`\./);
+});
+test('not taken for tests taken out: a rename, a part of them, a single commit, a change that only removes what the base held', () => {
+  const renamed = prRepo(); let base = rev(renamed);
+  put(renamed, 'test/more.test.js', T3); commitAll(renamed, 'three more');
+  put(renamed, 'test/more.test.js', T3.replace('adds two', 'sums two').replace('adds three', 'sums three').replace('adds four', 'sums four')); commitAll(renamed, 'better names');
+  assert.equal(range(renamed, base).rep.testsTakenOut, undefined, 'a rename leaves the number of tests the change adds as it was');
+  const part = prRepo(); base = rev(part);
+  put(part, 'test/more.test.js', T3); commitAll(part, 'three more');
+  put(part, 'test/more.test.js', T3.split('\n').filter((l) => !l.includes('adds four')).join('\n')); commitAll(part, 'one out');
+  assert.equal(range(part, base).rep.testsTakenOut, undefined, 'two of the three are still there');
+  const one = prRepo(); base = rev(one);
+  put(one, 'test/more.test.js', T3); commitAll(one, 'three more');
+  assert.equal(range(one, base).rep.testsTakenOut, undefined, 'one commit has no earlier commit');
+  const old = repoWith({ 'package.json': JSON.stringify({ name: 'a', scripts: { test: 'node --test test/a.test.js' } }), 'src/a.js': 'exports.f = () => 1\n', 'test/a.test.js': NODE_TEST("require('../src/a.js').f(), 1"), 'test/more.test.js': T3 }); base = rev(old);
+  put(old, 'src/a.js', 'exports.f = () => 1 // x\n'); commitAll(old, 'a change'); unlinkSync(join(old, 'test/more.test.js')); commitAll(old, 'drop old tests');
+  assert.equal(range(old, base).rep.testsTakenOut, undefined, 'tests the base held are the counts\' matter, not this note\'s');
+});
+test('the tests taken out are read from the change\'s own commits: behind GitHub\'s merge of a pull request, and past a merge of the base into the branch', () => {
+  // GitHub checks a pull request out as a merge of its head into the base, and the base has moved since the branch left it
+  const d = prRepo(); const main0 = gitIn(d, 'rev-parse', '--abbrev-ref', 'HEAD');
+  gitIn(d, 'checkout', '-q', '-b', 'agent/work');
+  put(d, 'test/more.test.js', T3); commitAll(d, 'three more'); const c1 = gitIn(d, 'rev-parse', '--short', 'HEAD');
+  unlinkSync(join(d, 'test/more.test.js')); put(d, 'src/b.js', 'exports.g = () => 2\n'); commitAll(d, 'drop them, add b');
+  gitIn(d, 'checkout', '-q', main0); put(d, 'test/main.test.js', "require('node:test').test('a test the base gained meanwhile', () => {});\n"); commitAll(d, 'the base moves'); const baseTip = rev(d);
+  gitIn(d, 'checkout', '-q', '--detach', baseTip); gitIn(d, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', '-q', '--no-ff', '-m', 'Merge agent/work into base', 'agent/work');
+  let r = range(d, baseTip).rep;
+  assert.deepEqual(r.testsTakenOut, { added: 3, names: ['adds four', 'adds three', 'adds two'], more: 0, at: c1 }, 'read behind the merge, and the base\'s own new test is not among them');
+  // a branch that took the base in half way: its later commits are read from where they left the base the second time
+  const e = prRepo(); const m0 = gitIn(e, 'rev-parse', '--abbrev-ref', 'HEAD');
+  gitIn(e, 'checkout', '-q', '-b', 'agent/work'); put(e, 'test/more.test.js', T3); commitAll(e, 'three more');
+  gitIn(e, 'checkout', '-q', m0); put(e, 'test/main.test.js', "require('node:test').test('a test the base gained meanwhile', () => {});\n"); commitAll(e, 'the base moves'); const tip = rev(e);
+  gitIn(e, 'checkout', '-q', 'agent/work'); gitIn(e, '-c', 'user.name=t', '-c', 'user.email=t@t', 'merge', '-q', '--no-ff', '-m', 'take the base in', m0);
+  r = range(e, tip, 'agent/work').rep; assert.equal(r.testsTakenOut, undefined, 'the three are still there after the merge');
+  unlinkSync(join(e, 'test/more.test.js')); commitAll(e, 'drop them');
+  r = range(e, tip, 'agent/work').rep;
+  assert.equal(r.testsTakenOut.added, 3); assert.deepEqual(r.testsTakenOut.names, ['adds four', 'adds three', 'adds two']);
+});
+test('the reading says nothing where it cannot read: a commit that is not here; and it is not run for uncommitted work', () => {
+  const d = prRepo(); const base = rev(d);
+  put(d, 'test/more.test.js', T3); commitAll(d, 'three more'); const c1 = rev(d);
+  unlinkSync(join(d, 'test/more.test.js')); commitAll(d, 'drop'); const c2 = rev(d);
+  assert.equal(testsTakenOut(d, [{ base, head: c1 }, { base, head: c2 }]).added, 3);
+  assert.equal(testsTakenOut(d, [{ base, head: '0000000000000000000000000000000000000001' }, { base, head: c2 }]), null, 'a commit that is not in the clone: no note, no throw');
+  assert.equal(testsTakenOut(d, [{ base, head: c2 }]), null); assert.equal(testsTakenOut(d, []), null);
+  put(d, 'src/a.js', 'exports.f = () => 1 // not committed\n');
+  const w = pw(d, ['run', '--working', '--no-record', '--json']); assert.equal(JSON.parse(w.out).testsTakenOut, undefined);
 });

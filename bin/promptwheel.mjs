@@ -1352,6 +1352,8 @@ function gate(repo, opts) {
     if (change) for (const m of fell) { const w = change.has(m.name) && fellIn(change.get(m.name), defOf(m.name)); if (w) m.where = w; }
     if (change) for (const m of held) { const w = change.has(m.name) && lostInFiles(repo, base, head, change.get(m.name), defOf(m.name), seen); if (w) m.lostIn = w; }
   }
+  // tests an earlier commit of this change added, all gone at its head (testsTakenOut): a note, never part of the verdict
+  const takenOut = opts.working ? null : testsTakenOut(repo, changeSteps(repo, base, head));
   const byCommit = opts.working || trailersOff() ? [] : guards.filter((m) => !m.allowed && mode.get(m.name) === true).map((m) => m.name);
   const mandated = mandateViolations.length > 0;
   const verdict = deriveVerdict(metrics, gateInfo, mandated);
@@ -1368,6 +1370,7 @@ function gate(repo, opts) {
     ...(allowed ? { allowed } : {}),
     ...(allowable.length ? { allowable } : {}),
     ...(byCommit.length ? { byCommit } : {}),
+    ...(takenOut ? { testsTakenOut: takenOut } : {}),
     ...(Array.isArray(cfg.mandates) && cfg.mandates.length ? { protects: cfg.mandates.length } : {}),
     // a repo with one person in it: the contract at the base says the account that opened a pull request may let it
     // through, so the words about who can accept a change say that (read at the base, like pr-allow does)
@@ -1642,6 +1645,7 @@ function printHuman(r) {
     if (m.gamed === true) console.log(`      🚩 GAMED, ${m.gamingReason}`);
   }
   for (const m of r.metrics || []) for (const w of m.lostIn || []) console.log(`  ℹ note: ${w.file} has ${PLAIN[m.name] || m.name} (${w.before} → ${w.after}), though the repo's total did not fall`);
+  if (r.testsTakenOut) console.log(`  ℹ note: ${takenOutSaid(r.testsTakenOut, false)}`);
   for (const x of r.explained || []) if (x.metric === 'environment') console.log(`  ℹ note: ${x.what}: ${x.items.join(', ')}`);
   if (r.setup) { const at = Object.keys(r.setup), f = r.setup[at[0]]; console.log(`  ⚠ setup failed (exit ${f.exit}) at the ${at.join(' and ')} ref${at.length > 1 ? 's' : ''}${f.lastLine ? ': ' + f.lastLine : ''}`); }
   if (r.gate && r.gate.weakened) for (const w of r.gate.weakened) console.log(w.change === 'measurement-edited'
@@ -1786,6 +1790,12 @@ function mdPathWayOut(r) {
     ...(hard.length ? ['>', `> ${r.mandates.length > 1 ? hard.map((md) => `\`${md.name}\``).join(', ') : 'This protected path'} ${hard.length > 1 ? 'take' : 'takes'} no reason. To change it on purpose, a person first takes its rule out of \`promptwheel.config.json\`, in a change of its own.`] : []),
   ];
 }
+// In the comment: "an earlier commit of this pull request (`abc1234`) added 3 tests. None of them is in it now: `a`, `b`, `c`."
+// At a terminal the same, of "this change": a range of commits is not always a pull request.
+const takenOutNames = (t, q = '') => `${t.names.map((n) => q + n + q).join(', ')}${t.more ? ` and ${t.more} more` : ''}`;
+const takenOutSaid = (t, md) => md
+  ? `an earlier commit of this pull request (\`${t.at}\`) added ${t.added} test${t.added === 1 ? '' : 's'}. ${t.added === 1 ? 'It is not' : 'None of them is'} in it now: ${takenOutNames(t, '`')}.`
+  : `an earlier commit of this change (${t.at}) added ${t.added} test${t.added === 1 ? '' : 's'}, and ${t.added === 1 ? 'it is not' : 'none of them is'} in it now: ${takenOutNames(t)}`;
 function renderMarkdown(r, o = {}) {
   const sIcon = { improved: '🟢', regressed: '🔴', unchanged: '⚪', inconclusive: '🟡', unmeasurable: '⚫' };
   const rows = r.metrics.map((m) => {
@@ -1812,10 +1822,287 @@ function renderMarkdown(r, o = {}) {
     ...(r.allowed && (r.allowable || []).some((l) => !r.allowed.cleared.includes(l)) ? [`> ✋ **Not let through:** \`${r.allowable.filter((l) => !r.allowed.cleared.includes(l)).join('`, `')}\`. A reason lets through only what it names when there is more than one thing. ${mdAccept(r, true)}`] : []),
     ...(r.gate && r.gate.changed ? [`> ⚠ **Gate definition changed** in this diff (fingerprint \`${r.gate.fingerprint.base}\` -> \`${r.gate.fingerprint.head}\`): a metric, guard, evaluatorPath, mandate, or the setup, env or linked dirs they are measured with was added, removed or edited. Review the config change with the code.`] : []),
     ...(lost.length ? [lost.join('\n')] : []),
+    ...(r.testsTakenOut ? [`> ℹ️ **Note:** ${takenOutSaid(r.testsTakenOut, true)}`] : []),
     ...(o.note && String(o.note).trim() ? [String(o.note).trim()] : []),
     o.fold === false ? `\`${span}\`${rest}\n\n${table}` : `<details><summary>What was measured (<code>${span}</code>${rest})</summary>\n\n${table}\n\n</details>`,
     MD_FOOT,
   ].join('\n\n');
+}
+
+// ---- Each test by its name (0.8.17) -----------------------------------------------------------------------------------
+// The counts above say how many tests a tree holds. They cannot say which. This reads each test of a file by name:
+// text in, tests out, no parser and no dependency, one small reader for each language the counts read.
+//
+//   testsIn(path, text) -> [{ name, line, asserts, skipped }]
+//
+// name     what a person would call the test: the string given to it( or test(, the function's name, the method's name
+//          with its class in Python and C#, a row of a Go table by its name field (TestParse/empty input).
+// line     the line the test begins on (0-based). For a test marked by an attribute, the attribute's line.
+// asserts  how many assertion patterns sit between this test's line and the next test's (or the end of the file); -1
+//          for a row of a Go table, which has no body of its own. A helper that asserts for the test is not seen.
+// skipped  the test is marked not to run.
+// Held against a reading by eye on five draws of sixty real test files (proof-bench/per-test, checks/): the first four
+// each found names it missed, fixed here; the fifth found none in JavaScript and TypeScript, Python, C#, Rust, Java, Go.
+// Not read: a name built at run time, tests made from a table in JavaScript, Python and C# (it.each, parametrize,
+// InlineData: one name for all rows), and any language not listed.
+const testExt = (p) => { const m = /\.([A-Za-z0-9]+)$/.exec(p); return m ? m[1].toLowerCase() : ''; };
+const TESTS_JS = new Set(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'mts', 'cts', 'vue', 'svelte']);
+const TESTS_READ = new Set([...TESTS_JS, 'py', 'go', 'rs', 'rb', 'java', 'kt', 'cs', 'swift', 'ex', 'exs']);
+
+// The engine's own assertion pattern (ASSERTS_RE), and the other ways a test says what must hold: should and must
+// (chai, RSpec, minitest, FluentAssertions), refute (ExUnit, minitest), verify (Mockito, Moq), googletest's macros,
+// pytest.raises, a Rust test that must panic.
+const TEST_ASSERT = /expect ?\(|\bassert|\bAssert\.[A-Z]|\bt\.(?:is|deepEqual|throws|truthy|falsy|not|ok|equal|same|match|notOk|rejects) ?\(|\bt\.(?:Error|Errorf|Fatal|Fatalf)\(|\brequire\.[A-Z][A-Za-z0-9]*\(|\bXCTAssert|\.should\b|\.Should\(|\bshould\.|\brefute\b|\b[Vv]erify\w*\(|\.must_\w+|\bis_expected\b|\b(?:EXPECT|ASSERT)_[A-Z]|\braises\(|should_panic|\.rejects\b|\.resolves\b/g;
+const assertsIn = (s) => (s.match(TEST_ASSERT) || []).length;
+
+const TEST_RE = {
+  // it('x' test("x" specify(`x` with any chain between the word and the bracket: .only .skip .each([...]) .concurrent
+  // Not a member call (.test( on a regex, .it( on an object), except tap's t.test(, Deno.test( and QUnit.test(.
+  // Groups: 1 the x of xit, 4 the chain, 5 the quote, 6 the name.
+  js: /(?:^|[^.\w$])(?:(x)?(it|test|specify)|(?:t|Deno|QUnit)\.(test))((?:\.[A-Za-z]+(?:\([^()]*(?:\([^()]*\)[^()]*)*\))?)*)\s*\(\s*(['"`])((?:\\.|(?!\5)[^\\\n])*)\5/,
+  js_open: /(?:^|[^.\w$])(?:(x)?(it|test|specify)|(?:t|Deno|QUnit)\.(test))((?:\.[A-Za-z]+(?:\([^()]*(?:\([^()]*\)[^()]*)*\))?)*)\s*\(\s*$/,
+  js_next: /^\s*(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/,
+  js_each: /(?:^|[^.\w$])(?:(x)?(it|test|specify))()((?:\.[A-Za-z]+)*\.(?:each|for))\s*(?:\(|`)[^)`]*$/,          // groups as TEST_RE.js: 1 the x, 4 the chain
+  js_each_close: /^\s*[\])`]+\s*\(\s*(['"`])((?:\\.|(?!\1)[^\\\n])*)\1/,
+  py_def: /^(\s*)(?:async\s+)?def\s+(test\w*)\s*\(/,
+  py_class: /^(\s*)class\s+(\w+)/,
+  py_skip: /^\s*@(?:pytest\.mark\.(?:skip|skipif|xfail)|unittest\.skip|skip)\b/,
+  go: /^func\s+(?:\([^)]*\)\s+)?((?:Test|Fuzz)\w*)\s*\(/,
+  go_run: /\bt\.Run\(\s*"((?:\\.|[^"\\])*)"/,
+  go_loop: /\bt\.Run\(\s*\w+\.(\w+)\s*,/,                             // t.Run(tt.name, ...): the name comes from that field of a table
+  go_row: /^\s*\{?\s*(\w+)\s*:\s*"((?:\\.|[^"\\])*)"/,                  // a field with a string, on its own line or first in a one-line row
+  go_struct: /\[\]struct\s*\{\s*(\w+)?/,                                 // the table's type: its first field names a row written without field names
+  go_bare: /^\s*\{\s*"((?:\\.|[^"\\])*)"\s*[,}]/,                         // {"a row", ...}: the first value, when the first field is the name
+  rs_attr: /^\s*#\[(?:[\w]+::)*(?:test|rstest|test_case|quickcheck|proptest)\b/,
+  rs_fn: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:const\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+(\w+)/,
+  rb: /^\s*(x)?(?:it|specify|scenario|example|test)\s+(['"])((?:\\.|(?!\2)[^\\\n])*)\2/,
+  rb_def: /^\s*def\s+(test_\w+)/,
+  rb_bare: /^\s*(x)?it\s*\{(.*)$/,
+  jv_attr: /^\s*@(?:Test|ParameterizedTest|RepeatedTest|TestFactory|Property)\b/,
+  jv_skip: /@(?:Disabled|Ignore)\b/,
+  kt_fn: /\bfun\s+(?:<[^>]*>\s*)?(`[^`]+`|\w+)\s*\(/,
+  jv_fn: /(?:^|[\s>\]])(\w+)\s*\([^;{]*(?:\{|$|\)\s*(?:throws\b|$))/,
+  cs_attr: /^\s*\[\s*(?:\w+\.)*(?:Fact|Theory|Test|TestMethod|TestCase|DataTestMethod|TestCaseSource|SkippableFact|SkippableTheory|ConditionalFact|ConditionalTheory|StaFact|WpfFact|UIFact|Property|Scenario)\b/,
+  cs_skip: /\bSkip\s*=|\[\s*Ignore\b|\bIgnore\s*\(|\bExplicit\b/,
+  cs_class: /\b(?:class|struct|record)\s+(\w+)/,
+  cs_fn: /(?:^|[\s>\]?])(\w+)\s*(?:<[^<>()]*>)?\s*\(/,
+  sw_fn: /\bfunc\s+(\w+)\s*\(/,
+  sw_attr: /@Test\b/,
+  ex: /^\s*test\s+"((?:\\.|[^"\\])*)"/,
+  ex_skip: /^\s*@tag\s+:?skip\b|^\s*@tag\s+skip:/,
+};
+
+const TEST_NOT_A_NAME = new Set(['if', 'for', 'while', 'switch', 'catch', 'using', 'lock', 'return', 'new', 'foreach', 'fixed', 'when', 'nameof', 'typeof', 'sizeof', 'await', 'throw', 'base', 'this', 'get', 'set', 'synchronized', 'super', 'assert']);
+
+// A test marked by an attribute: `#[test]` in Rust, `@Test` in Java and Kotlin, `[Fact]` in C#. The function follows
+// it, with other attributes, comments, and the attribute's own arguments between, on one line or over several:
+//   [Theory]                                   @Test(groups = { "direct" },       #[rstest]
+//   [InlineData(new[] { "--" }, null)]                 timeOut = TIMEOUT)         #[case::renamed(
+//   public void ArgumentSeparator(...)         public void tryGetAddresses(...)       "a", Some(B))]
+// So brackets are counted, with what is inside a string left out, and a line is read only once every attribute on it
+// is closed. `open` are the attribute openers of the language; `mark` says an attribute line marks a test; `skip` says
+// it marks one not to run; `nameOf` reads the function's name from what is left of a line.
+const blankStrings = (l) => l.replace(/"(?:\\.|[^"\\])*"/g, '""').replace(/'(?:\\.|[^'\\])'/g, "''");
+function leadingAttributes(s, open, depth) {
+  // -> { rest, depth, had }: what follows the attributes at the start of `s` (already blanked), the depth still open, and whether one was there
+  let i = 0, had = depth > 0;
+  for (;;) {
+    if (depth === 0) {
+      while (i < s.length && /\s/.test(s[i])) i++;
+      const o = open.find((op) => s.startsWith(op, i)); if (!o) break;
+      had = true;
+      if (o === '@') { const m = /^@[\w.]+/.exec(s.slice(i)); i += m ? m[0].length : 1; let j = i; while (j < s.length && /\s/.test(s[j])) j++; if (s[j] !== '(') continue; i = j; }
+    }
+    for (; i < s.length; i++) {
+      const c = s[i];
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') { depth--; if (depth <= 0) { depth = 0; i++; break; } }
+    }
+    if (depth > 0) return { rest: '', depth, had };
+  }
+  return { rest: s.slice(i), depth: 0, had };
+}
+function attributed(lines, { open, mark, skip, nameOf, add, ends = /[;{}]/, before = null }) {
+  let at = -1, skipped = false, preSkip = false, depth = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]; if (before) before(raw, at);
+    const { rest, depth: d, had } = leadingAttributes(blankStrings(raw), open, depth); depth = d;
+    if (had) {
+      if (mark.test(raw) && at < 0) { at = i; skipped = preSkip; }
+      if (skip.test(raw)) { if (at >= 0) skipped = true; else preSkip = true; }
+    }
+    if (depth > 0 || !rest.trim() || /^\s*(\/\/|\/\*|\*)/.test(rest)) continue;
+    if (at >= 0) { const name = nameOf(rest); if (name) add(name, at, skipped); else if (!ends.test(rest)) continue; }
+    at = -1; skipped = false; preSkip = false;
+  }
+}
+
+export function testsIn(path, text) {
+  const ext = testExt(path); if (!TESTS_READ.has(ext)) return [];
+  const lines = String(text).split('\n'); const found = [];   // { name, line, skipped }
+  const add = (name, line, skipped) => found.push({ name: String(name).trim().slice(0, 300), line, skipped: !!skipped });
+  if (TESTS_JS.has(ext)) {
+    for (let i = 0; i < lines.length; i++) {
+      let m = TEST_RE.js.exec(lines[i]), name = m && m[6];
+      if (!m) {                                                        // it(  and the name on the next line, as a formatter leaves a long one
+        const o = TEST_RE.js_open.exec(lines[i]), n = o && TEST_RE.js_next.exec(lines[i + 1] || '');
+        if (n) { m = o; name = n[2]; }
+      }
+      if (!m) {                                                        // it.each([  a table over several lines  ])('the name', ...)
+        const e = TEST_RE.js_each.exec(lines[i]); if (!e) continue;
+        for (let k = i + 1; k < Math.min(lines.length, i + 400); k++) {
+          const c = TEST_RE.js_each_close.exec(lines[k]); if (c) { m = e; name = c[2]; break; }
+          if (TEST_RE.js.test(lines[k]) || TEST_RE.js_each.test(lines[k])) break;   // another test began: this table never named one
+        }
+        if (!m) continue;
+      }
+      const chain = m[4] || '';
+      if (/\.describe\b/.test(chain)) continue;                       // test.describe('a group', ...) is a group, not a test
+      add(name, i, !!m[1] || /\.(?:skip|todo|fixme)\b/.test(chain));
+    }
+  } else if (ext === 'py') {
+    let cls = null, skip = false;
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i]; if (!l.trim()) continue;
+      const c = TEST_RE.py_class.exec(l); if (c) { cls = { indent: c[1].length, name: c[2] }; skip = TEST_RE.py_skip.test(lines[i - 1] || '') ? skip : false; continue; }
+      if (TEST_RE.py_skip.test(l)) { skip = true; continue; }
+      if (/^\s*@/.test(l)) continue;                                   // another decorator: the skip mark above it still stands
+      const d = TEST_RE.py_def.exec(l);
+      if (d) { if (cls && d[1].length <= cls.indent) cls = null; add(cls ? `${cls.name}.${d[2]}` : d[2], i, skip); }
+      else if (cls && /^\S/.test(l)) cls = null;                       // back at the left edge: the class is over
+      skip = false;
+    }
+  } else if (ext === 'go') {
+    // A table-driven test: the rows of the table are its sub-tests, each named by its name field. A row has no body
+    // of its own (the loop holds the assertions), so its assertions are not counted: asserts is -1.
+    let cur = null, rows = [], loop = new Set(), first = null, wantFirst = false;
+    const flush = () => { if (cur) for (const [field, n, i] of rows) if (loop.has(field)) found.push({ name: `${cur}/${n}`.slice(0, 300), line: i, skipped: false, row: true }); rows = []; loop = new Set(); first = null; wantFirst = false; };
+    for (let i = 0; i < lines.length; i++) {
+      const m = TEST_RE.go.exec(lines[i]); if (m) { flush(); cur = m[1]; add(cur, i, false); continue; }
+      if (!cur) continue;
+      const r = TEST_RE.go_run.exec(lines[i]); if (r) { add(`${cur}/${r[1]}`, i, false); continue; }
+      const lp = TEST_RE.go_loop.exec(lines[i]); if (lp) { loop.add(lp[1]); continue; }
+      const st = TEST_RE.go_struct.exec(lines[i]); if (st) { first = st[1] || null; wantFirst = !st[1]; continue; }
+      if (wantFirst) { const f = /^\s*(\w+)/.exec(lines[i]); if (f) { first = f[1]; wantFirst = false; } continue; }
+      const w = TEST_RE.go_row.exec(lines[i]); if (w) { rows.push([w[1], w[2], i]); continue; }
+      const b = first && TEST_RE.go_bare.exec(lines[i]); if (b) rows.push([first, b[1], i]);
+    }
+    flush(); found.sort((a, b) => a.line - b.line);
+  } else if (ext === 'rs') {
+    attributed(lines, { open: ['#['], mark: TEST_RE.rs_attr, skip: /#\[ignore\b/, add, ends: /[;{}=]/,
+      nameOf: (rest) => { const f = TEST_RE.rs_fn.exec(rest); return f && f[1]; } });
+  } else if (ext === 'rb') {
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i]; let m;
+      if ((m = TEST_RE.rb.exec(l))) add(m[3], i, !!m[1]);
+      else if ((m = TEST_RE.rb_def.exec(l))) add(m[1], i, false);
+      else if ((m = TEST_RE.rb_bare.exec(l))) add(`it {${m[2]}`.replace(/\s+/g, ' '), i, !!m[1]);
+    }
+  } else if (ext === 'java' || ext === 'kt') {
+    attributed(lines, { open: ['@'], mark: TEST_RE.jv_attr, skip: TEST_RE.jv_skip, add,
+      nameOf: (rest) => { const f = ext === 'kt' ? TEST_RE.kt_fn.exec(rest) : TEST_RE.jv_fn.exec(rest); return f && !TEST_NOT_A_NAME.has(f[1]) ? f[1].replace(/`/g, '') : null; } });
+  } else if (ext === 'cs') {
+    let cls = '';
+    attributed(lines, { open: ['['], mark: TEST_RE.cs_attr, skip: TEST_RE.cs_skip, add,
+      before: (raw, at) => { const c = TEST_RE.cs_class.exec(raw); if (c && at < 0) cls = c[1]; },
+      nameOf: (rest) => { const f = TEST_RE.cs_fn.exec(rest); return f && !TEST_NOT_A_NAME.has(f[1]) ? (cls ? `${cls}.${f[1]}` : f[1]) : null; } });
+  } else if (ext === 'swift') {
+    let at = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (TEST_RE.sw_attr.test(l) && at < 0) at = i;
+      const f = TEST_RE.sw_fn.exec(l);
+      if (f && (at >= 0 || /^test/.test(f[1]))) { add(f[1], at >= 0 ? at : i, /\.disabled\(/.test(lines.slice(Math.max(0, at), i + 1).join('\n'))); at = -1; }
+      else if (at >= 0 && !f && /[{}]/.test(l) && !TEST_RE.sw_attr.test(l)) at = -1;
+    }
+  } else if (ext === 'ex' || ext === 'exs') {
+    let skip = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (TEST_RE.ex_skip.test(lines[i])) { skip = true; continue; }
+      const m = TEST_RE.ex.exec(lines[i]); if (m) { add(m[1], i, skip); skip = false; }
+      else if (lines[i].trim() && !/^\s*@/.test(lines[i])) skip = false;
+    }
+  }
+  // what each test holds: the lines from its own to the next test's
+  return found.map((t, k) => {
+    const end = k + 1 < found.length ? found[k + 1].line : lines.length;
+    // the test's own name is not part of what it holds: it('asserts the total', ...) is not an assertion
+    const body = lines.slice(t.line, Math.max(end, t.line + 1)).join('\n').replace(t.name, '');
+    const skipped = t.skipped || (path.endsWith('.go') ? /\bt\.Skip(?:f|Now)?\(/.test(body) : path.endsWith('.rb') ? /^\s*(?:skip|pending)\b/m.test(body) : path.endsWith('.py') ? /\bpytest\.skip\(|\bself\.skipTest\(/.test(body) : false);
+    return { name: t.name, line: t.line, asserts: t.row ? -1 : assertsIn(body), skipped };
+  });
+}
+
+// ---- Tests a change added, and took out again (0.8.17) ----------------------------------------------------------------
+// The check holds the head against the base. An agent that writes tests early in a pull request, sees them go red and
+// deletes them in a later commit ends with as many tests as the base holds, and every count reads "nothing changed". On
+// real pull requests where a person wrote "you removed the tests" and no tool had sent anything back, this was the most
+// common shape (proof-bench/outside-repos, 2026-11-19: 29 of 45).
+// So the change's own commits are read, each against the base, for the tests it ADDS there by name. When an earlier
+// commit added some and the last adds none, the report says so and names them (`testsTakenOut`). A note for a reader,
+// never part of a verdict. Scored on 994 pull requests (proof-bench/per-test/RESULT.md): it speaks on 14 of 139 pull
+// requests a person objected to, 6 of 270 matched ones nobody objected to, and none of 271 ordinary ones by an agent.
+// The trigger is the NUMBER of tests added, not their names: a rename is a name gone, and by name alone half of what
+// this spoke on among controls was a rename. Wider forms (half or fewer left) spoke on too much unobjected work.
+// It reads at most the last 60 of the change's commits, and says nothing when a step touches more than 2,000 files it
+// can read or a commit is not in the clone (a shallow one). Blobs are read from the object store; nothing is checked out.
+const TESTS_READ_COMMITS = 60, TESTS_READ_FILES = 2000, TESTS_READ_BLOB = 2 * 1024 * 1024;
+function testsAddedAt(repo, base, head, cache) {
+  // the tests `head` adds over `base`, by name: Map name -> how many more of it. null: this step cannot be read.
+  const g = (args, input) => execFileSync('git', args, { cwd: repo, input, maxBuffer: 1 << 30, stdio: ['pipe', 'pipe', 'ignore'] });
+  let parts; try { parts = g(['diff', '--name-status', '-z', '--no-renames', base, head]).toString('utf8').split('\0'); } catch { return null; }
+  const changed = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) { const f = parts[i + 1]; if (TESTS_READ.has(testExt(f)) && !f.includes('\n')) changed.push({ st: parts[i][0], f }); }
+  if (changed.length > TESTS_READ_FILES) return null;
+  if (!changed.length) return new Map();
+  const asks = []; for (const c of changed) { if (c.st !== 'A') asks.push([c, 'a', `${base}:${c.f}`]); if (c.st !== 'D') asks.push([c, 'b', `${head}:${c.f}`]); }
+  let chk; try { chk = g(['cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'], asks.map((a) => a[2]).join('\n') + '\n').toString('utf8').split('\n'); } catch { return null; }
+  const want = new Map();
+  asks.forEach((a, i) => { const m = /^([0-9a-f]{40,64}) blob (\d+)$/.exec(chk[i] || ''); if (m && +m[2] <= TESTS_READ_BLOB) { a[0][a[1]] = `${m[1]}.${testExt(a[0].f)}`; if (!cache.has(a[0][a[1]])) want.set(a[0][a[1]], [m[1], a[0].f]); } });
+  const todo = [...want.entries()];
+  for (let i = 0; i < todo.length; i += 500) {
+    const part = todo.slice(i, i + 500); let out; try { out = g(['cat-file', '--batch'], part.map(([, [sha]]) => sha).join('\n') + '\n'); } catch { return null; }
+    let at = 0;
+    for (const [k, [, f]] of part) {
+      const nl = out.indexOf(10, at); if (nl < 0) return null;
+      const size = +out.subarray(at, nl).toString('latin1').split(' ')[2]; if (!Number.isFinite(size)) return null;
+      const body = out.subarray(nl + 1, nl + 1 + size); at = nl + 1 + size + 1;
+      let names = []; if (!body.subarray(0, 8000).includes(0)) { try { names = testsIn(f, body.toString('utf8')).map((t) => t.name); } catch { names = []; } }
+      cache.set(k, names);
+    }
+  }
+  const tally = new Map(); const bump = (n, by) => tally.set(n, (tally.get(n) || 0) + by);
+  for (const c of changed) { for (const n of (c.b && cache.get(c.b)) || []) bump(n, 1); for (const n of (c.a && cache.get(c.a)) || []) bump(n, -1); }
+  return new Map([...tally].filter(([, v]) => v > 0));   // a test that moved to another changed file keeps its name and cancels
+}
+// steps: [{ base, head }] in order, the last one the change as it stands. -> { added, names, more, at } | null
+export function testsTakenOut(repo, steps) {
+  if (!Array.isArray(steps) || steps.length < 2) return null;
+  const cache = new Map(); let most = null, at = null;
+  for (let i = 0; i < steps.length; i++) {
+    const adds = testsAddedAt(repo, steps[i].base, steps[i].head, cache); if (adds === null) return null;
+    const n = [...adds.values()].reduce((a, b) => a + b, 0);
+    if (i < steps.length - 1) { if (n > 0 && (!most || n > most.n)) { most = { n, names: [...adds.keys()] }; at = steps[i].head; } continue; }
+    if (!most || n > 0) return null;                               // it added none before, or it still adds some
+    const names = most.names.sort();
+    return { added: most.n, names: names.slice(0, 10), more: Math.max(0, names.length - 10), at: short(repo, at) };
+  }
+  return null;
+}
+// The change's own commits, oldest first, each with the commit it is held against. Behind GitHub's merge of a pull
+// request (its checkout is a merge of the head into the base) the commits are those of the second parent. A branch that
+// took the base in again is held, from that commit on, against the point where it then left the base.
+function changeSteps(repo, base, head) {
+  const g = (...a) => { try { return execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
+  const b = g('rev-parse', '--verify', '--quiet', `${base}^{commit}`), h = g('rev-parse', '--verify', '--quiet', `${head}^{commit}`); if (!b || !h) return null;
+  const ps = (g('rev-list', '--parents', '-n', '1', h) || '').split(' ');
+  const tip = ps.length === 3 && ps[1] === b ? ps[2] : h;
+  const fork = g('merge-base', b, tip); if (!fork) return null;
+  const list = (g('rev-list', '--first-parent', '--parents', '--reverse', `${fork}..${tip}`) || '').split('\n').filter(Boolean).map((l) => l.split(' '));
+  if (list.length < 2) return null;
+  let from = fork; const steps = [];
+  for (const [c, ...parents] of list) { if (parents.length > 1) from = g('merge-base', b, c) || from; steps.push({ base: from, head: c }); }
+  return steps.slice(-TESTS_READ_COMMITS);
 }
 
 // ---- The comment on a pull request: one, edited in place, and only when there is something to say -------------------
@@ -1851,7 +2138,7 @@ export function commentPlan(input = {}) {
     full = ['### ⚠️ Sawbuck: could not run', `Nothing was checked on this push${why ? ':' : '.'}`, ...(why ? [why] : []), ...(commentOnly ? ['This check only comments here. It never fails the job.'] : []), MD_FOOT].join('\n\n');
     speaks = true;
   } else {
-    speaks = wouldFail || !!(report.allowed && (report.allowed.cleared || []).length) || report.metrics.some((m) => m.lostIn && m.lostIn.length) || !!(report.gate && report.gate.changed);
+    speaks = wouldFail || !!(report.allowed && (report.allowed.cleared || []).length) || report.metrics.some((m) => m.lostIn && m.lostIn.length) || !!report.testsTakenOut || !!(report.gate && report.gate.changed);
     full = null;
   }
   const render = (fold) => (readable ? renderMarkdown(report, { fold, commentOnly, wouldFail, note: wouldFail ? note : '' }) : full);

@@ -254,6 +254,8 @@ export interface Report {
   allowable?: string[];
   /** `true` when the contract at the base holds `"allowFromAuthor": true`: on a pull request the comment of the account that opened it counts. */
   openerCounts?: true;
+  /** In a run between two commits with more than one commit between them: an earlier commit of the change (`at`, short) added `added` tests, by name, and the change as it stands adds none. `names` holds at most ten of them, `more` how many are left out. A note for a reader, never part of a verdict. */
+  testsTakenOut?: { added: number; names: string[]; more: number; at: string };
   /** Present only when the `setup` command failed: at which ref, with what exit code, and its last output line. */
   setup?: { base?: SetupFailure; head?: SetupFailure };
   provenance: Provenance;
@@ -437,3 +439,10 @@ export declare function environmentNote(env?: Record<string, string | undefined>
 export declare function allowFromComments(comments: unknown[], opts?: { author?: string; allowFromAuthor?: boolean }): string;
 /** The same, with the login whose comment was left out because it opened the pull request (`skipped`, '' if none). */
 export declare function allowDecision(comments: unknown[], opts?: { author?: string; allowFromAuthor?: boolean }): { reason: string; skipped: string };
+
+/** One test of a file, read by name (0.8.17). `asserts` is -1 for a row of a Go table-driven test. */
+export interface NamedTest { name: string; line: number; asserts: number; skipped: boolean }
+/** Each test in a file's text, by its name. No parser: one small reader for each language the counting tripwires read. A file of another kind holds none. */
+export declare function testsIn(path: string, text: string): NamedTest[];
+/** The tests an earlier step of a change added and its last step no longer adds. `steps` are the change's commits in order, each with the commit it is held against. `null` when there is nothing to say or a step cannot be read. */
+export declare function testsTakenOut(repo: string, steps: { base: string; head: string }[]): { added: number; names: string[]; more: number; at: string } | null;
