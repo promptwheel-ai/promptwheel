@@ -4025,10 +4025,12 @@ test('the band and the second measurement: a part exactly as wide as the band is
   assert.equal(kept.gamed, false); assert.equal(kept.inBand, true);
   assert.equal(judgeGaming(up(80, 90), src(87), 0.9).gamed, true, 'with no band both read as before'); assert.equal(judgeGaming(up(80, 85), src(83), 0.9, 0).gamed, true);
 });
-test('gamingThreshold: the one written on a metric decides over the one written for the whole contract', () => {
+test('gamingThreshold: the one written on a metric decides over the one written for the whole contract, stricter or more lenient', () => {
   const a = bonusRepo({ threshold: 0.9, top: { gamingThreshold: 0.2 } }); a.put(85, 5); a.g('commit', '-qam', 'ten up, half of it beside an edited test file');
-  const r = a.run(); assert.equal(r.score.retained, 0.5); assert.equal(r.j.verdict, 'gamed', 'half is under the 0.9 the metric asks for, whatever the contract says for the rest'); assert.equal(r.code, 2);
-  rmSync(a.d, { recursive: true, force: true });
+  let r = a.run(); assert.equal(r.score.retained, 0.5); assert.equal(r.j.verdict, 'gamed', 'half is under the 0.9 the metric asks for, whatever the contract says for the rest'); assert.equal(r.code, 2);
+  const b = bonusRepo({ threshold: 0.3, top: { gamingThreshold: 0.9 } }); b.put(85, 5); b.g('commit', '-qam', 'the same change, where the metric asks for 0.3 and the contract for 0.9');
+  r = b.run(); assert.equal(r.score.retained, 0.5); assert.equal(r.j.verdict, 'pass', 'half clears the 0.3 the metric asks for'); assert.equal(r.code, 0);
+  for (const x of [a, b]) rmSync(x.d, { recursive: true, force: true });
 });
 test('gamingThreshold: a change cannot lower the threshold written on the metric it wins on (the stricter of before and after decides)', () => {
   const a = bonusRepo({ threshold: 0.9 }); a.cfg({ threshold: 0.1 }); a.put(85, 5); a.g('commit', '-qam', 'ten up, half of it beside an edited test file, and the threshold lowered in the same change');
