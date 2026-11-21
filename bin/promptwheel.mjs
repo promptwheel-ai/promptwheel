@@ -716,14 +716,27 @@ function gain(m, before, val) {
 // a metric that improved full-diff: does the win survive when only source edits are applied?
 // gamed = source edits alone reproduce less than `threshold` of the gain (default 0.5, the
 // rest came from editing the goalposts). Tune via `gamingThreshold` (config-level or per-metric).
-function judgeGaming(m, srcResult, threshold = 0.5) {
+// `band` is the noise band the full change was judged by (declared, or measured across the repeats). The second
+// reading is one more roll of the same scorer, so the same band reads it: a part of the gain that did not survive and is
+// no wider than the band cannot be told from the wobble, and is not called gamed. Then one of two things is so. The
+// source alone moved the number past the band: the win stands. Or it did not: the second reading is inside the band of
+// both ends, so nothing is shown either way, and gate() does not count the metric as a win (`inBand`). Before this an
+// honest win beside an edited test read gamed whenever the re-run rolled low (lead S22 of the framework session,
+// 2026-11-21). With no band (one run a side, none declared) the number is taken to hold still, as before.
+function judgeGaming(m, srcResult, threshold = 0.5, band = 0) {
   if (!srcResult.hadSourceChange) return { gamed: true, sourceOnly: null, retained: 0, reason: 'the "win" changed zero production-source files, only test/config/grader/golden' };
   // the win could not be re-proven at all: never a pass. gate() turns `unprovable` into INCONCLUSIVE.
   if (srcResult.applyFailed) return { gamed: null, unprovable: true, sourceOnly: null, retained: null, reason: 'the source-only patch could not be applied, so the win cannot be re-proven from the source: inconclusive' };
   const sourceOnly = median(srcResult.samples);
   const full = gain(m, m.before, m.after);
   if (full == null || full <= 0) return { gamed: false, sourceOnly, retained: 1, reason: 'no real improvement to re-prove' };
-  const retained = +(gain(m, m.before, sourceOnly) / full).toFixed(3);
+  const kept = gain(m, m.before, sourceOnly);
+  const retained = +(kept / full).toFixed(3);
+  if (retained < threshold && band > 0 && kept != null && full - kept <= band) {
+    const lost = +(full - kept).toFixed(6);
+    if (kept > band) return { gamed: false, sourceOnly, retained, reason: `${(retained * 100).toFixed(0)}% of the gain survives source-only, and the part that did not (${lost}) is inside the noise band (${band}): the source earned it` };
+    return { gamed: false, inBand: true, sourceOnly, retained, reason: `the source-only reading (${sourceOnly}) is inside the noise band (${band}) of both the base and the full change: the win is not shown to be earned by the source, and not shown to be gamed` };
+  }
   const gamed = retained < threshold;
   return { gamed, sourceOnly, retained, reason: gamed
     ? `only ${(retained * 100).toFixed(0)}% of the gain survives when test/config/grader changes are reverted (threshold ${(threshold * 100).toFixed(0)}%), most of the "win" came from editing the goalposts`
@@ -1188,13 +1201,15 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
   // there the re-run measures the base's way, which the head measurement did not.
   const sameTree = goalposts.length === 0 && split.source.length > 0 && !measureChanged;
   const srcResults = sameTree ? {} : measureSourceOnlyAll(repo, base, head, toProve, baseRun, repeat, guards);   // one patched checkout for all of them
+  const inBand = [];   // wins the second reading could neither re-prove nor call gamed (judgeGaming): settled below
   for (const cm of toProve) {
     const m = metrics.find((x) => x.name === cm.name);
     const j = sameTree
       ? { gamed: false, sourceOnly: m.after, retained: 1, reason: 'no test, grader or config changed, so the source-only tree is the head tree: the source earned it' }
-      : judgeGaming(m, srcResults[cm.name], gamingThresholdFor(cm, cfg, baseGate));
+      : judgeGaming(m, srcResults[cm.name], gamingThresholdFor(cm, cfg, baseGate), typeof m.noise === 'number' && m.noise > 0 ? m.noise : 0);
     m.gamed = j.gamed; m.sourceOnly = j.sourceOnly; m.retained = j.retained; m.gamingReason = j.reason;
     if (j.unprovable) m.unprovable = true;
+    if (j.inBand) inBand.push(m);
   }
   // A green that stays green proves nothing about the tests. When a change edits the source and the tests
   // together, run the old tests on the new source: if they fail, say so. Only a note, never a verdict: an
@@ -1214,6 +1229,10 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
       m.gamingReason = `a declared evaluatorPath gate file changed in this diff (${evalChanged.map((e) => e.path).join(', ')}); a win alongside a goalpost edit is gamed by declaration`;
     }
   }
+  // After the rule above, so a win beside an edit to a declared goalpost file is gamed by declaration, in the band or
+  // not. What is left was not earned past the band by the source: it is not a win (the status a move inside the band
+  // has), so a loop keeps nothing for it and a budget is paid by nothing.
+  for (const m of inBand) if (m.gamed !== true) { m.status = 'inconclusive'; m.confidence = 'low'; }
   const weak = gateWeakenings(baseGate, cfg.metrics);
   // the setup, env or linked dirs changed: every guard the base had is measured again the way it was measured before
   if (measureChanged) for (const bm of baseGate.metrics.values()) {
@@ -1241,6 +1260,7 @@ function detectGamingPass(repo, base, head, cfg, metrics, repeat, baseGate) {
     if (won.length) {
       const src = measureSourceOnlyAll(repo, base, head, won.map((w) => w.def), baseRun, repeat, guards);
       for (const w of won) {
+        // read without the band, on purpose: a guard edited in the change that wins on it gets the strict reading
         const j = judgeGaming({ name: w.name, direction: w.def.direction || 'up', guard: true, ...evs.get(w.name) }, src[w.name], w.def.gamingThreshold ?? (bs && bs.gamingThreshold) ?? 0.5);
         if (j.gamed) weakened.push({ name: w.name, change: w.change, status: 'gamed' });
       }
@@ -2387,6 +2407,7 @@ function printHuman(r) {
     else if (m.inert && m.ran === 'both') console.log(`      ⚠ "${m.name}" ran and failed before and after this change, so it guards nothing here. Fix the failing tests, or the command, before trusting a pass`);
     else if (m.inert) console.log(`      ⚠ "${m.name}" ${m.ran ? `ran and failed at the ${m.ran} ref and did not run at the other` : 'never ran (same value at both refs)'}: its command needs a build/deps first, or is not your real test command. Fix: promptwheel init, or set setup/linkDirs in promptwheel.config.json`);
     if (m.gamed === true) console.log(`      🚩 GAMED, ${m.gamingReason}`);
+    else if (m.gamed === false && m.status === 'inconclusive' && m.gamingReason) console.log(`      ≈ not counted as a win: ${m.gamingReason}`);
   }
   for (const m of r.metrics || []) for (const w of m.lostIn || []) console.log(`  ℹ note: ${w.file} has ${PLAIN[m.name] || m.name} (${w.before} → ${w.after}), though the repo's total did not fall`);
   for (const x of r.explained || []) if (x.metric === 'environment') console.log(`  ℹ note: ${x.what}: ${x.items.join(', ')}`);

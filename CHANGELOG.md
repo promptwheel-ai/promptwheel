@@ -14,6 +14,7 @@
 - **The engine's own switch is not handed to a command it measures.** `PROMPTWHEEL_NO_ALLOW_TRAILER` (Sawbuck sets it) reached this repo's own suite, and six tests about trailers failed at both ends of every check Sawbuck ran here, so they were never checked there.
 - **What is judged cannot touch what judges it.** Another session wrote 28 attacks for its own loop step. Run against this command, 8 of the 25 that apply got through, and 6 were holes. Closed: the commit is made from the tree that was judged, with `git commit-tree` (no git hook runs on it, and a file written after the check is not in it); a file an attempt hides from git is shown again and the attempt put back, and the loop does not start while a file is hidden; the loop's record and the engine's own files are put back if an attempt changed them. Now 23 of 25. The two left are limits on every step that was tried, and `docs/LEARNING.md` says them: an installed dependency a measure runs, and a safety rule deleted behind another one.
 - **`run`: the repeat count is read as it stood at the base.** A change that lowered its own repeat count was measured with fewer readings a side, which is a wider band. It is now measured with the count the base held. A change may raise it, and `--repeat` decides over both.
+- **The band reads the second measurement too.** When a change moves a goalpost, each win is measured again with the source edits alone. That reading was read without the noise band, so on a score that wobbles an honest win beside an edited test read `gamed` whenever the re-run rolled low. Now a part of the gain that did not survive and is no wider than the band is not called gamed. If the source alone moved the number past the band, the win stands. If it did not, the second reading is inside the band of both ends: nothing is shown either way, and the metric is not counted as a win (`inconclusive`, with the reason). A win beside an edit to a declared goalpost file is gamed by declaration as before, and a guard edited in the change that wins on it keeps the strict reading. With no band nothing changes.
 - **The missing-dependency hint keeps the file's name on a long path.** It was cut at 200 characters from the left, so under a temp folder longer than 123 characters the name of the missing file was gone. A long path is now cut in its middle.
 - **Inside the loop the contract is the person's.** An attempt added a measure of its own to the contract, satisfied it with one line of source, and was kept, the changed contract with it (found by a second reader of the code, then run). An attempt that changes `promptwheel.config.json`, a file it extends or a file it names as part of the gate is now put back, and a win is a gain on a measure the contract held when the run started.
 - **A test that makes a removal loud.** `the wheel is here on purpose` fails, and says what was decided on 2026-11-21, if the loop's commands or its tests go missing.
@@ -23,17 +24,9 @@
 - **What is not claimed:** that the loop gets better with use. `bench/compounding-ab.mjs` is the test, and it has not been run on real use. See `docs/LEARNING.md`.
 - New exports: `foldOutcomes`, `betaMean`, `scoreKey`. New options on `check()`: `record`, `label`.
 
-## 0.8.16 (2026-11-20): a report that arrived cut
-
-`run` printed its report and called `process.exit()` at once. Node writes to a pipe in the background, and an exit drops what the pipe has not taken yet. So a report larger than a pipe holds arrived cut, with the verdict's exit code: at 146,176 bytes where the reader was quick, at 65,536 where it was slow. Found by running the Action's own two commands on every commit of 994 pull requests. One of them changed 10,753 files, and its report came to 812,136 bytes.
-
-- **`run` ends by itself once its report is written.** The exit code is set, and nothing is cut. The report lists every test, fixture and config file a change touches (`gate.goalposts`), so the cut began at a change of a few thousand of them.
-- **The Action was not affected.** It writes the report to a file. A tool that reads `run --json` through a pipe was. Sawbuck's `check` and its commit hook do, and Sawbuck 0.2.3 has the tests for what each of them then did.
-- Not run on a Mac.
-
 ## Unreleased: a score that wobbles, and the loop is back
 
-On the branch `feat/noisy-scorer-gate`. Not released, and no version is set.
+From the branch `feat/noisy-scorer-gate`, a second line of work the same night, merged here as it was written. Not released, and no version is set.
 
 The gate was built for tests that pass or fail. An eval score moves between runs, and the gate did not handle that well. Measured on a made-up scorer with normal noise and nothing changed, 1,000 runs with one run a side: it called a win 496 times and a loss 504 times, and 241 of those runs read `gamed`. More repeats made it worse at seeing a real gain, because the band was the widest gap seen, and that grows with every reading: a gain of three standard deviations was seen 761 times in 1,000 at three repeats, 289 in 500 at five, and 196 in 500 at eight.
 
@@ -49,8 +42,16 @@ The gate was built for tests that pass or fail. An eval score moves between runs
 - **One test in the main suite is a tripwire.** It fails, and says why, if the loop or its tests go missing, drop under 60, or get skipped.
 - **One existing test changed on purpose.** It pinned three setup runs for a change that moved no goalpost. That is two now.
 - New command: `calibrate`. New exports: `calibrate`, `noiseBand`. New in a report: `spread` on a metric with a declared band, and `baseMeasured`.
-- **Not built:** when a goalpost did move, the second measurement is still read without the band, so a noisy score beside an edited test can still read `gamed`. The repeat count is still read from the change's own config. PHP lint silencers and Pest's `->skip(` are not counted.
+- **Not built:** PHP lint silencers and Pest's `->skip(` are not counted. (Two things this line named when it was written are built in the section above: the band reads the second measurement, and the repeat count is read as it stood at the base.)
 - **Not run:** the loop on a real scorer with a real proposer. Everything here ran on small scripted scorers. Those test the mechanics. They do not show that a loop makes anything better over time. Not run on Windows or macOS.
+
+## 0.8.16 (2026-11-20): a report that arrived cut
+
+`run` printed its report and called `process.exit()` at once. Node writes to a pipe in the background, and an exit drops what the pipe has not taken yet. So a report larger than a pipe holds arrived cut, with the verdict's exit code: at 146,176 bytes where the reader was quick, at 65,536 where it was slow. Found by running the Action's own two commands on every commit of 994 pull requests. One of them changed 10,753 files, and its report came to 812,136 bytes.
+
+- **`run` ends by itself once its report is written.** The exit code is set, and nothing is cut. The report lists every test, fixture and config file a change touches (`gate.goalposts`), so the cut began at a change of a few thousand of them.
+- **The Action was not affected.** It writes the report to a file. A tool that reads `run --json` through a pipe was. Sawbuck's `check` and its commit hook do, and Sawbuck 0.2.3 has the tests for what each of them then did.
+- Not run on a Mac.
 
 ## 0.8.15 (2026-11-20): a good guest on a pull request
 

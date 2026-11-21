@@ -194,6 +194,55 @@ test('a declared band, end to end: a contract with no band keeps the gate finger
   assert.notEqual(withBand, plain);
 });
 
+// The band and the second measurement (lead S22, found by the framework session on 2026-11-21). When a change moves a
+// goalpost, every win is measured again with the source edits alone. That second reading was read without the band:
+// on a scorer with jitter, an honest win beside an edited test read gamed whenever the re-run rolled low. The score
+// here is the source's value plus a bonus kept in a test-side file, so the second reading is known to the digit.
+function bonusRepo({ noise, threshold, bonusFile = 'test/bonus.json', evaluatorPaths } = {}) {
+  const d = mkdtempSync(join(TMP_ROOT, 'band2-')); const g = (...a) => execFileSync('git', a, { cwd: d, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@b.c', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@b.c' } });
+  mkdirSync(join(d, 'src')); mkdirSync(join(d, dirname(bonusFile)), { recursive: true });
+  const put = (score, bonus) => { writeFileSync(join(d, 'src/values.js'), `module.exports = { score: ${score} }\n`); writeFileSync(join(d, bonusFile), JSON.stringify({ bonus }) + '\n'); };
+  writeFileSync(join(d, 'measure.js'), `console.log(require('./src/values.js').score + require('./${bonusFile}').bonus)\n`);
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...(evaluatorPaths ? { evaluatorPaths } : {}), metrics: [{ name: 'score', cmd: 'node measure.js', extract: 'number', direction: 'up', guard: true, ...(noise === undefined ? {} : { noise }), ...(threshold === undefined ? {} : { gamingThreshold: threshold }) }] }, null, 2));
+  put(80, 0); g('init', '-q'); g('add', '-A'); g('commit', '-qm', 'base');
+  const run = () => { const r = spawnSync(process.execPath, [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--json'], { cwd: d, encoding: 'utf8' }); let j = null; try { j = JSON.parse(r.stdout); } catch {} return { code: r.status, j, score: j && j.metrics.find((x) => x.name === 'score') }; };
+  const human = () => spawnSync(process.execPath, [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD'], { cwd: d, encoding: 'utf8' }).stdout;
+  return { d, g, put, run, human };
+}
+test('the band and the second measurement: a win whose source-only reading is inside the band of both the base and the full change is not called gamed, and is not counted as a win', () => {
+  const a = bonusRepo({ noise: 3 }); a.put(81.5, 2.5); a.g('commit', '-qam', 'four up in all, past a band of three: a point and a half from the source, the rest beside an edited test file');
+  const r = a.run();
+  assert.equal(r.score.before, 80); assert.equal(r.score.after, 84); assert.equal(r.score.sourceOnly, 81.5, 'the second reading: the source edit alone');
+  assert.equal(r.j.verdict, 'pass', 'two readings a band apart cannot be told from the wobble, so nothing is called gamed'); assert.equal(r.code, 0);
+  assert.equal(r.score.gamed, false); assert.equal(r.score.status, 'inconclusive', 'and nothing is called a win: the source alone did not move the number past the band');
+  assert.equal(r.score.confidence, 'low'); assert.match(r.score.gamingReason, /inside the noise band \(3\) of both the base and the full change/);
+  assert.equal(conformsToContract(r.j).ok, true, conformsToContract(r.j).errors.join('; '));
+  assert.deepEqual(r.j.gate.goalposts, ['test/bonus.json'], 'the test-side file that moved is still named');
+  assert.match(a.human(), /not counted as a win: the source-only reading \(81\.5\) is inside the noise band/, 'and the plain report says why the number that moved is not a win');
+  rmSync(a.d, { recursive: true, force: true });
+});
+test('the band and the second measurement: when the source alone clears the band and only the part that did not survive is inside it, the win stands', () => {
+  const a = bonusRepo({ noise: 3, threshold: 0.9 }); a.put(87, 2.5); a.g('commit', '-qam', 'nine and a half up: seven from the source, two and a half beside an edited test file');
+  const r = a.run();
+  assert.equal(r.score.sourceOnly, 87); assert.equal(r.score.retained, 0.737, 'under the threshold of 0.9 the contract sets');
+  assert.equal(r.j.verdict, 'pass'); assert.equal(r.score.gamed, false); assert.equal(r.score.status, 'improved');
+  assert.match(r.score.gamingReason, /74% of the gain survives source-only, and the part that did not \(2\.5\) is inside the noise band \(3\)/);
+  rmSync(a.d, { recursive: true, force: true });
+});
+test('the band and the second measurement: a part that did not survive and is wider than the band is gamed as before, and with no band nothing changes', () => {
+  const a = bonusRepo({ noise: 3 }); a.put(81, 9); a.g('commit', '-qam', 'ten up: one from the source, nine beside an edited test file');
+  let r = a.run(); assert.equal(r.j.verdict, 'gamed'); assert.equal(r.code, 2); assert.equal(r.score.gamed, true); assert.equal(r.score.retained, 0.1); assert.equal(r.score.status, 'improved');
+  const b = bonusRepo({}); b.put(81.5, 2.5); b.g('commit', '-qam', 'the first case again, on a contract that declares no band');
+  r = b.run(); assert.equal(r.j.verdict, 'gamed', 'one run a side and no declared band: the number is taken to hold still, as before'); assert.equal(r.score.retained, 0.375);
+  for (const x of [a, b]) rmSync(x.d, { recursive: true, force: true });
+});
+test('the band and the second measurement: a win beside an edit to a declared goalpost file is gamed by declaration, inside the band or not', () => {
+  const a = bonusRepo({ noise: 3, bonusFile: 'limits.json', evaluatorPaths: ['limits.json'] }); a.put(81.5, 2.5); a.g('commit', '-qam', 'the first case again, and the file beside it is one the contract names as a goalpost');
+  const r = a.run(); assert.equal(r.j.verdict, 'gamed'); assert.equal(r.code, 2); assert.equal(r.score.gamed, true); assert.equal(r.score.status, 'improved');
+  assert.match(r.score.gamingReason, /a declared evaluatorPath gate file changed in this diff \(limits\.json\)/);
+  rmSync(a.d, { recursive: true, force: true });
+});
+
 // -------------------------------------------------------------- unit: evaluate
 const m = (over = {}) => ({ direction: 'down', guard: true, extract: 'number', ...over });
 

@@ -67,7 +67,9 @@ config), else the jitter measured across the top-level `repeat` runs; a
 delta inside it is `inconclusive`, never a regression. Where the band was declared, `spread` carries the measured
 jitter beside it. `baseMeasured` (top level, optional) is present when the base's numbers were kept from an earlier
 run (`--base-cache`) and not measured in this one: the time they were measured. `retained` is the fraction of a
-metric's gain that survived the source-only re-run (Section 3). `confidence`
+metric's gain that survived the source-only re-run (Section 3). The re-run is read with the same band: a metric
+that improved in the full change reads `inconclusive` with `gamed: false` when its source-only reading was inside
+the band of both ends, and `gamingReason` says so. `confidence`
 (`none | unverified | low | medium | high`, `none` for an unmeasurable metric) and `sourceOnly` are informational fields this
 implementation adds; a minimal conforming report may omit them. `gate` (optional) records a
 truncated SHA-256 fingerprint of the gate definition (metrics, guards, `evaluatorPaths`,
@@ -144,7 +146,7 @@ Returns the Section 2 verdict object (identical to `run --json`). Reproducible f
 | `config` | object | load `promptwheel.config.json`, or auto-detect | a resolved config `{ metrics: [...], ... }`, supplied in process |
 | `auto` | boolean | `true` | with no config file and no `config` option, gate the auto-detected test command (zero-config); `false` throws instead |
 | `repeat` | number | `config.repeat ?? 1` | measurement repeats for the noise band |
-| `baseCache` | string | none | a folder outside the repository that keeps the base's measurement between runs (the same as `--base-cache`), reused only for the same tree measured the same way; a folder inside the repository throws |
+| `baseCache` | string | none | a folder outside the repository that keeps the base's measurement between runs (the same as `--base-cache`), reused only for the same tree measured the same way; a folder inside the repository throws. The folder is only as safe as who can write it: an attempt that runs as you can edit a kept number, so a loop that hands attempts a shell puts the folder back after each one |
 | `detectGaming` | boolean | `true` | run the Section 3 source-only re-proof |
 | `allow` | string | none | a declared override reason (the same as `--allow` / a `Promptwheel-Allow:` trailer): a would-be `gamed`, or an `unprovable` win (its source-only re-run could not be applied), reads `pass` with the reason recorded in `report.allowed`. When it could let more than one thing through, it lets through only the ones it names (`report.allowable` lists the names). The checks on the tests themselves (`tests_pass`, `test_count`, `skipped_tests`, `assertions`) count as one thing, and naming any of them names them all |
 | `record` | boolean | `false` | add one short row for this run to the record in the repo's git folder (the CLI's `run` does unless `--no-record`; the library only when asked). The record never changes a verdict |
