@@ -16,6 +16,10 @@ const ENGINE = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'promp
 // removed at exit: a run used to leave about 19 folders in the system temp folder
 const TMP_ROOT = mkdtempSync(join(tmpdir(), 'pw-suite-'));
 process.env.TMPDIR = TMP_ROOT;
+// The suite gives the same answer whoever runs it. PROMPTWHEEL_NO_ALLOW_TRAILER is the engine's own switch (Sawbuck sets
+// it for a check on a commit an agent made); left in place it would switch off the very thing six tests below are about.
+// The engine no longer hands it to a command it measures, and this file does not take it from whoever started it.
+delete process.env.PROMPTWHEEL_NO_ALLOW_TRAILER;
 process.on('exit', () => rmSync(TMP_ROOT, { recursive: true, force: true }));
 
 // ---------------------------------------------------------------- unit: extract
@@ -3785,9 +3789,7 @@ test('improve: an attempt that makes commits of its own is still checked, as one
   r = pw(d, ['improve', '--attempt', "sed -i '1s| // TODO||' app.js && git commit -qam 'agent: one' && sed -i '2s| // TODO||' app.js"]);
   assert.equal(r.code, 0, r.out); assert.equal(gitOut(d, ['rev-list', '--count', `${base}..HEAD`]), '1'); assert.equal(rev(d, 'HEAD~1'), base);
   assert.equal(readFileSync(join(d, 'app.js'), 'utf8'), 'a\nb\n'); assert.equal(gitOut(d, ['log', '-1', '--format=%s']), 'promptwheel improve: kept (improved todos)');
-  // an attempt that leaves the repo on another branch is not judged, and nothing is touched
-  r = pw(d, ['improve', '--attempt', 'git checkout -q -b elsewhere']);
-  assert.equal(r.code, 64); assert.match(r.out, /another branch/); assert.equal(gitOut(d, ['symbolic-ref', '--short', 'HEAD']), 'elsewhere');
+  // (an attempt that leaves the branch, or moves it back, has its own test further down: it is put back, not left)
 });
 test('improve needs an attempt and a clean tree, and never takes untracked work of the person with it', () => {
   const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
@@ -3937,4 +3939,162 @@ test('suggest offers a count that should go down, and no guard that already pass
   const s = JSON.parse(pw(d, ['suggest', '--json']).out);
   const offered = [...new Set(s.arms.map((a) => a.metric))].sort();
   assert.deepEqual(offered, ['dashes', 'suite'], 'the count that should fall and the guard that fails are offered; the guard that passes is not');
+});
+
+// ---- Over a number of turns (proof-bench/wheel/PLAN-2.md, 2026-11-21) -------------------------------------------------
+// One attempt judged alone is put back unless it improved by itself, so a change that needs a level step first could
+// never be kept. With --turns each turn goes on from the last, the whole change so far is checked against the commit
+// the run started from, and the best turn is kept. The holes another session's report named are closed here too: an
+// attempt that moves the branch back, an interrupt, and the engine's own switch reaching a measured command.
+import { spawn } from 'node:child_process';
+const script = (body) => { const f = join(mkdtempSync(join(tmpdir(), 'pw-att-')), 'attempt.sh'); writeFileSync(f, `#!/bin/sh\n${body}\n`); return `sh ${f}`; };
+const BOTH = { name: 'both', cmd: 'test -f a.js && test -f b.js', extract: 'exit', direction: 'pass', guard: true };   // all or nothing, like "the tests pass"
+const markPath = (d) => join(d, '.git', 'promptwheel', 'running.json');
+
+test('improve --turns: a change that takes two turns under an all-or-nothing measure is kept, and is put back each time when every attempt is judged alone', () => {
+  const d = tmpRepo([BOTH]); writeFileSync(join(d, 'app.js'), 'x\n'); commitAll(d, 'base'); const base = rev(d);
+  const step = script('if [ ! -f a.js ]; then echo a > a.js; else echo b > b.js; fi');
+  for (const n of [1, 2]) { const r = pw2(d, ['improve', '--json', '--attempt', step]); assert.equal(r.code, 3, `alone, attempt ${n}: ${r.err}`); assert.equal(existsSync(join(d, 'a.js')), false, 'the half that was done is put back'); }
+  assert.equal(rev(d), base);
+  const r = pw2(d, ['improve', '--json', '--turns', '4', '--attempt', step]);
+  assert.equal(r.code, 0, r.out + r.err); const j = JSON.parse(r.out);
+  assert.equal(j.result, 'kept'); assert.equal(j.best, 2); assert.equal(j.turns, 2, 'the run ends when nothing more can be gained'); assert.deepEqual(j.path.map((p) => p.standing), ['unsure', 'win']);
+  assert.equal(gitOut(d, ['rev-list', '--count', `${base}..HEAD`]), '1', 'one commit for the whole run'); assert.ok(existsSync(join(d, 'a.js')) && existsSync(join(d, 'b.js')));
+  assert.equal(gitOut(d, ['log', '-1', '--format=%s']), 'promptwheel improve: kept (improved both; turn 2 of 2)'); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
+  assert.equal(existsSync(markPath(d)), false, 'no mark of a running loop is left');
+});
+test('improve --turns: a turn that makes a guard worse does not end the run, and a later turn that mends it and gains is kept', () => {
+  const d = tmpRepo([TODOS, BOTH]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  const step = script(`case "$PW_TURN" in 1) echo 'x // TODO' >> app.js; echo a > a.js;; 2) sed -i '/^x /d' app.js; echo b > b.js;; esac`);
+  const r = pw2(d, ['improve', '--json', '--turns', '3', '--attempt', step]);
+  assert.equal(r.code, 0, r.out + r.err); assert.deepEqual(JSON.parse(r.out).path.slice(0, 2).map((p) => p.standing), ['worse', 'win']); assert.equal(readFileSync(join(d, 'app.js'), 'utf8'), 'a // TODO\n');
+});
+test('improve --turns: the best turn is kept, not the last; the record holds a row a turn and a row for the run; the playbook prints the path', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\nc // TODO\n'); commitAll(d, 'base'); const base = rev(d);
+  const step = script(`case "$PW_TURN" in 1|2) sed -i '0,/ \\/\\/ TODO/s///' app.js;; 3) echo 'x // TODO' >> app.js;; esac`);
+  const r = pw2(d, ['improve', '--json', '--label', 'clear todos', '--turns', '3', '--attempt', step]);
+  assert.equal(r.code, 0, r.out + r.err); const j = JSON.parse(r.out);
+  assert.equal(j.best, 2); assert.equal(j.turns, 3); assert.deepEqual(j.path.map((p) => p.gain), [1, 2, 1]);
+  assert.equal(readFileSync(join(d, 'app.js'), 'utf8'), 'a\nb\nc // TODO\n', 'the commit holds the tree of turn 2: the line turn 3 added is not in it');
+  assert.equal(gitOut(d, ['rev-list', '--count', `${base}..HEAD`]), '1'); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
+  assert.match(r.err, /kept the best of 3 turns \(turn 2\)/);
+  const rows = ledger(d);
+  assert.deepEqual(rows.map((x) => x.turn ?? 'run'), [1, 2, 3, 'run']); assert.deepEqual(rows.slice(0, 3).map((x) => x.standing), ['win', 'win', 'win']); assert.ok(rows.slice(0, 3).every((x) => x.result === undefined));
+  assert.equal(rows[3].result, 'kept'); assert.equal(rows[3].turns, 3); assert.equal(rows[3].best, 2); assert.equal(new Set(rows.map((x) => x.episode)).size, 1);
+  assert.match(pw(d, ['playbook']).out, /## Runs over several turns \(newest first\)\n- \*\*clear todos\*\*: kept at turn 2 of 3: `todos` 3 → 2 → 1 → 2/);
+  const ins = JSON.parse(pw(d, ['insights', '--json']).out);
+  assert.equal(ins.runs, 1, 'a run of three turns is one run'); assert.equal(ins.attempts, 1); assert.equal(ins.kept, 1); assert.deepEqual(ins.overTurns, { runs: 1, kept: 1, bestTurns: [2] });
+  assert.equal(ins.metrics.find((m) => m.name === 'todos').improved, 1, 'a number that rose over three turns is counted once');
+});
+test('improve --turns: a test edited at an early turn makes no win at a later one, and a run that undoes the edit and fixes the source is kept', () => {
+  const mk = () => { const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
+    writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');
+    writeFileSync(join(d, 'calc.test.mjs'), "import { test } from 'node:test'; import assert from 'node:assert'; import { sub } from './calc.mjs'; test('s', () => assert.strictEqual(sub(5, 3), 2));\n");
+    commitAll(d, 'base: red'); return d; };
+  let d = mk(); const base = rev(d);
+  let r = pw2(d, ['improve', '--json', '--turns', '2', '--attempt', script(`case "$PW_TURN" in 1) sed -i 's|, 2))|, 8))|' calc.test.mjs;; 2) echo '// tidy' >> calc.mjs;; esac`)]);
+  assert.equal(r.code, 2, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'gamed'); assert.equal(rev(d), base); assert.match(readFileSync(join(d, 'calc.test.mjs'), 'utf8'), /, 2\)\)/);
+  d = mk();
+  r = pw2(d, ['improve', '--json', '--turns', '2', '--attempt', script(`case "$PW_TURN" in 1) sed -i 's|, 2))|, 8))|' calc.test.mjs;; 2) git checkout -q -- calc.test.mjs; sed -i 's|a + b|a - b|' calc.mjs;; esac`)]);
+  assert.equal(r.code, 0, r.out + r.err); assert.deepEqual(JSON.parse(r.out).path.map((p) => p.standing), ['gamed', 'win']);
+});
+test('improve --turns: the second look. A win that does not show again when the best turn is measured once more is not kept', () => {
+  const armed = join(mkdtempSync(join(tmpdir(), 'pw-flaky-')), 'armed'); writeFileSync(armed, '');
+  const FLAKY = { name: 'flaky', cmd: `if [ -f win.js ] && [ -f ${armed} ]; then rm -f ${armed}; echo 4; else echo 5; fi`, extract: 'number', direction: 'down', guard: true };
+  const d = tmpRepo([FLAKY]); writeFileSync(join(d, 'app.js'), 'x\n'); commitAll(d, 'base'); const base = rev(d);
+  const r = pw2(d, ['improve', '--json', '--no-detect-gaming', '--turns', '2', '--attempt', script(`case "$PW_TURN" in 1) echo y >> app.js;; 2) echo w > win.js;; esac`)]);
+  assert.equal(r.code, 3, r.out + r.err); const j = JSON.parse(r.out);
+  assert.equal(j.result, 'plateau'); assert.deepEqual(j.because, ['unconfirmed:flaky']); assert.deepEqual(j.path.map((p) => p.standing), ['level', 'win']);
+  assert.match(r.err, /did not show again/); assert.equal(rev(d), base); assert.equal(existsSync(join(d, 'win.js')), false);
+});
+test('improve --turns: a turn that changes nothing ends the run; patience counts only once there is a best', () => {
+  let d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  let r = pw2(d, ['improve', '--json', '--turns', '5', '--attempt', 'true']);
+  assert.equal(r.code, 3); assert.equal(JSON.parse(r.out).turns, 1, 'nothing changed at turn 1: the run ends there');
+  // after a best, two turns in a row with no new best end the run
+  r = pw2(d, ['improve', '--json', '--turns', '6', '--patience', '2', '--attempt', script(`if [ "$PW_TURN" = 1 ]; then sed -i 's| // TODO||' app.js; else echo "// n$PW_TURN" >> app.js; fi`)]);
+  assert.equal(r.code, 0, r.out + r.err); let j = JSON.parse(r.out); assert.equal(j.best, 1); assert.equal(j.turns, 3);
+  assert.equal(readFileSync(join(d, 'app.js'), 'utf8'), 'a\n', 'and what the later turns added is not kept');
+  // before any best, level turns are not cut short by patience
+  d = tmpRepo([BOTH]); writeFileSync(join(d, 'app.js'), 'x\n'); commitAll(d, 'base');
+  r = pw2(d, ['improve', '--json', '--turns', '6', '--patience', '1', '--attempt', script(`case "$PW_TURN" in 4) echo a > a.js;; 5) echo b > b.js;; *) echo "// n$PW_TURN" >> app.js;; esac`)]);
+  assert.equal(r.code, 0, r.out + r.err); j = JSON.parse(r.out); assert.equal(j.best, 5); assert.equal(j.turns, 5);
+  for (const bad of [['--turns', '0'], ['--turns', 'many'], ['--patience', '0']]) assert.equal(pw2(d, ['improve', ...bad, '--attempt', 'true']).code, 64, bad.join(' '));
+});
+test('improve --turns: the next turn is told what the last one measured, and which turn it is', () => {
+  const out = mkdtempSync(join(tmpdir(), 'pw-fb-'));
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  const step = script(`cat "$PW_FEEDBACK" > ${out}/fb-$PW_TURN.txt; echo "$PW_TURN of $PW_TURNS" >> ${out}/seen.txt; case "$PW_TURN" in 1) echo 'x // TODO' >> app.js;; 2) sed -i 's| // TODO||' app.js;; esac`);
+  const r = pw2(d, ['improve', '--turns', '2', '--attempt', step]); assert.equal(r.code, 0, r.err);
+  assert.equal(readFileSync(join(out, 'seen.txt'), 'utf8'), '1 of 2\n2 of 2\n');
+  const f1 = readFileSync(join(out, 'fb-1.txt'), 'utf8'), f2 = readFileSync(join(out, 'fb-2.txt'), 'utf8');
+  assert.match(f1, /^Turn 1 of 2\./); assert.match(f1, /Nothing is measured yet/);
+  assert.match(f2, /^Turn 2 of 2\./); assert.match(f2, /todos: 1 at the start, 2 now/); assert.match(f2, /WORSE THAN AT THE START: todos/); assert.match(f2, /A change to the tests or the contract cannot make a win/);
+  // one attempt alone is told too, so one command line serves both ways of running
+  const r1 = pw2(d, ['improve', '--attempt', `cat "$PW_FEEDBACK" > ${out}/alone.txt`]); assert.equal(r1.code, 3); assert.match(readFileSync(join(out, 'alone.txt'), 'utf8'), /^Turn 1 of 1\./);
+});
+const interrupted = (d, args, ready) => new Promise((done) => {
+  const c = spawn(process.execPath, [ENGINE, 'improve', ...args], { cwd: d, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });   // its own process group, as a terminal gives it
+  let err = ''; c.stderr.on('data', (x) => { err += x; }); c.stdout.resume();
+  const poll = setInterval(() => { if (existsSync(ready)) { clearInterval(poll); try { process.kill(-c.pid, 'SIGINT'); } catch { /* gone */ } } }, 50);
+  c.on('close', (code, sig) => { clearInterval(poll); done({ code, sig, err }); });
+});
+test('improve: an interrupt puts the tree back; a best turn that had passed its check is kept; a run that died is named by the next one', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'pw-int-'));
+  let d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base'); let base = rev(d);
+  let r = await interrupted(d, ['--attempt', `echo 'x // TODO' >> app.js; touch ${tmp}/r1; sleep 30`], join(tmp, 'r1'));
+  assert.equal(r.code, 130, r.err); assert.match(r.err, /interrupted/); assert.equal(readFileSync(join(d, 'app.js'), 'utf8'), 'a // TODO\n', 'the half-made change is gone');
+  assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), ''); assert.equal(rev(d), base); assert.equal(existsSync(markPath(d)), false);
+  // turn 1 wins and passes its check; the interrupt comes during turn 2
+  r = await interrupted(d, ['--turns', '3', '--attempt', script(`if [ "$PW_TURN" = 1 ]; then sed -i 's| // TODO||' app.js; else echo junk >> app.js; touch ${tmp}/r2; sleep 30; fi`)], join(tmp, 'r2'));
+  assert.equal(r.code, 0, r.err); assert.match(r.err, /interrupted/); assert.match(r.err, /kept/);
+  assert.equal(readFileSync(join(d, 'app.js'), 'utf8'), 'a\n', 'turn 1 is kept, and what turn 2 had begun is not'); assert.equal(gitOut(d, ['rev-list', '--count', `${base}..HEAD`]), '1');
+  // a run that died: its mark is still there and its changes are in the tree
+  base = rev(d); mkdirSync(join(d, '.git', 'promptwheel'), { recursive: true });
+  writeFileSync(markPath(d), JSON.stringify({ start: base, pid: 2147483646, at: '2026-11-21T00:00:00Z' })); writeFileSync(join(d, 'app.js'), 'a\nhalf\n');
+  const s = pw2(d, ['improve', '--attempt', 'true']);
+  assert.equal(s.code, 64); assert.match(s.err, /did not finish/); assert.ok(s.err.includes(`git reset --hard ${base} && git clean -fd`), s.err); assert.equal(readFileSync(join(d, 'app.js'), 'utf8'), 'a\nhalf\n', 'nothing is deleted for the person');
+  execFileSync('git', ['checkout', '-q', '--', 'app.js'], { cwd: d });
+  assert.equal(pw2(d, ['improve', '--attempt', 'true']).code, 3, 'with the tree clean the old mark is cleared and the loop runs'); assert.equal(existsSync(markPath(d)), false);
+});
+test('improve: an attempt that moves the branch back cannot throw away a kept win, and one that leaves for another branch is brought back', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  assert.equal(pw2(d, ['improve', '--attempt', "sed -i '1s| // TODO||' app.js"]).code, 0); const kept = rev(d);
+  let r = pw2(d, ['improve', '--json', '--attempt', 'git reset -q --hard HEAD~1']);
+  assert.equal(r.code, 1, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'refused'); assert.equal(rev(d), kept, 'the kept win is still the head of the branch'); assert.match(r.err, /moved the branch/);
+  const branch = gitOut(d, ['symbolic-ref', '--short', 'HEAD']);
+  r = pw2(d, ['improve', '--json', '--attempt', "git checkout -q -b elsewhere && sed -i 's| // TODO||' app.js && git commit -qam other"]);
+  assert.equal(r.code, 1, r.out + r.err); assert.equal(gitOut(d, ['symbolic-ref', '--short', 'HEAD']), branch); assert.equal(rev(d), kept); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
+  assert.deepEqual(ledger(d).slice(-2).map((x) => [x.result, x.because]), [['refused', ['branch']], ['refused', ['branch']]]);
+});
+test('the engine\'s own switch is not handed to a command it measures (a variable Sawbuck sets reached this repo\'s own suite)', () => {
+  const d = tmpRepo([{ name: 'clean_env', cmd: 'test -z "$PROMPTWHEEL_NO_ALLOW_TRAILER"', extract: 'exit', direction: 'pass', guard: true }, TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base'); writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'one out');
+  const r = spawnSync(process.execPath, [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--json', '--no-record'], { cwd: d, encoding: 'utf8', env: { ...process.env, PROMPTWHEEL_NO_ALLOW_TRAILER: '1' } });
+  const m = JSON.parse(r.stdout).metrics.find((x) => x.name === 'clean_env'); assert.equal(m.before, 1); assert.equal(m.after, 1);
+});
+// The loop was removed once (0.7.5 and 0.8.0, November 2026) with no measurement behind the cut. A test cannot stop
+// a person from removing it again. It can make the removal loud, and say what was decided.
+test('the wheel is here on purpose: its commands and its tests', () => {
+  const why = 'The loop (improve, the record, insights, playbook, suggest, backfill) is core by a decision of 2026-11-21 (CLAUDE.md, rule 7). It was removed once with no measurement and put back. If you mean to remove it, that is a decision for a person: change CLAUDE.md first, then this test.';
+  const help = pw(tmpdir(), ['--help']).out;
+  for (const c of ['improve', 'insights', 'playbook', 'suggest', 'backfill']) assert.match(help, new RegExp(`promptwheel ${c}\\b`), `${c} is gone. ${why}`);
+  const src = readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const mine = src.slice(src.indexOf('// ---- The wheel, put back')).split('\n').filter((l) => /^test\(/.test(l));
+  const skipped = mine.filter((l) => /\{\s*skip:|\btest\.skip\(|\btodo:/.test(l));
+  assert.ok(mine.length >= 30, `only ${mine.length} of the loop's tests are left. ${why}`); assert.equal(skipped.length, 0, `a test of the loop is skipped. ${why}`);
+  assert.match(readFileSync(join(dirname(ENGINE), '..', 'CLAUDE.md'), 'utf8'), /The wheel turns/, `CLAUDE.md no longer says the loop is kept on purpose. ${why}`);
+});
+test('improve: an attempt that leaves a contract nobody can read is put back, not left in the tree with a crash; over several turns the next turn is told and can mend it', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base'); const base = rev(d);
+  const contract = readFileSync(join(d, 'promptwheel.config.json'), 'utf8');
+  let r = pw2(d, ['improve', '--json', '--attempt', "printf '}' >> promptwheel.config.json; sed -i 's| // TODO||' app.js"]);
+  assert.equal(r.code, 1, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'refused'); assert.deepEqual(JSON.parse(r.out).because, ['contract']); assert.match(r.err, /a contract that cannot be read/);
+  assert.equal(rev(d), base); assert.equal(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'), contract); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
+  assert.equal(pw2(d, ['improve', '--attempt', 'rm promptwheel.config.json']).code, 1, 'a deleted contract is the same'); assert.equal(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'), contract);
+  const out = mkdtempSync(join(tmpdir(), 'pw-fb-'));
+  r = pw2(d, ['improve', '--json', '--turns', '2', '--attempt', script(`cat "$PW_FEEDBACK" > ${out}/fb-$PW_TURN.txt; case "$PW_TURN" in 1) printf '}' >> promptwheel.config.json;; 2) git checkout -q -- promptwheel.config.json; sed -i 's| // TODO||' app.js;; esac`)]);
+  assert.equal(r.code, 0, r.out + r.err); assert.deepEqual(JSON.parse(r.out).path.map((p) => p.standing), ['worse', 'win']);
+  assert.match(readFileSync(join(out, 'fb-2.txt'), 'utf8'), /THE CONTRACT COULD NOT BE READ after turn 1/);
+  assert.match(pw(d, ['playbook']).out, /the attempt left a contract that cannot be read/);
 });
