@@ -46,6 +46,8 @@ export interface MetricConfig {
   guard?: boolean;
   /** On a guard: a trusted regression is let through when the metric named in `gain` improved in the same change (earned in the source) and this one got worse by a share of its old value no larger than `base + rate * gain`. Part of the guard: a change cannot write or loosen its own. */
   budget?: { gain: string; base?: number; rate?: number };
+  /** The noise band for this metric, in its own units: a difference no larger than this is `inconclusive`, never a win and never a failure. For a number that does not hold still (a model-graded score, a timing). It replaces the band measured across repeats, so it holds at one run a side and more repeats do not widen it. Not read on a pass/fail metric or an `exact` one. Part of how the metric is judged: a change is held to the band the contract had before it, and a band it adds counts from the next change on. `calibrate()` measures one. */
+  noise?: number;
   /** Read a value even when `cmd` exits nonzero (never needed for `extract: 'exit'`). */
   allowNonzero?: boolean;
   /** Per-command timeout, default 300. */
@@ -120,6 +122,8 @@ export interface CheckOptions {
   detectGaming?: boolean;
   /** A declared override reason (the same as `--allow` or a `Promptwheel-Allow:` commit trailer): a would-be `gamed`, or an `unprovable` win (its source-only re-run could not be applied), reads `pass`, recorded in `report.allowed`. */
   allow?: string;
+  /** A folder outside the repository that keeps the base's measurement between runs (`--base-cache`). A kept number is reused only for the same tree measured the same way (commands, setup, env, linked dirs, repeat count, engine version, platform), and only a clean measurement is kept. A folder inside the repository throws a `ConfigError`: a kept number the change can reach is a goalpost. */
+  baseCache?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,8 +140,10 @@ export interface Evaluation {
   /** `false` only for a guarded metric with a trusted regression. */
   ok: boolean;
   confidence: Confidence;
-  /** The measured jitter band (max spread across repeats); `null` when unmeasurable. */
+  /** The noise band the delta was held against: the one the contract declares for the metric, else the measured jitter (max spread across repeats); `null` when unmeasurable. */
   noise: number | null;
+  /** Only where the band was declared: the measured jitter (max spread across repeats), reported beside it. */
+  spread?: number;
   /** A guarded pass/fail metric stuck at 0 at both refs: it protects nothing. */
   inert?: true;
 }
@@ -245,6 +251,8 @@ export interface Report {
   mode: 'refs' | 'working';
   repeat: number;
   verdict: Verdict;
+  /** Present only when the base's numbers were kept from an earlier run (`baseCache`) and not measured in this one: when they were measured (ISO time). */
+  baseMeasured?: string;
   metrics: MetricResult[];
   /** Present only when a mandate was violated (the verdict is then `fail`). */
   mandates?: MandateViolation[];
@@ -319,6 +327,52 @@ export interface CountChange {
  */
 export declare function changeCounts(options?: Pick<CheckOptions, 'repo' | 'base' | 'head' | 'config'>): Record<string, CountChange | null> | null;
 
+/** What `calibrate()` found for one metric. */
+export interface CalibratedMetric {
+  name: string;
+  /** How many of the runs gave a number. */
+  runs: number;
+  median: number | null;
+  /** The widest gap between the readings. */
+  spread: number;
+  /** The band to write on the metric as `noise`; `null` when a run gave no number. */
+  noise: number | null;
+}
+
+export interface Calibration {
+  /** The commit the metrics were run at (short sha). */
+  ref: string;
+  /** Readings asked for per metric. */
+  runs: number;
+  /** The runs a side the band is for. */
+  repeat: number;
+  metrics: CalibratedMetric[];
+}
+
+export interface CalibrateOptions extends Pick<CheckOptions, 'repo' | 'config' | 'repeat'> {
+  /** The commit to measure at. Default `HEAD`. */
+  ref?: string;
+  /** Readings per metric. Default 20, at least 4. */
+  runs?: number;
+  /** Measure only the metric with this name. */
+  metric?: string;
+}
+
+/**
+ * Measures the noise band each metric needs: runs it `runs` times at one commit, in a throwaway worktree, and gives
+ * the band for `repeat` runs a side. A pass/fail metric and an `exact` one take no band and are left out. Writes
+ * nothing: a band goes into the contract by hand, as `noise` on the metric. Throws a `ConfigError` (exit code 64)
+ * as `check` does, and when `metric` names no metric that takes a band.
+ */
+export declare function calibrate(options?: CalibrateOptions): Calibration;
+
+/**
+ * The noise band a metric with these readings needs, or `null` with fewer than two readings. Draws pairs of groups of
+ * `repeat` readings and returns the gap between their medians that 95 of 100 pairs stay inside. The draw has a fixed
+ * seed, so the same readings give the same band.
+ */
+export declare function noiseBand(samples: ReadonlyArray<number | null | undefined>, repeat?: number, pairs?: number): number | null;
+
 /**
  * Structurally validate any verdict object against Section 2 (shapes, the fixed vocabularies,
  * and the honest-verdict rules). Zero dependency, so a third-party implementation can self-check
@@ -339,7 +393,7 @@ export declare function median(samples: ReadonlyArray<number | null | undefined>
 /** `max - min` of the non-null samples; `0` when there are none. */
 export declare function spread(samples: ReadonlyArray<number | null | undefined>): number;
 
-/** The credibility core: compare before/after samples and trust the delta only if it clears the observed noise band. */
+/** The credibility core: compare before/after samples and trust the delta only if it clears the noise band (the metric's declared `noise`, else the jitter observed across repeats). */
 export declare function evaluate(
   metric: Pick<MetricConfig, 'direction' | 'guard' | 'extract'>,
   beforeSamples: ReadonlyArray<number | null>,

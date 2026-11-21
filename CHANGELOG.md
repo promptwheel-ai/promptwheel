@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased: a score that wobbles
+
+On the branch `feat/noisy-scorer-gate`. Not released, and no version is set.
+
+The gate was built for tests that pass or fail. An eval score moves between runs, and the gate did not handle that well. Measured on a made-up scorer with normal noise and nothing changed, 1,000 runs with one run a side: it called a win 496 times and a loss 504 times, and 241 of those runs read `gamed`. More repeats made it worse at seeing a real gain, because the band was the widest gap seen, and that grows with every reading: a gain of three standard deviations was seen 761 times in 1,000 at three repeats, 289 in 500 at five, and 196 in 500 at eight.
+
+- **No second measurement when no goalpost moved.** A change that touched no test, grader or config has a source-only tree that is the tree just measured. Measuring it again asked a noisy scorer the same question twice, and a lower second answer read `gamed`. That measurement now stands. On the same scorer `gamed` went from 241, 55 and 20 in 1,000 (one, two and three repeats) to 0, 0 and 0. A change that did move a goalpost is re-proved as before.
+- **A band the contract declares.** `"noise": <number>` on a metric is the band, in the metric's own units. A move inside it is `inconclusive`, with one run a side too. The report keeps the widest gap it saw beside it, as `spread`. The band is part of how a metric is judged, so it is read as it stood at the base: a change cannot widen its own band to hide a loss, or narrow it to claim a win. A contract with no band keeps the fingerprint it had.
+- **`promptwheel calibrate`.** Measures the band. It runs a metric N times at HEAD (20 by default) and prints the gap that two medians of `--repeat` readings stay inside 95 times in 100 when nothing changed. It writes nothing. You put the number in the contract.
+- **Measured with a calibrated band** (same scorer, the band from 200 runs at the base). Nothing changed, one run a side: a win 31 times in 1,000 and a loss 27 times, where it was 496 and 504. A gain of three standard deviations was seen 877 times in 1,000 at three repeats, 488 in 500 at five, and 499 in 500 at eight. More repeats now help. A gain of one standard deviation at five repeats: 135 in 500, where it was 19.
+- **`run --base-cache <dir>`.** Keeps the base's measurement in a folder and uses it again for the same tree measured the same way, so a loop asks a slow or paid scorer about the base once. Off unless asked for. The folder must sit outside the repository: a kept number the change can reach is a goalpost. Only a clean measurement is kept, and the report says when a kept one was used (`baseMeasured`).
+- **The counts read PHP.** PHPUnit test methods, `#[Test]`, a docblock `@test`, and skipped or incomplete tests. On a real Drupal module with 489 PHP files the counts read 0 tests and 0 skips before. Now they read 984 and 5. By hand it is 982 test methods and 5 skips: the other 2 are the word in a comment and in a string.
+- **One existing test changed on purpose.** It pinned three setup runs for a change that moved no goalpost. That is two now.
+- New command: `calibrate`. New exports: `calibrate`, `noiseBand`. New in a report: `spread` on a metric with a declared band, and `baseMeasured`.
+- **Not built:** when a goalpost did move, the second measurement is still read without the band, so a noisy score beside an edited test can still read `gamed`. The repeat count is still read from the change's own config. PHP lint silencers and Pest's `->skip(` are not counted.
+- **Not run:** on a real eval. The scorer here is made up, with normal noise. Not run on Windows or macOS.
+
 ## 0.8.15 (2026-11-20): a good guest on a pull request
 
 The Action left a new comment on every run, a pass included, under the name PromptWheel. Run with its own steps: ten passing pushes, ten comments. A check that speaks on every push gets muted, and then its one real sentence is not read either.

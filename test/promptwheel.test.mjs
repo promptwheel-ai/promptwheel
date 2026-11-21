@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint,
   allowFromComments, check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION, deriveVerdict, applyBudgets } from '../bin/promptwheel.mjs';
 import { createHash } from 'node:crypto';
-import { realpathSync, chmodSync } from 'node:fs';
+import { realpathSync, chmodSync, readdirSync } from 'node:fs';
 
 const ENGINE = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'promptwheel.mjs');
 // every temp repo this file makes, and every clean copy the engine makes for them, goes under one folder that is
@@ -89,6 +89,107 @@ test('budget, end to end: a change cannot loosen the budget it runs under (a bud
   const r = a.run(); assert.notEqual(r.code, 0); assert.notEqual(r.j.verdict, 'pass', 'judged by the budget as it was at the base: 300% against 50%');
 });
 
+// ---- calibrate: the band a metric needs, measured, so nobody has to guess the number. It runs the metric N times at one
+// commit and asks how far apart two medians of `repeat` runs land when nothing changed. The band is the gap that 95
+// of 100 such pairs stay inside. The pairs are drawn with a fixed seed, so the same runs give the same band.
+const lib = await import('../bin/promptwheel.mjs');
+test('noiseBand: a number that holds still needs no band; two values a coin apart need the whole gap at one run a side; under two readings there is no answer', () => {
+  assert.equal(lib.noiseBand([7, 7, 7, 7], 3), 0);
+  assert.equal(lib.noiseBand([0, 10], 1), 10);
+  assert.equal(lib.noiseBand([5], 1), null); assert.equal(lib.noiseBand([null, 'x', NaN], 1), null);
+  assert.equal(lib.noiseBand([3, 9, 4, 8, 5], 2), lib.noiseBand([3, 9, 4, 8, 5], 2), 'the same runs give the same band');
+});
+test('noiseBand: more runs a side narrow the band, where the widest gap between repeats grows', () => {
+  // 40 readings of one number with jitter, made here from a fixed seed so the test reads the same every time
+  let a = 7; const rnd = () => { a = (a * 1103515245 + 12345) % 2147483648; return a / 2147483648; };
+  const xs = Array.from({ length: 40 }, () => +(100 + (rnd() + rnd() + rnd() + rnd() - 2) * 10).toFixed(3));
+  const b1 = lib.noiseBand(xs, 1), b3 = lib.noiseBand(xs, 3), b8 = lib.noiseBand(xs, 8);
+  assert.ok(b1 > b3 && b3 > b8 && b8 > 0, `${b1} > ${b3} > ${b8} > 0`);
+});
+test('calibrate: runs each metric a band applies to at one commit, gives the band for the repeat count, and writes nothing', () => {
+  const asked = join(mkdtempSync(join(tmpdir(), 'pw-cal-')), 'n');
+  const d = repoWith({
+    'promptwheel.config.json': JSON.stringify({ linkNodeModules: false, repeat: 2, metrics: [
+      { name: 'score', cmd: 'node measure.mjs', extract: 'number', direction: 'up', guard: true },
+      { name: 'tests_pass', cmd: 'true', extract: 'exit', direction: 'pass', guard: true },
+      { name: 'pins', cmd: 'echo 3', extract: 'number', direction: 'down', exact: true, guard: true }] }),
+    // a scorer that walks through four values, counted in a file outside the repo
+    'measure.mjs': `import { readFileSync, writeFileSync, existsSync } from 'node:fs';\nconst f = ${JSON.stringify(asked)};\nconst n = existsSync(f) ? Number(readFileSync(f, 'utf8')) : 0;\nwriteFileSync(f, String(n + 1));\nconsole.log([10, 12, 11, 13][n % 4]);\n`,
+  });
+  const before = readFileSync(join(d, 'promptwheel.config.json'), 'utf8');
+  const c = lib.calibrate({ repo: d, runs: 8 });
+  assert.equal(c.runs, 8); assert.equal(c.repeat, 2, 'the repeat count the contract sets');
+  assert.deepEqual(c.metrics.map((x) => x.name), ['score'], 'a pass or fail metric and an exact one take no band');
+  const want = lib.noiseBand([10, 12, 11, 13, 10, 12, 11, 13], 2);
+  assert.deepEqual(c.metrics[0], { name: 'score', runs: 8, median: 11.5, spread: 3, noise: want });
+  assert.ok(want > 0 && want <= 3, String(want));
+  const cli = pw(d, ['calibrate', '--runs', '8', '--json']);
+  assert.equal(cli.code, 0, cli.out); assert.deepEqual(JSON.parse(cli.out).metrics, c.metrics, 'the command prints what the library returns');
+  const plain = pw(d, ['calibrate', '--runs', '8', '--repeat', '1', '--metric', 'score']);
+  assert.equal(plain.code, 0, plain.out); assert.match(plain.out, new RegExp(`"noise": ${String(lib.noiseBand([10, 12, 11, 13, 10, 12, 11, 13], 1)).replace('.', '\\.')}`));
+  assert.equal(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'), before, 'the contract is not edited');
+  assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: d, encoding: 'utf8' }), '', 'and nothing else is written in the repo');
+  for (const argv of [['calibrate', '--metric', 'nope'], ['calibrate', '--metric', 'tests_pass'], ['calibrate', '--runs', '3'], ['calibrate', '--runs'], ['calibrate', '--bogus']]) {
+    const r = pw(d, argv); assert.equal(r.code, 64, `${argv.join(' ')} -> ${r.out}`); assert.doesNotMatch(r.out, /at .*promptwheel\.mjs:\d+/, 'no stack trace');
+  }
+  rmSync(d, { recursive: true, force: true }); rmSync(dirname(asked), { recursive: true, force: true });
+});
+
+// the same small repo with one score, and a band the contract declares for it
+function bandRepo(noise) {
+  const d = mkdtempSync(join(TMP_ROOT, 'band-')); const g = (...a) => execFileSync('git', a, { cwd: d, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@b.c', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@b.c' } });
+  mkdirSync(join(d, 'src')); const put = (score) => writeFileSync(join(d, 'src/values.js'), `module.exports = { score: ${score} }\n`);
+  writeFileSync(join(d, 'measure.js'), "console.log(require('./src/values.js')[process.argv[2]])\n");
+  const cfg = (band) => writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ metrics: [{ name: 'score', cmd: 'node measure.js score', extract: 'number', direction: 'up', guard: true, ...(band === undefined ? {} : { noise: band }) }] }, null, 2));
+  put(80); cfg(noise); g('init', '-q'); g('add', '-A'); g('commit', '-qm', 'base');
+  const run = () => { const r = spawnSync(process.execPath, [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--json'], { cwd: d, encoding: 'utf8' }); let j = null; try { j = JSON.parse(r.stdout); } catch {} return { code: r.status, j, score: j && j.metrics.find((x) => x.name === 'score') }; };
+  return { d, g, put, cfg, run };
+}
+test('a declared band, end to end: with one run a side a move inside the band is not a win and not a failure; a move past it is', () => {
+  const a = bandRepo(2); a.put(81); a.g('commit', '-qam', 'one point up, inside a band of two');
+  let r = a.run(); assert.equal(r.code, 0); assert.equal(r.score.status, 'inconclusive'); assert.equal(r.score.noise, 2); assert.equal(conformsToContract(r.j).ok, true);
+  a.put(79.5); a.g('commit', '-qam', 'a point and a half down, still inside');
+  r = a.run(); assert.equal(r.code, 0, 'a guard does not fail inside the band'); assert.equal(r.score.status, 'inconclusive');
+  a.put(85); a.g('commit', '-qam', 'well past the band');
+  r = a.run(); assert.equal(r.code, 0); assert.equal(r.score.status, 'improved');
+  a.put(80); a.g('commit', '-qam', 'well below it');
+  r = a.run(); assert.equal(r.code, 1); assert.equal(r.score.status, 'regressed');
+});
+test('a declared band, end to end: a change cannot widen the band it is judged by to hide a fall', () => {
+  const a = bandRepo(2); a.put(75); a.cfg(50); a.g('commit', '-qam', 'five points down, and a band of fifty written in the same change');
+  const r = a.run(); assert.notEqual(r.code, 0); assert.notEqual(r.j.verdict, 'pass'); assert.equal(r.score.status, 'regressed', 'judged by the band as it was at the base');
+  assert.equal(r.score.noise, 2); assert.equal(r.j.gate.changed, true, 'and the report says the gate was edited');
+});
+test('a declared band, end to end: a change cannot narrow the band, or drop it, to turn a wobble into a win', () => {
+  for (const band of [0, undefined]) {
+    const a = bandRepo(2); a.put(81); a.cfg(band); a.g('commit', '-qam', 'one point up, and the band taken away in the same change');
+    const r = a.run(); assert.equal(r.score.status, 'inconclusive', `band ${band}: still judged by the band of two`); assert.equal(r.score.noise, 2);
+  }
+});
+test('a declared band, end to end: a band added to a metric counts from the next change on, and a new metric brings its own', () => {
+  const a = bandRepo(undefined); a.put(75); a.cfg(50); a.g('commit', '-qam', 'five points down, with a first band of fifty in the same change');
+  let r = a.run(); assert.equal(r.code, 1, 'the base declared no band, so the fall is read as before'); assert.equal(r.score.status, 'regressed');
+  a.put(74); a.g('commit', '-qam', 'the next change is judged by the band the last one left');
+  r = a.run(); assert.equal(r.code, 0); assert.equal(r.score.status, 'inconclusive'); assert.equal(r.score.noise, 50);
+  const b = bandRepo(2);
+  writeFileSync(join(b.d, 'src/values.js'), 'module.exports = { score: 80, speed: 10 }\n');
+  writeFileSync(join(b.d, 'promptwheel.config.json'), JSON.stringify({ metrics: [
+    { name: 'score', cmd: 'node measure.js score', extract: 'number', direction: 'up', guard: true, noise: 2 },
+    { name: 'speed', cmd: 'node measure.js speed', extract: 'number', direction: 'up', guard: true, noise: 3 }] }, null, 2));
+  b.g('commit', '-qam', 'a second metric, new in this change, with its own band');
+  r = b.run(); assert.equal(r.code, 0); assert.equal(r.j.metrics.find((x) => x.name === 'speed').adopted, true);
+  writeFileSync(join(b.d, 'src/values.js'), 'module.exports = { score: 80, speed: 8 }\n'); b.g('commit', '-qam', 'two down, inside its band of three');
+  r = b.run(); assert.equal(r.code, 0); assert.equal(r.j.metrics.find((x) => x.name === 'speed').status, 'inconclusive');
+});
+test('a declared band, end to end: a contract with no band keeps the gate fingerprint it had, and a band is part of the fingerprint', () => {
+  const a = bandRepo(undefined); a.put(81); a.g('commit', '-qam', 'a change');
+  const plain = a.run().j.gate.fingerprint.head;
+  const b = bandRepo(2); b.put(81); b.g('commit', '-qam', 'a change');
+  const withBand = b.run().j.gate.fingerprint.head;
+  assert.equal(plain, '64db2d70617e9d51', 'the fingerprint the published 0.8.15 gives the same contract');
+  assert.notEqual(withBand, plain);
+});
+
 // -------------------------------------------------------------- unit: evaluate
 const m = (over = {}) => ({ direction: 'down', guard: true, extract: 'number', ...over });
 
@@ -113,6 +214,34 @@ test('evaluate: single read → unverified (noise unknown)', () => {
 });
 test('evaluate: deterministic extract → high even on a single read', () => {
   assert.equal(evaluate(m({ extract: 'exit' }), [1], [1], 1).confidence, 'high');
+});
+
+// ---- a noise band the contract declares. The measured band is the widest gap between repeats. That gap grows with
+// more repeats, so on a scorer with jitter more repeats hid a real gain: one of three standard deviations was seen in
+// 761 of 1,000 runs at 3 repeats, 289 of 500 at 5 and 196 of 500 at 8. With one run a side there was no band at all:
+// a change that moved nothing read improved 496 times and regressed 504 times in 1,000 (noise-band bench, 2026-11-21).
+// A band written on the metric is one number in the metric's own units. A difference inside it is not called.
+const banded = (over = {}) => ({ direction: 'up', guard: true, extract: 'number', noise: 0.5, ...over });
+test('evaluate: a declared band holds at a single read: inside it is inconclusive and never fails a guard, outside it is trusted', () => {
+  const inside = evaluate(banded(), [10], [10.3], 1);
+  assert.equal(inside.status, 'inconclusive'); assert.equal(inside.ok, true); assert.equal(inside.confidence, 'low'); assert.equal(inside.noise, 0.5); assert.equal(inside.spread, 0);
+  const dip = evaluate(banded(), [10], [9.6], 1); assert.equal(dip.status, 'inconclusive'); assert.equal(dip.ok, true, 'a guard does not fail inside the band');
+  const won = evaluate(banded(), [10], [11], 1); assert.equal(won.status, 'improved'); assert.equal(won.confidence, 'medium');
+  const lost = evaluate(banded(), [10], [9], 1); assert.equal(lost.status, 'regressed'); assert.equal(lost.ok, false);
+  assert.equal(evaluate(banded(), [10], [10.5], 1).status, 'inconclusive', 'the edge of the band is inside it, as with the measured band');
+});
+test('evaluate: with a declared band more repeats do not widen it: the band stands, and the widest gap between repeats is reported beside it', () => {
+  const ev = evaluate(banded(), [10, 12, 14], [13, 15, 11], 3);   // medians 12 and 13; the widest gap between repeats is 4
+  assert.equal(ev.status, 'improved'); assert.equal(ev.noise, 0.5); assert.equal(ev.spread, 4);
+  const plain = evaluate(banded({ noise: undefined }), [10, 12, 14], [13, 15, 11], 3);
+  assert.equal(plain.status, 'inconclusive', 'with no declared band the widest gap is the band, as before'); assert.equal(plain.noise, 4);
+  assert.equal('spread' in plain, false, 'and no spread is reported apart from it');
+});
+test('evaluate: a declared band is not read on a pass or fail metric or an exact one; a band that is not a number of zero or more is no band; zero says the number holds still', () => {
+  assert.equal(evaluate({ direction: 'pass', guard: true, extract: 'exit', noise: 5 }, [1], [0], 1).status, 'regressed');
+  assert.equal(evaluate({ direction: 'down', guard: true, exact: true, noise: 5 }, [3], [4], 1).status, 'regressed');
+  for (const no of [-1, NaN, '0.5', null, Infinity]) assert.equal(evaluate(banded({ noise: no }), [10], [10.3], 1).status, 'improved', String(no));
+  const still = evaluate(banded({ noise: 0 }), [10], [10.3], 1); assert.equal(still.status, 'improved'); assert.equal(still.confidence, 'high');
 });
 test('evaluate: non-guard informational metric never fails', () => {
   assert.equal(evaluate(m({ guard: false }), [5, 5], [9, 9], 2).ok, true);
@@ -2192,7 +2321,7 @@ test('check: a repo path that names a subdirectory gates at the repository root'
 });
 
 // -------------------------------------------- review 4: one patched worktree re-proves every improved metric
-test('gaming: two improved metrics are re-proven in ONE source-only checkout (setup runs 3 times, not 4)', () => {
+test('gaming: two improved metrics beside a moved goalpost are re-proven in ONE source-only checkout (setup runs 3 times, not 4); with no goalpost moved there is no such checkout (2 times)', () => {
   const log = join(mkdtempSync(join(tmpdir(), 'pw-setups-')), 'setups.log');
   const d = tmpRepo([
     TODOS,
@@ -2201,13 +2330,19 @@ test('gaming: two improved metrics are re-proven in ONE source-only checkout (se
   const cfg = JSON.parse(readFileSync(join(d, 'promptwheel.config.json'), 'utf8'));
   cfg.setup = `echo setup >> ${JSON.stringify(log)}`;
   writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify(cfg));
+  const earned = () => {
+    const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+    assert.equal(r.verdict, 'pass', JSON.stringify(r.metrics));
+    for (const m of r.metrics) { assert.equal(m.status, 'improved', m.name); assert.equal(m.gamed, false, m.name); assert.equal(m.retained, 1, m.name); }
+    const setups = readFileSync(log, 'utf8').split('\n').filter(Boolean).length; writeFileSync(log, '');
+    return setups;
+  };
   writeFileSync(join(d, 'app.js'), 'a // TODO\nb // FIXME\n'); commitAll(d, 'base');
-  writeFileSync(join(d, 'app.js'), 'a\nb\n'); commitAll(d, 'fix both');
-  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
-  assert.equal(r.verdict, 'pass', JSON.stringify(r.metrics));
-  for (const m of r.metrics) { assert.equal(m.status, 'improved', m.name); assert.equal(m.gamed, false, m.name); assert.equal(m.retained, 1, m.name); }
-  const setups = readFileSync(log, 'utf8').split('\n').filter(Boolean).length;
-  assert.equal(setups, 3, `base + head + ONE source-only checkout, got ${setups}`);
+  writeFileSync(join(d, 'app.js'), 'a\nb\n'); writeFileSync(join(d, 'app.test.js'), '// a test file\n'); commitAll(d, 'fix both, and add a test file');
+  assert.equal(earned(), 3, 'base + head + ONE source-only checkout');
+  writeFileSync(join(d, 'app.js'), 'a\nb\nc // TODO\nd // FIXME\n'); commitAll(d, 'two more');
+  writeFileSync(join(d, 'app.js'), 'a\nb\nc\nd\n'); commitAll(d, 'fix both again, in the source alone');
+  assert.equal(earned(), 2, 'base + head: with no goalpost moved the head tree is the source-only tree');
   rmSync(d, { recursive: true, force: true }); rmSync(dirname(log), { recursive: true, force: true });
 });
 
@@ -2751,7 +2886,7 @@ test('cli: lock outside a git repository prints one line and exits 64', () => {
 });
 test('cli: --help lists every command, pr-allow included, and names no MCP surface', () => {
   const r = pw(tmpdir(), ['--help']);
-  for (const c of ['run', 'init', 'lock', 'pr-allow']) assert.match(r.out, new RegExp(`promptwheel ${c}\\b`), c);
+  for (const c of ['run', 'init', 'lock', 'pr-allow', 'calibrate']) assert.match(r.out, new RegExp(`promptwheel ${c}\\b`), c);
   assert.doesNotMatch(r.out, /MCP/);
 });
 
@@ -3057,6 +3192,31 @@ test('init: a member call is not a test; a tap, Deno or QUnit test is', () => {
     'test/more.test.js': "t.test('sub', (t) => { t.equal(1, 1); t.end() })\nDeno.test('d', () => {})\nQUnit.test('q', () => {})\ndescribe('g', () => { it('i', () => {}); test('t', () => {}) })\nit.skip('s', () => {}); xtest('x', () => {})\n",
   }), [6, 2, 0, 1], 'three member-call tests the frameworks define, a group, two tests; two skipped; one tap assertion');
 });
+// PHP was not in the list of code files, so a PHP repo had no test the counts could see: in one real Drupal module the
+// test count read 6 (its few JavaScript files) beside 982 PHPUnit test methods, and the skip count read 0 beside 5
+// (counted by hand on 2026-11-21). A method is a test by its name (testAdds, test_adds), by #[Test], or by a docblock
+// @test. Pest's it( and test( are read as JavaScript's are. A method call (->test() is not a test, as .test( is not.
+test('init: the counting tripwires read PHPUnit and Pest tests, and a skipped or incomplete PHPUnit test', () => {
+  assert.deepEqual(tripwires({
+    'tests/src/Unit/CalcTest.php': [
+      '<?php', 'use PHPUnit\\Framework\\TestCase;', 'use PHPUnit\\Framework\\Attributes\\Test;', 'class CalcTest extends TestCase {',
+      '  public function testAdds(): void { $this->assertSame(2, 1 + 1); }',
+      '  public function test_subtracts(): void { self::assertEquals(1, 2 - 1); }',
+      '  #[Test]', '  public function multiplies(): void { $this->assertTrue(true); }',
+      '  /**', '   * @test', '   */', "  public function divides(): void { $this->markTestSkipped('later'); }",
+      "  public function testLater(): void { $this->markTestIncomplete('soon'); }",
+      "  private function testimonial(): string { return 'a name that starts with test'; }",
+      "  public function provider(): array { return ['an address' => ['menu@test']]; }",
+      '}', '',
+    ].join('\n'),
+  }), [5, 2, 0, 3], 'PHPUnit: three by name, one by attribute, one by annotation; two skipped; three assertions');
+  assert.deepEqual(tripwires({
+    'tests/Feature/ExampleTest.php': "<?php\nit('adds', function () { expect(1 + 1)->toBe(2); });\ntest('subtracts', function () { expect(2 - 1)->toBe(1); });\n",
+  }), [2, 0, 0, 2], 'Pest');
+  assert.deepEqual(tripwires({
+    'src/Runner.php': "<?php\nclass Runner {\n  public function go($probe) { return $probe->test($this) && $probe->it(1) && $probe->describe('x'); }\n}\n",
+  }), [0, 0, 0, 0], 'a method called test, it or describe on an object is not a test');
+});
 test('init: the counting tripwires read Go, Rust, Ruby, Java, C#, Elixir, Swift and Python tests', () => {
   const each = {
     go: [{ 'add_test.go': 'func TestAdd(t *testing.T) {\n\tif add(1, 2) != 3 {\n\t\tt.Errorf("no")\n\t}\n}\nfunc (s *Suite) TestSub() { require.Equal(s.T(), 1, 1) }\nfunc TestLater(t *testing.T) { t.Skip("later") }\nfunc testHelper() {}\n' }, [3, 1, 0, 2]],
@@ -3336,6 +3496,100 @@ test('gate.goalposts: a report whose goalposts are empty is never gamed, on ever
   assert.equal(check({ repo: d, base: 'HEAD~1', head: 'HEAD', detectGaming: false }).gate, undefined, 'no gate record, so no goalposts, when detection is off');
   assert.equal(conformsToContract({ ...r, gate: { ...r.gate, goalposts: 'calc.test.mjs' } }).ok, false, 'goalposts must be an array of paths');
   rmSync(d, { recursive: true, force: true });
+});
+
+// ---- a win is not measured a second time when no goalpost moved. The source-only tree is then the head tree, and the
+// engine measured it again all the same. A number that holds still said the same thing twice. A number that does not (a
+// model-graded eval, a timing) rolled again: on 1,000 runs of one change that edited no test, grader or config, with
+// nothing else changed, 241 read gamed at one run a side, 55 at two and 20 at three (noise-band bench, 2026-11-21).
+// The scorer here counts how often it is asked, in a file outside the repo, and answers 0 from the third ask on.
+const askedRepo = () => {
+  const asked = join(mkdtempSync(join(tmpdir(), 'pw-asked-')), 'n');
+  const d = repoWith({
+    'promptwheel.config.json': JSON.stringify({ linkNodeModules: false, metrics: [{ name: 'score', cmd: 'node measure.mjs', extract: 'number', direction: 'up', guard: true }] }),
+    'measure.mjs': `import { readFileSync, writeFileSync, existsSync } from 'node:fs';\nimport { level } from './src/level.mjs';\nconst f = ${JSON.stringify(asked)};\nconst n = existsSync(f) ? Number(readFileSync(f, 'utf8')) + 1 : 1;\nwriteFileSync(f, String(n));\nconsole.log(n <= 2 ? level : 0);\n`,
+    'src/level.mjs': 'export const level = 0;\n',
+  });
+  return { d, times: () => Number(readFileSync(asked, 'utf8')), done: () => { rmSync(d, { recursive: true, force: true }); rmSync(dirname(asked), { recursive: true, force: true }); } };
+};
+test('a win is not measured a second time when the change moved no goalpost: the scorer is asked once a side, and a third answer cannot turn the win into gamed', () => {
+  const a = askedRepo();
+  writeFileSync(join(a.d, 'src/level.mjs'), 'export const level = 5;\n'); commitAll(a.d, 'a real gain, in the source');
+  const r = check({ repo: a.d, base: 'HEAD~1', head: 'HEAD' }), m = r.metrics[0];
+  assert.deepEqual(r.gate.goalposts, []);
+  assert.equal(a.times(), 2, 'once at the base, once at the head');
+  assert.equal(m.status, 'improved'); assert.equal(m.gamed, false, JSON.stringify(m)); assert.equal(m.retained, 1); assert.equal(m.sourceOnly, 5);
+  assert.match(m.gamingReason, /the source-only tree is the head tree/); assert.match(m.gamingReason, /the source earned it/);
+  assert.equal(r.verdict, 'pass');
+  assert.equal(conformsToContract(r).ok, true, conformsToContract(r).errors.join('; '));
+  a.done();
+});
+test('a win beside a moved goalpost is still re-proved from the source alone: the scorer is asked a third time, and its answer is believed', () => {
+  const a = askedRepo();
+  writeFileSync(join(a.d, 'src/level.mjs'), 'export const level = 5;\n'); writeFileSync(join(a.d, 'level.test.mjs'), '// a test file the change adds\n');
+  commitAll(a.d, 'the same gain, and a test file beside it');
+  const r = check({ repo: a.d, base: 'HEAD~1', head: 'HEAD' }), m = r.metrics[0];
+  assert.deepEqual(r.gate.goalposts, ['level.test.mjs']);
+  assert.equal(a.times(), 3, 'base, head, and the source-only tree');
+  assert.equal(m.gamed, true, JSON.stringify(m)); assert.equal(m.retained, 0); assert.equal(r.verdict, 'gamed');
+  a.done();
+});
+
+// ---- the base's number, kept between runs when the caller asks (--base-cache). A loop that tries many changes against
+// one commit asked the scorer about that commit on every try. Where a run takes minutes or costs money that is half
+// the bill. The scorer here counts how often it is asked, in a file outside the repo, and always prints the level.
+const countedRepo = () => {
+  const asked = join(mkdtempSync(join(tmpdir(), 'pw-count-')), 'n'), keep = mkdtempSync(join(tmpdir(), 'pw-kept-'));
+  const d = repoWith({
+    'promptwheel.config.json': JSON.stringify({ linkNodeModules: false, metrics: [{ name: 'score', cmd: 'node measure.mjs', extract: 'number', direction: 'up', guard: true }] }),
+    'measure.mjs': `import { readFileSync, writeFileSync, existsSync } from 'node:fs';\nimport { level } from './src/level.mjs';\nconst f = ${JSON.stringify(asked)};\nwriteFileSync(f, String((existsSync(f) ? Number(readFileSync(f, 'utf8')) : 0) + 1));\nif (level < 0) process.exit(1);\nconsole.log(level);\n`,
+    'src/level.mjs': 'export const level = 1;\n',
+  });
+  const level = (n, msg) => { writeFileSync(join(d, 'src/level.mjs'), `export const level = ${n};\n`); if (msg) commitAll(d, msg); };
+  return { d, level, keep, times: () => (existsSync(asked) ? Number(readFileSync(asked, 'utf8')) : 0), done: () => { for (const x of [d, dirname(asked), keep]) rmSync(x, { recursive: true, force: true }); } };
+};
+test('--base-cache: the base is measured once across runs, the report says when its number was kept, and the verdict is the one a fresh run gives', () => {
+  const a = countedRepo(), base = rev(a.d);
+  a.level(2, 'a first try');
+  const r1 = check({ repo: a.d, base, head: 'HEAD', baseCache: a.keep });
+  assert.equal(a.times(), 2, 'base and head'); assert.equal(r1.baseMeasured, undefined, 'the base was measured in this run');
+  a.level(3, 'a second try, against the same base');
+  const r2 = check({ repo: a.d, base, head: 'HEAD', baseCache: a.keep });
+  assert.equal(a.times(), 3, 'only the head was run');
+  assert.match(r2.baseMeasured, /^\d{4}-\d\d-\d\dT/, 'the report says when the kept number was measured');
+  assert.equal(r2.metrics[0].before, 1); assert.equal(r2.metrics[0].status, 'improved'); assert.equal(r2.verdict, 'pass');
+  const fresh = check({ repo: a.d, base, head: 'HEAD' });
+  assert.equal(a.times(), 5, 'without the folder nothing is kept and nothing is read');
+  assert.equal(fresh.baseMeasured, undefined); assert.equal(fresh.provenance.verdictHash, r2.provenance.verdictHash);
+  assert.equal(conformsToContract(r2).ok, true, conformsToContract(r2).errors.join('; '));
+  const cli = pw(a.d, ['run', '--base', base, '--head', 'HEAD', '--base-cache', a.keep, '--json']);
+  assert.equal(cli.code, 0, cli.out); assert.equal(a.times(), 6); assert.ok(JSON.parse(cli.out).baseMeasured);
+  assert.match(pw(a.d, ['run', '--base', base, '--head', 'HEAD', '--base-cache', a.keep]).out, /base: measured .*not run again/);
+  a.done();
+});
+test('--base-cache: a kept number answers only for the same tree measured the same way, and uncommitted work is held against the kept HEAD', () => {
+  const a = countedRepo(), base = rev(a.d);
+  a.level(2, 'a try');
+  check({ repo: a.d, base, head: 'HEAD', baseCache: a.keep }); assert.equal(a.times(), 2);
+  check({ repo: a.d, base, head: 'HEAD', baseCache: a.keep, repeat: 2 }); assert.equal(a.times(), 6, 'another repeat count: both sides run, twice each');
+  check({ repo: a.d, base: 'HEAD', head: 'HEAD', baseCache: a.keep }); assert.equal(a.times(), 8, 'another commit as the base: its tree was never measured as one');
+  a.level(5);   // not committed
+  const w1 = check({ repo: a.d, working: true, baseCache: a.keep }); assert.equal(a.times(), 9, 'HEAD is kept from the run before, so only the working tree is run');
+  assert.ok(w1.baseMeasured); assert.equal(w1.metrics[0].before, 2); assert.equal(w1.metrics[0].after, 5);
+  a.done();
+});
+test('--base-cache: the folder must sit outside the repository, and a base that gave no number is not kept', () => {
+  const a = countedRepo(), base = rev(a.d);
+  a.level(2, 'a try');
+  for (const inside of [join(a.d, '.kept'), a.d, join(a.d, '.git', 'kept')]) {
+    assert.throws(() => check({ repo: a.d, base, head: 'HEAD', baseCache: inside }), (e) => e.name === 'ConfigError' && e.exitCode === 64 && /outside the repository/.test(e.message), inside);
+  }
+  assert.equal(a.times(), 0, 'refused before anything is run');
+  for (const argv of [['run', '--base-cache'], ['run', '--base-cache', '--json'], ['run', '--base-cache', join(a.d, 'kept')]]) assert.equal(pw(a.d, argv).code, 64, argv.join(' '));
+  const b = countedRepo(); b.level(-1, 'a base whose scorer fails'); const red = rev(b.d); b.level(4, 'a head that works');
+  const r = check({ repo: b.d, base: red, head: 'HEAD', baseCache: b.keep });
+  assert.equal(r.metrics[0].status, 'unmeasurable'); assert.deepEqual(readdirSync(b.keep), [], 'nothing is kept of a base that could not be measured');
+  a.done(); b.done();
 });
 
 // ---- a count that holds for the repo can still fall in one file (proof-bench/outside-repos, gates/RESULT.md: four of
