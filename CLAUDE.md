@@ -12,12 +12,14 @@
 4. **Never touch the user's working tree.** All measurement happens in throwaway git worktrees.
 5. **Outcome over orchestration.** Every feature must serve the question "did a real metric move, provably?" If it doesn't, it belongs in a different tool.
 6. **Open-core.** The CLI + GitHub Action are OSS (Apache-2.0). The paid surface is *later*: hosted cross-repo intelligence + dashboards. Don't build billing/cloud into the core.
+7. **The wheel turns.** (Decided 2026-11-21.) Keep-if-improved (`improve`), the record of every checked run, and the views over it are core, not extras. They were cut in November 2026 with no measurement behind the cut, and put back. This is still not a loop driver (rule 2 stands): `improve` wraps ONE attempt of any agent, and the record is one append-only file with views worked out on each read. The claim that the loop gets better with use stays closed until `bench/compounding-ab.mjs` opens it.
 
 ## Layout
 
-- `bin/promptwheel.mjs` - the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict + the source-only re-run, evaluatorPaths auto-fail and gate integrity; commands run/init/lock/pr-allow). ~1500 LOC. `bin/promptwheel.d.ts` is its hand-written type declaration (no build step; a test keeps it in step with the export list).
+- `bin/promptwheel.mjs` - the whole engine (config load → worktree measure ×N → median + noise band → evaluate → verdict + the source-only re-run, evaluatorPaths auto-fail and gate integrity; commands run/init/lock/pr-allow/pr-comment, and the wheel: improve, insights, playbook, suggest, backfill). ~1500 LOC. `bin/promptwheel.d.ts` is its hand-written type declaration (no build step; a test keeps it in step with the export list).
 - `promptwheel.config.json` - example metrics config.
 - `docs/ARCHITECTURE.md` - how the engine works, schemas, the trust model.
+- `docs/LEARNING.md` - the record, `improve` and the views over the record; what may be said about them and the test that would open the claim (`bench/compounding-ab.mjs`).
 - `docs/history/` - the original pivot rationale (`VISION.md`) and the phased plan (`ROADMAP.md`); historical, not maintained.
 
 ## Run / verify

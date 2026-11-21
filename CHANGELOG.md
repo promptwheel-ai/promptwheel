@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased: the wheel, put back
+
+`improve`, the record of every checked run, and the views over it (`insights`, `playbook`, `suggest`, `backfill`) were built in June and July 2026 and removed in November (0.7.5 and 0.8.0) for a smaller surface. Neither cut followed a measurement. They are back, with these changes.
+
+- **The record is one short row a run, in the repo's git folder.** Not in the working tree: no run leaves a file to commit or ignore, and every worktree of a repo writes the one record. A row holds the verdict, each measure before and after, and the top folders the change landed in. Nothing a person typed is in it: the command line of an attempt is no longer kept, and a label is there only when `--label` gave one. A record written before 0.8.0 is still read where it is.
+- **`run` adds a row again, unless `--no-record`.** The report is not changed. The library's `check()` adds a row only with `record: true`.
+- **`improve` does not keep more tests alone.** A count that only guards going up is not a win. An attempt that makes commits of its own is folded back and checked as one change (it used to pass unchecked: the tree looked clean). An attempt's own output goes to stderr, so `--json` is the report alone. A plain `git status` that hides untracked files no longer lets `improve` start on a tree that holds a person's work.
+- **The playbook lists what was tried and thrown away,** newest first, with the measured reason.
+- **`suggest` names the least tried arm after three attempts with nothing kept,** and offers no measure that is gone from the contract and no count that only guards. On the first real record the views met (224 rows from before 0.8.0), the four arms it put first were measures no contract held any more.
+- **What is not claimed:** that the loop gets better with use. `bench/compounding-ab.mjs` is the test, and it has not been run on real use. See `docs/LEARNING.md`.
+- New exports: `foldOutcomes`, `betaMean`, `scoreKey`. New options on `check()`: `record`, `label`.
+
 ## 0.8.16 (2026-11-20): a report that arrived cut
 
 `run` printed its report and called `process.exit()` at once. Node writes to a pipe in the background, and an exit drops what the pipe has not taken yet. So a report larger than a pipe holds arrived cut, with the verdict's exit code: at 146,176 bytes where the reader was quick, at 65,536 where it was slow. Found by running the Action's own two commands on every commit of 994 pull requests. One of them changed 10,753 files, and its report came to 812,136 bytes.

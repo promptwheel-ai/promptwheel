@@ -1396,6 +1396,8 @@ function run(argv) {
     console.error(`no promptwheel.config.json, auto-gating the detected test command: ${config.metrics[0].cmd}  (promptwheel init to customize; --no-auto to require a config)`);
   }
   const report = gate(repo, { base: args.base, head: args.head, working: args.working, repeat: args.repeat, detectGaming: args.detectGaming, allow: args.allow, config });
+  // one short row in the record (the git folder, never the tree), unless --no-record. The report is not changed by it.
+  if (!args.noRecord) recordRun(repo, report, config ?? loadConfig(repo), { label: args.label });
   if (args.json) console.log(JSON.stringify(report, null, 2));
   else if (args.markdown) console.log(renderMarkdown(report));
   else printHuman(report);
@@ -1404,6 +1406,368 @@ function run(argv) {
   // report larger than a pipe holds arrived cut, with the verdict's exit code (at 146,176 bytes when the reader was
   // quick, at 65,536 when it was slow). The report lists every test and config file a change touches.
   process.exitCode = verdictExitCode(report.verdict);
+}
+
+// ---------------------------------------------------------------------------
+// The wheel: the record of every checked run, `improve` (keep a change only if a measure improved), and the views over
+// the record. Built in June and July 2026, removed in November (0.7.5 and 0.8.0) for a smaller surface with no
+// measurement behind either cut, and put back. What holds from the first build:
+//   - ONE STORE. The record is append-only, and every view is worked out from it on each read. Nothing else is kept.
+//   - EVIDENCE FIRST. A key earns a line only past MIN_MOVED weighted runs in which it moved. Below that it is counted.
+//   - THE CLAIM WAITS. No page says the loop gets better with use until bench/compounding-ab.mjs shows the arm that is
+//     given the playbook beating the arm that is not, on real use (docs/LEARNING.md).
+// What changed on the way back: the row is short, the record lives in the git folder that worktrees share, no command
+// line is kept, a count of tests going up is not a win, an attempt that commits is still checked as one change, and a
+// thrown-away attempt says why.
+// The record never changes a verdict: anything that can write to the repo can write to it, so it is read as a hint.
+// ---------------------------------------------------------------------------
+const HALF_LIFE = 20;   // runs: a row counts half as much every HALF_LIFE runs after it
+const MIN_MOVED = 3;    // weighted runs in which a key moved, before it earns a line
+const EXPLORE_C = 1.0;  // how much the least tried arm is favoured (UCB)
+const STALL_W = 3;      // attempts in a row with nothing kept: the search has stalled (the window RRSI uses in all three of its domains)
+
+// the record's file: in the git folder, the one every worktree of the repo shares. Not in the working tree: it is the
+// loop's own state and not part of a change, so no attempt's `git add -A` takes it in and no `git clean` removes it.
+function recordFile(repo) {
+  const c = git(['rev-parse', '--git-common-dir'], repo);
+  return join(isAbsolute(c) ? c : join(repo, c), 'promptwheel', 'outcomes.jsonl');
+}
+// rows, oldest first. A record written before 0.8.0 lived in the working tree: it is read first where it still is,
+// and never written again. A line that is not a row (cut, or not JSON) is skipped.
+function readRecord(repo) {
+  const rows = [];
+  for (const f of [join(repo, '.promptwheel', 'outcomes.jsonl'), recordFile(repo)]) {
+    let text = ''; try { text = readFileSync(f, 'utf8'); } catch { continue; }
+    for (const l of text.split('\n')) {
+      if (!l) continue;
+      try { const r = JSON.parse(l); if (r && typeof r === 'object' && !Array.isArray(r)) rows.push(r); } catch { /* skipped */ }
+    }
+  }
+  return rows;
+}
+// a name or a label as one short line: a row can be written by anything that can write to the repo, and a view of
+// the record may be handed to an agent
+const oneLine = (s, n) => String(s).replace(/[\u0000-\u001f\u007f`*<>[\]]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, n);
+
+// where a change landed: the top folders of the source files it touched, most files first, three at most. Read from
+// the names alone (no file is opened), so a row costs one `git diff --name-only` on top of the check.
+function subsystemsOf(names, cfg) {
+  const isEval = evaluatorMatcher(cfg), counts = {};
+  for (const p of names) {
+    if (isNonSource(p) || isEval(p)) continue;
+    const d = p.includes('/') ? p.slice(0, p.indexOf('/')) : '(root)';
+    counts[d] = (counts[d] || 0) + 1;
+  }
+  return Object.entries(counts).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([d]) => d);
+}
+
+// One short row for one checked run: what was measured and where the change landed. Nothing a person typed is in
+// it; a label is there only when --label gave one. Under 4 KB, written with one append, so two runs at once (two
+// worktrees) do not cut each other's row. It never fails a check.
+const ROW_MAX = 3800;
+function recordRun(repo, report, cfg, extra = {}) {
+  try {
+    const p = report.provenance || {};
+    const base = p.baseSha || report.base, head = p.headSha || report.head;
+    let names = []; try { names = gitNames(['diff', '--name-only', '--no-renames', base, head], repo); } catch { /* a ref that is gone */ }
+    const row = {
+      ts: new Date().toISOString(), base: report.base, head: report.head, mode: report.mode, verdict: report.verdict,
+      cohort: extra.cohort ?? (process.env.CI ? 'ci' : 'local'),
+      ...(extra.label ? { label: oneLine(extra.label, 80) } : {}),
+      files: names.length, subsystems: subsystemsOf(names, cfg),
+      metrics: (report.metrics || []).map((m) => ({ name: oneLine(m.name, 60), guard: !!m.guard, ...(m.tripwire ? { tripwire: true } : {}), before: m.before ?? null, after: m.after ?? null, delta: m.delta ?? null, status: m.status })),
+      ...(extra.result ? { result: extra.result } : {}),
+      ...(extra.because && extra.because.length ? { because: extra.because.slice(0, 10).map((x) => oneLine(x, 60)) } : {}),
+      ...(extra.commit ? { commit: extra.commit } : {}),
+    };
+    let line = JSON.stringify(row);
+    if (line.length > ROW_MAX) { row.metrics = row.metrics.filter((m) => m.status !== 'unchanged'); row.cut = true; line = JSON.stringify(row); }
+    if (line.length > ROW_MAX) { row.metrics = row.metrics.slice(0, 12); line = JSON.stringify(row); }
+    if (line.length > ROW_MAX) return;
+    const f = recordFile(repo);
+    mkdirSync(dirname(f), { recursive: true });
+    appendFileSync(f, line + '\n');
+  } catch { /* the record must never break a check */ }
+}
+
+// put the tree back where an attempt started. Only what the attempt made is removed: improve does not start on a tree
+// that holds work of the person's, tracked or not.
+function revert(repo, to) {
+  git(['reset', '--hard', to], repo);
+  try { git(['clean', '-fd'], repo); } catch { /* best effort */ }
+}
+
+// keep-if-improved: run any agent or script, check what it changed, and keep the change ONLY if a measure improved.
+// The exit codes are the check's own, so `while promptwheel improve --attempt "..."; do :; done` stops at the first
+// attempt that is not kept: 0 kept (one commit) · 1 a guard got worse, a protected path was changed, or the repo's own
+// commit hook refused · 2 gamed · 3 nothing improved, or nothing could be measured. In every case but the first the
+// tree is put back as it was.
+function improve(argv) {
+  const args = parseArgs(argv);
+  if (!args.attempt) bad('promptwheel improve: needs --attempt "<a command that changes the repo>"');
+  const repo = repoRoot(process.cwd());
+  let config;
+  if (!hasConfigFile(repo) && !args.noAuto) config = autoConfig(repo);
+  const here = () => {
+    let branch = ''; try { branch = git(['symbolic-ref', '-q', 'HEAD'], repo); } catch { /* no branch */ }
+    return { sha: git(['rev-parse', '--verify', 'HEAD'], repo), branch };
+  };
+  let start; try { start = here(); } catch { bad('promptwheel improve: no commits yet, make a first commit'); }
+  // --untracked-files=all is said out loud: a person's own git config can hide untracked files from a plain status
+  if (git(['status', '--porcelain', '--untracked-files=all'], repo)) bad('promptwheel improve: the working tree is not clean. Commit or stash first: a thrown-away attempt is undone with git reset and git clean, and that must not take your own work with it');
+
+  // the attempt's own output goes to stderr, so stdout carries the report and nothing else; it reads no input
+  console.error(`▶ attempt: ${args.attempt}`);
+  try { execSync(args.attempt, { cwd: repo, stdio: ['ignore', 2, 2] }); }
+  catch (e) { console.error(`  (the attempt ended with code ${e.status ?? 1}; checking whatever it changed)`); }
+
+  const now = here();
+  if (now.branch !== start.branch) bad(`promptwheel improve: the attempt left the repo on another branch (${now.branch || 'no branch'}). Nothing was checked and nothing was changed`);
+  if (now.sha !== start.sha) {
+    let ahead = true; try { git(['merge-base', '--is-ancestor', start.sha, now.sha], repo); } catch { ahead = false; }
+    if (!ahead) bad('promptwheel improve: the attempt rewrote the history it started on. Nothing was checked and nothing was changed');
+    // the attempt made commits of its own. They are folded back into the tree, so the whole attempt is ONE change,
+    // checked as one: a commit an agent makes is not a way past the check, and a reason in its message is not read.
+    const n = git(['rev-list', '--count', `${start.sha}..${now.sha}`], repo);
+    git(['reset', '--soft', start.sha], repo);
+    console.error(`  (the attempt made ${n} commit${n === '1' ? '' : 's'} of its own: checked as one change)`);
+  }
+
+  const report = gate(repo, { working: true, repeat: args.repeat, detectGaming: args.detectGaming, config });
+  // a count that only guards (tests, assertions) going up is not a win: nothing was earned from the source
+  const wins = report.metrics.filter((m) => m.status === 'improved' && !m.tripwire).map((m) => m.name);
+  const counts = report.metrics.filter((m) => m.status === 'improved' && m.tripwire).map((m) => m.name);
+  let result, exit, note, because = [], commit;
+  if (report.verdict === 'fail') {
+    result = 'regression'; exit = 1; note = '✗ a guard got worse, or a protected path was changed: put back';
+    because = [...report.metrics.filter((m) => m.guard && !m.ok).map((m) => m.name), ...(report.mandates || []).map((v) => `mandate:${v.name}`)];
+  } else if (report.verdict === 'gamed') {
+    result = 'gamed'; exit = 2; note = '🚩 gamed, a measure went up by a change to the tests or the contract and not the source: put back';
+    because = [...report.metrics.filter((m) => m.gamed || m.unprovable).map((m) => m.name), ...(report.gate && report.gate.weakened && !report.gate.allowed ? ['gate'] : [])];
+  } else if (report.verdict === 'inconclusive') {
+    result = 'inconclusive'; exit = 3; note = '≈ inconclusive, a guard could tell nothing (it failed or could not run both before and after, or its win could not be re-run from the source alone): put back';
+    because = report.metrics.filter((m) => m.inert || m.unprovable || m.status === 'inconclusive').map((m) => m.name);
+  } else if (!wins.length) {
+    result = 'plateau'; exit = 3; because = counts;
+    note = counts.length ? `= only ${counts.join(', ')} moved, a count that guards and is not a goal: put back` : '= nothing improved: put back';
+  } else {
+    git(['add', '-A'], repo);
+    let staged = true; try { git(['diff', '--cached', '--quiet'], repo); staged = false; } catch { /* something is staged */ }
+    if (!staged) { result = 'plateau'; exit = 3; note = '= a measure moved, but the attempt changed no file that git tracks: nothing to keep'; }
+    else {
+      const msg = `promptwheel improve: ${args.label ? oneLine(args.label, 80) : 'kept'} (improved ${wins.join(', ')})`;
+      try {
+        execFileSync('git', ['commit', '-qm', msg], { cwd: repo, stdio: ['ignore', 2, 2] });
+        commit = git(['rev-parse', '--short', 'HEAD'], repo);
+        result = 'kept'; exit = 0; note = `✓ kept, committed ${commit} (improved ${wins.join(', ')})`;
+      } catch { result = 'refused'; exit = 1; note = "✗ the repo's own commit hook refused the change: put back"; }
+    }
+  }
+  if (result !== 'kept') revert(repo, start.sha);
+  if (!args.noRecord) recordRun(repo, report, config ?? loadConfig(repo), { label: args.label, result, because, commit });
+
+  // stdout carries the report (JSON, or the table); the decision line goes to stderr, so a loop's driver reads clean
+  // stdout. The code is set and the process ends by itself, so a large report is written whole (see run).
+  if (args.json) console.log(JSON.stringify({ result, ...(because.length ? { because } : {}), ...report }, null, 2));
+  else printHuman(report);
+  console.error(`  ${note}`);
+  process.exitCode = exit;
+}
+
+// how reliably each measure responds, straight from the record. No model.
+function insights(argv) {
+  const args = parseArgs(argv);
+  const repo = repoRoot(process.cwd());
+  const runs = readRecord(repo);
+  if (!runs.length) bad('promptwheel insights: no record yet. Run the check a few times first (promptwheel run, or promptwheel backfill for past commits)');
+  const agg = {};
+  for (const r of runs) for (const m of (Array.isArray(r.metrics) ? r.metrics : [])) {
+    if (!m || typeof m.name !== 'string') continue;
+    const a = agg[m.name] ??= { runs: 0, improved: 0, regressed: 0, inconclusive: 0, unchanged: 0, net: 0, last: null };
+    a.runs++; if (typeof a[m.status] === 'number' && m.status !== 'runs' && m.status !== 'net') a[m.status]++;
+    if (typeof m.delta === 'number') a.net = +(a.net + m.delta).toFixed(6);
+    a.last = m.after ?? null;
+  }
+  // "lever" = how often a run made this measure better
+  const rows = Object.entries(agg).map(([name, a]) => ({ name, ...a, lever: a.runs ? a.improved / a.runs : 0 })).sort((x, y) => y.lever - x.lever);
+  const attempts = runs.filter((r) => typeof r.result === 'string');
+  const kept = attempts.filter((r) => r.result === 'kept').length;
+  if (args.json) { console.log(JSON.stringify({ runs: runs.length, attempts: attempts.length, kept, metrics: rows }, null, 2)); return; }
+  console.log(`\nPromptWheel insights, ${runs.length} checked runs in the record${attempts.length ? ` (${attempts.length} attempts of the loop, ${kept} kept)` : ''}\n`);
+  console.log(`  ${'measure'.padEnd(26)} ${'runs'.padStart(5)} ${'up'.padStart(5)} ${'worse'.padStart(5)} ${'unsure'.padStart(6)} ${'net'.padStart(9)}  lever`);
+  for (const r of rows) console.log(`  ${oneLine(r.name, 26).padEnd(26)} ${String(r.runs).padStart(5)} ${String(r.improved).padStart(5)} ${String(r.regressed).padStart(5)} ${String(r.inconclusive).padStart(6)} ${String(r.net).padStart(9)}  ${(r.lever * 100).toFixed(0)}%`);
+  console.log('\n  lever = runs that made the measure better, out of all runs. It says where a change has paid here before.\n');
+}
+
+// fold the record into decayed counts for each key. Keys: `metric` · `metric @ folder` · `metric # label`
+function foldOutcomes(runs) {
+  const keys = new Map();
+  const N = runs.length;
+  runs.forEach((r, idx) => {
+    const w = Math.pow(0.5, (N - 1 - idx) / HALF_LIFE);   // the newest row weighs 1
+    for (const m of (Array.isArray(r && r.metrics) ? r.metrics : [])) {
+      if (!m || typeof m.name !== 'string') continue;
+      const name = oneLine(m.name, 60);
+      const tags = [name];
+      for (const s of (Array.isArray(r.subsystems) ? r.subsystems : [])) if (typeof s === 'string') tags.push(`${name} @ ${oneLine(s, 60)}`);
+      if (typeof r.label === 'string' && r.label) tags.push(`${name} # ${oneLine(r.label, 80)}`);
+      for (const key of tags) {
+        const k = keys.get(key) ?? { key, metric: name, w: 0, n: 0, imp: 0, reg: 0, moved: 0, effects: [], cohorts: {}, last: null };
+        k.n += 1; k.w += w;
+        const coh = (k.cohorts[typeof r.cohort === 'string' ? oneLine(r.cohort, 20) : 'unknown'] ??= { imp: 0, reg: 0 });
+        if (m.status === 'improved') {
+          k.imp += w; k.moved += w; coh.imp += 1;
+          if (typeof m.delta === 'number' && m.delta !== 0) k.effects.push(Math.abs(m.delta));
+        } else if (m.status === 'regressed') { k.reg += w; k.moved += w; coh.reg += 1; }
+        k.last = typeof r.ts === 'string' ? r.ts : k.last;
+        keys.set(key, k);
+      }
+    }
+  });
+  return [...keys.values()];
+}
+
+const betaMean = (imp, reg) => (1 + imp) / (2 + imp + reg);   // how often it helped, pulled toward a half while there is little to go on
+
+// lever = how often it helped × how often it moved; the UCB score adds a bonus that shrinks as a key is tried more
+function scoreKey(k, totalW) {
+  const p = betaMean(k.imp, k.reg);
+  const move = k.w ? k.moved / k.w : 0;
+  const lever = p * move;
+  const ucb = lever + EXPLORE_C * Math.sqrt(Math.log(Math.max(Math.E, totalW)) / Math.max(1e-6, k.w));
+  return { p: +p.toFixed(3), move: +move.toFixed(3), lever: +lever.toFixed(3), ucb: +ucb.toFixed(3), effect: +(median(k.effects) ?? 0).toFixed(6) };
+}
+
+// where the same key went one way on one kind of run and the other way on another, it is said, never averaged away
+function cohortNote(k) {
+  const cs = Object.entries(k.cohorts).filter(([, c]) => c.imp + c.reg > 0);
+  if (cs.length < 2) return '';
+  const signs = new Set(cs.map(([, c]) => Math.sign(c.imp - c.reg)));
+  return signs.size > 1 ? ` · ⚠ differs by where it ran (${cs.map(([n]) => n).join(' against ')})` : '';
+}
+
+// The contract as it is now. A view offers no arm for a measure that is gone from it, and a count that only guards
+// (gamingCheck: false: tests, assertions) is never offered as a goal. Found on the first real record the views met.
+function contractNow(repo) {
+  try {
+    const cfg = hasConfigFile(repo) ? loadConfig(repo) : autoConfig(repo);
+    const names = new Set(), guards = new Set();
+    for (const m of cfg.metrics || []) { if (!m || typeof m.name !== 'string') continue; names.add(m.name); if (m.gamingCheck === false) guards.add(m.name); }
+    return { names, guards };
+  } catch { return null; }   // no contract that can be read: nothing is left out
+}
+
+function loadEntries(repo, cmd) {
+  const runs = readRecord(repo);
+  if (!runs.length) bad(`promptwheel ${cmd}: no record yet. Run the check a few times first (promptwheel run, or promptwheel backfill for past commits)`);
+  const keys = foldOutcomes(runs);
+  const totalW = keys.filter((k) => k.key === k.metric).reduce((s, k) => s + k.w, 0);
+  const now = contractNow(repo);
+  const entries = keys.map((k) => ({ ...k, ...scoreKey(k, totalW), sufficient: k.moved >= MIN_MOVED, ...(now && !now.names.has(k.metric) ? { retired: true } : {}), ...(now && now.guards.has(k.metric) ? { tripwire: true } : {}) }))
+    .sort((a, b) => b.lever - a.lever || b.w - a.w);
+  return { runs, entries };
+}
+
+// what the loop tried and threw away, newest first, each with the measured reason. RRSI keeps a rejected edit in its
+// log as evidence against trying the same thing again. Whether this list changes what a later attempt does is NOT
+// measured: in a session a line that only states the fact did not carry it, and the reason did (docs/LEARNING.md).
+const THROWN = new Set(['regression', 'gamed', 'inconclusive', 'plateau', 'refused']);
+const strings = (a, n, len) => (Array.isArray(a) ? a : []).filter((x) => typeof x === 'string' && x).slice(0, n).map((x) => oneLine(x, len));
+function triedOf(runs) {
+  return runs.filter((r) => THROWN.has(r.result)).reverse().slice(0, 30).map((r) => ({
+    ts: typeof r.ts === 'string' ? r.ts : null, result: r.result,
+    ...(typeof r.label === 'string' && r.label ? { label: oneLine(r.label, 80) } : {}),
+    because: strings(r.because, 10, 60), subsystems: strings(r.subsystems, 3, 60), files: typeof r.files === 'number' ? r.files : 0,
+  }));
+}
+function whyThrown(t) {
+  const tick = (a) => a.map((n) => `\`${n}\``).join(', ');
+  const guards = t.because.filter((n) => !n.startsWith('mandate:')), paths = t.because.filter((n) => n.startsWith('mandate:')).map((n) => n.slice(8));
+  if (t.result === 'regression') return [guards.length ? `${tick(guards)} got worse` : '', paths.length ? `a protected path was changed (${tick(paths)})` : ''].filter(Boolean).join('; ') || 'a guard got worse';
+  if (t.result === 'gamed') return guards.length ? `${tick(guards)} went up by a change to the tests or the contract, not the source` : 'the win came from a change to the tests or the contract, not the source';
+  if (t.result === 'inconclusive') return guards.length ? `${tick(guards)} could tell nothing (it failed or could not run both before and after, or its win could not be re-run from the source alone)` : 'nothing could be measured';
+  if (t.result === 'refused') return "the repo's own commit hook refused it";
+  return guards.length ? `only ${tick(guards)} moved, a count that guards and is not a goal` : 'nothing moved';
+}
+const whereThrown = (t) => (t.subsystems.length ? t.subsystems.join(', ') : t.files ? 'no source file' : 'nothing changed');
+
+// what the record has earned here, and what was thrown away, in a form an agent or a person can read before the next try
+function playbook(argv) {
+  const args = parseArgs(argv);
+  const repo = repoRoot(process.cwd());
+  const { runs, entries } = loadEntries(repo, 'playbook');
+  const tried = triedOf(runs);
+  if (args.json) { console.log(JSON.stringify({ runs: runs.length, halfLife: HALF_LIFE, minMoved: MIN_MOVED, entries, tried }, null, 2)); return; }
+  const suff = entries.filter((e) => e.sufficient);
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const out = [];
+  out.push(`## What the record shows here (${runs.length} checked runs; a run counts half as much every ${HALF_LIFE} runs)`);
+  out.push('Every line below was measured by the check. Nothing here is a guess, and a line fades unless new runs earn it again.', '');
+  if (!suff.length) out.push(`_Nothing has earned a line yet. A key needs ${MIN_MOVED} weighted runs in which it moved. ${entries.length} keys are being counted._`);
+  else {
+    for (const e of suff.slice(0, 20)) out.push(`- **${e.key}**: helped ${pct(e.p)} of the times it moved (${e.imp.toFixed(1)} better, ${e.reg.toFixed(1)} worse, weighted), moved in ${pct(e.move)} of runs, middle effect ${e.effect}${cohortNote(e)}${e.retired ? ' · no longer in the contract' : ''}${e.tripwire ? ' · a count that guards, not a goal' : ''}`);
+    const hidden = entries.length - suff.length;
+    if (hidden > 0) out.push('', `_${hidden} more keys have too few runs to earn a line. They are counted, not claimed._`);
+  }
+  if (tried.length) {
+    out.push('', '## Tried and thrown away (newest first)');
+    const seen = new Map();
+    for (const t of tried) { const line = `- ${t.label ? `**${t.label}**: ` : ''}${whyThrown(t)} (in: ${whereThrown(t)})`; seen.set(line, (seen.get(line) || 0) + 1); }
+    for (const [line, n] of [...seen].slice(0, 12)) out.push(n > 1 ? `${line}, ${n} times` : line);
+  }
+  console.log(out.join('\n'));
+}
+
+// where to spend the NEXT attempt: a measure or a place, never code advice. A high score is a lever that has paid, or
+// an arm tried little. When the last STALL_W attempts kept nothing, the search has stalled and the least tried arm is
+// named first: RRSI's exploration slot.
+function suggest(argv) {
+  const args = parseArgs(argv);
+  const repo = repoRoot(process.cwd());
+  const { runs, entries } = loadEntries(repo, 'suggest');
+  const arms = entries.filter((e) => (e.key === e.metric || e.key.includes(' @ ')) && !e.retired && !e.tripwire).sort((a, b) => b.ucb - a.ucb);
+  const retired = new Set(entries.filter((e) => e.retired).map((e) => e.metric)).size;
+  const attempts = runs.filter((r) => typeof r.result === 'string');
+  const stalled = attempts.length >= STALL_W && attempts.slice(-STALL_W).every((r) => r.result !== 'kept');
+  const leastTried = stalled && arms.length ? [...arms].sort((a, b) => a.w - b.w)[0].key : null;
+  if (args.json) { console.log(JSON.stringify({ runs: runs.length, thin: runs.length < 10, stalled, ...(leastTried ? { leastTried } : {}), retired, arms: arms.slice(0, 10) }, null, 2)); return; }
+  console.log(`\nPromptWheel suggest, over ${runs.length} checked runs${runs.length < 10 ? '  (a thin record: mostly a guess, the bonus for what is untried decides)' : ''}\n`);
+  if (stalled) console.log(`  The last ${STALL_W} attempts kept nothing. Try what the record has seen least: ${leastTried}\n`);
+  for (const a of arms.slice(0, 5)) console.log(`  ${a.ucb.toFixed(3)}  ${a.key.padEnd(28)} lever ${a.lever.toFixed(3)} (helped ${a.p}, moved ${a.move}) · moved in ${a.moved.toFixed(1)} of ${a.n} runs${a.sufficient ? '' : ' · too few to earn a line'}`);
+  if (!arms.length) console.log('  (no measure of the contract that can be a goal is in the record yet)');
+  console.log(`\n  score = lever + a bonus for what was tried least. A high score is a lever that has paid, or an arm tried little.${retired ? `\n  Left out: ${retired} measure${retired === 1 ? '' : 's'} in the record that the contract no longer holds.` : ''}\n`);
+}
+
+// fill the record from past commits: each one checked against its parent with the measures as they are NOW. No model.
+// Rows are marked `backfill`: a past commit by a person is not an attempt of the loop, and where the two disagree the
+// playbook says so. The commit's type (fix, feat, refactor, ...) becomes its label.
+function backfill(argv) {
+  const args = parseArgs(argv);
+  const repo = repoRoot(process.cwd());
+  let config;
+  if (!hasConfigFile(repo) && !args.noAuto) config = autoConfig(repo);
+  const listArgs = ['rev-list', '--no-merges'];
+  if (args.since) listArgs.push(`${args.since}..HEAD`); else listArgs.push('-n', String(args.n ?? 30), 'HEAD');
+  const commits = git(listArgs, repo).split('\n').filter(Boolean).reverse();   // oldest first, so the record stays in the order things happened
+  if (!commits.length) bad('promptwheel backfill: no commits to read');
+  const seen = new Set(readRecord(repo).filter((r) => r.cohort === 'backfill').map((r) => r.head));
+  const cfg = config ?? loadConfig(repo);
+  let done = 0, skipped = 0, failed = 0;
+  console.log(`\nreading ${commits.length} commits with the measures as they are now (the source-only re-run is ${args.dgExplicit && args.detectGaming ? 'on' : 'off: pass --detect-gaming to check the past for gamed wins too'})\n`);
+  for (const c of commits) {
+    try { git(['rev-parse', '--verify', '-q', `${c}~1`], repo); } catch { skipped++; continue; }   // the first commit has no parent
+    if (seen.has(short(repo, c))) { skipped++; continue; }                                          // already in the record
+    const subj = git(['log', '-1', '--format=%s', c], repo);
+    const type = /^(feat|fix|docs|test|chore|refactor|perf|ci|build|style)\b/i.exec(subj)?.[1]?.toLowerCase();
+    let report;
+    try { report = gate(repo, { base: `${c}~1`, head: c, repeat: args.repeat, detectGaming: args.dgExplicit ? args.detectGaming : false, config }); }
+    catch (e) { if (e && e.name === 'ConfigError') { failed++; continue; } throw e; }
+    recordRun(repo, report, cfg, { label: type, cohort: 'backfill' });
+    console.log(`  ${report.head} ${report.verdict.toUpperCase().padEnd(12)} ${(type ? `#${type}` : '').padEnd(10)} ${oneLine(subj, 56)}`);
+    done++;
+  }
+  console.log(`\n  ${done} commits added to the record${skipped ? ` (${skipped} left out: the first commit, or already there)` : ''}${failed ? ` (${failed} could not be checked)` : ''}. An old commit that no longer builds is recorded as not measured, never made up.`);
+  console.log('  next:  promptwheel playbook   ·   promptwheel suggest\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -1876,9 +2240,14 @@ function parseArgs(argv) {
     else if (argv[i] === '--repeat') a.repeat = parseInt(argv[++i], 10);
     else if (argv[i] === '--working') a.working = true;
     else if (argv[i] === '--no-auto') a.noAuto = true;
+    else if (argv[i] === '--no-record') a.noRecord = true;
+    else if (argv[i] === '--label') a.label = argv[++i];
+    else if (argv[i] === '--attempt') a.attempt = argv[++i];
+    else if (argv[i] === '--since') a.since = argv[++i];
+    else if (argv[i] === '-n' || argv[i] === '--limit') a.n = parseInt(argv[++i], 10);
     else if (argv[i] === '--allow') a.allow = argv[++i];
-    else if (argv[i] === '--detect-gaming') a.detectGaming = true;
-    else if (argv[i] === '--no-detect-gaming') a.detectGaming = false;
+    else if (argv[i] === '--detect-gaming') { a.detectGaming = true; a.dgExplicit = true; }
+    else if (argv[i] === '--no-detect-gaming') { a.detectGaming = false; a.dgExplicit = true; }
     else if (argv[i] === '--json') a.json = true;
     else if (argv[i] === '--markdown') a.markdown = true;
   }
@@ -1887,7 +2256,7 @@ function parseArgs(argv) {
 
 // pure, side-effect-free helpers are exported for unit testing; the CLI below only
 // runs when this file is executed directly (not when imported by the test suite).
-export { MISSING_DEP, extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint };
+export { MISSING_DEP, extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint, foldOutcomes, betaMean, scoreKey };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Public library API: the Verified-Outcome Contract, in process.
@@ -1948,7 +2317,7 @@ export function check(options = {}) {
     config = autoConfig(repo);   // zero-config: gate the detected test command in process
   }
 
-  return gate(repo, {
+  const report = gate(repo, {
     base: options.base,
     head: options.head,
     working: options.working,
@@ -1957,6 +2326,9 @@ export function check(options = {}) {
     detectGaming: options.detectGaming ?? true,
     allow: options.allow,
   });
+  // the library writes no row unless asked: a caller that keeps its own record (Sawbuck) decides
+  if (options.record === true) recordRun(repo, report, config ?? loadConfig(repo), { label: options.label });
+  return report;
 }
 
 // changeCounts(options) -> { [metric name]: { delta, files: { path: [before, after] } } | null } | null
@@ -2073,15 +2445,21 @@ export function conformsToContract(report) {
 // the flags each command accepts. An unknown --flag is a usage error (exit 64), never silently
 // ignored: a typo in a CI step must not turn `--no-detect-gaming` into the default gate or `--allow`
 // into nothing, and INTEGRATE.md promises a bad flag exits 64. A flag that takes a value consumes
-// the next argument; anything not starting with `-` is positional. --no-record does nothing now that
-// no record is written, and stays accepted because Sawbuck and existing CI steps pass it.
-const GATE_FLAGS = ['--base', '--head', '--repeat', '--working', '--no-record', '--no-auto', '--allow', '--detect-gaming', '--no-detect-gaming', '--json', '--markdown'];
+// the next argument; anything not starting with `-` is positional. --no-record checks without adding a row
+// to the record (Sawbuck and some CI steps pass it). `improve` takes no --allow: a person lets a change through,
+// not a loop.
+const GATE_FLAGS = ['--base', '--head', '--repeat', '--working', '--no-record', '--no-auto', '--allow', '--detect-gaming', '--no-detect-gaming', '--json', '--markdown', '--label'];
 const COMMAND_FLAGS = {
   run: GATE_FLAGS, init: ['--preset', '--list', '--force', '--no-agent-block'], lock: [],
+  improve: ['--attempt', '--label', '--repeat', '--no-record', '--no-auto', '--detect-gaming', '--no-detect-gaming', '--json'],
+  insights: ['--json'], playbook: ['--json'], suggest: ['--json'],
+  backfill: ['-n', '--limit', '--since', '--repeat', '--no-auto', '--detect-gaming', '--no-detect-gaming'],
 };
 // what each valued flag needs. A missing or unusable value is a usage error too: `--repeat abc` must not
 // measure nothing and read FAIL, and `--allow` with nothing after it must not run as if no reason was asked for.
-const VALUED_FLAGS = { '--base': 'a ref', '--head': 'a ref', '--repeat': 'a whole number, 1 or more', '--allow': 'a reason, e.g. --allow "the spec changed"', '--preset': 'a preset name (see promptwheel init --list)' };
+const VALUED_FLAGS = { '--base': 'a ref', '--head': 'a ref', '--repeat': 'a whole number, 1 or more', '--allow': 'a reason, e.g. --allow "the spec changed"', '--preset': 'a preset name (see promptwheel init --list)',
+  '--attempt': 'a command that changes the repo, e.g. --attempt "claude -p \'fix the failing test\'"', '--label': 'a short name for this change, e.g. --label "cache the lookup"',
+  '--since': 'a ref', '-n': 'a whole number, 1 or more', '--limit': 'a whole number, 1 or more' };
 function checkFlags(cmd, argv) {
   const known = new Set(COMMAND_FLAGS[cmd]);
   for (let i = 0; i < argv.length; i++) {
@@ -2094,7 +2472,7 @@ function checkFlags(cmd, argv) {
     // an empty --base or --head is the default ref: the Action passes an empty base outside a pull request
     const blank = !gone && !v.trim() && !(v === '' && (a === '--base' || a === '--head'));
     if (gone || blank) bad(`promptwheel ${cmd}: ${a} needs ${VALUED_FLAGS[a]}`);
-    if (a === '--repeat' && !/^[1-9]\d*$/.test(v)) bad(`promptwheel ${cmd}: --repeat needs ${VALUED_FLAGS[a]} (got "${v}")`);
+    if ((a === '--repeat' || a === '-n' || a === '--limit') && !/^[1-9]\d*$/.test(v)) bad(`promptwheel ${cmd}: ${a} needs ${VALUED_FLAGS[a]} (got "${v}")`);
   }
 }
 
@@ -2160,6 +2538,11 @@ function dispatch() {
   else if (cmd === 'pr-comment') prComment(rest);
   else if (cmd === 'init') init(rest);
   else if (cmd === 'lock') return lock(rest);
+  else if (cmd === 'improve') improve(rest);
+  else if (cmd === 'insights') insights(rest);
+  else if (cmd === 'playbook') playbook(rest);
+  else if (cmd === 'suggest') suggest(rest);
+  else if (cmd === 'backfill') backfill(rest);
   else {
     const help = !cmd || cmd === '--help' || cmd === '-h' || cmd === 'help';
     if (!help) console.error(`unknown command: ${cmd}`);
@@ -2174,6 +2557,12 @@ function dispatch() {
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',
       '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
+      '  promptwheel improve --attempt "<cmd>" [--label "<name>"] [--json]   the loop: run any agent or script, check what it changed, and keep it (one commit) only if a measure improved;',
+      '                                               if not, the tree is put back. Exit 0 kept · 1 a guard got worse · 2 gamed · 3 nothing improved. The tree must be clean first.',
+      '  promptwheel insights [--json]                how each measure has responded, from the record of checked runs (kept in the git folder, never in the tree; run --no-record adds no row)',
+      '  promptwheel playbook [--json]                what has paid here, and what the loop tried and threw away, with the measured reason',
+      '  promptwheel suggest [--json]                 where to spend the next attempt (a lever that has paid, or what was tried least)',
+      '  promptwheel backfill [-n N | --since <ref>]  fill the record from past commits (marked backfill; a commit\'s type becomes its label)',
       '  promptwheel pr-allow < comments.json         print the newest `sawbuck-allow: <reason>` from a PR comment by someone with write access (the Action uses it;',
       '                                               --author <login> leaves out the account that opened the PR, unless the contract at --base <ref> says "allowFromAuthor": true)',
       '  promptwheel pr-comment --report <file> ...   what the Action does with its one comment on a pull request: prints none, create or update:<id>, and writes the comment (the Action uses it)',

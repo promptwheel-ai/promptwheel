@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extract, evaluate, median, spread, renderMarkdown, isNonSource, evaluatorMatcher, gain, judgeGaming, verdictFingerprint,
-  allowFromComments, check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION, deriveVerdict, applyBudgets } from '../bin/promptwheel.mjs';
+  allowFromComments, check, verdictExitCode, conformsToContract, VERDICTS, METRIC_STATUSES, DIRECTIONS, CONTRACT_VERSION, deriveVerdict, applyBudgets, foldOutcomes, betaMean, scoreKey } from '../bin/promptwheel.mjs';
 import { createHash } from 'node:crypto';
 import { realpathSync, chmodSync } from 'node:fs';
 
@@ -2144,10 +2144,11 @@ test('cli: a flag with a missing or unusable value is a usage error (64, one lin
 });
 
 // ------------------------------------------- 0.8.0: the smaller surface
+// improve and insights were in this list from 0.8.0 until the wheel was put back (see the end of this file)
 test('cli: the removed commands and presets are usage errors (64), never a verdict; the kept presets remain', () => {
   const d = tmpRepo([TODOS]);
   writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
-  for (const cmd of ['improve', 'insights', 'guards', 'conformance']) {
+  for (const cmd of ['guards', 'conformance']) {
     const r = pw(d, [cmd]);
     assert.equal(r.code, 64, `${cmd} -> ${r.out}`); assert.match(r.out, new RegExp(`unknown command: ${cmd}`));
   }
@@ -3659,4 +3660,243 @@ test('a report larger than a pipe holds arrives whole through a reader that star
   r = lateReader(); rep = whole(r);
   assert.ok(rep, `the failing report did not arrive whole: ${Buffer.byteLength(r.text)} bytes came`);
   assert.equal(rep.verdict, 'fail'); assert.equal(r.code, 1); assert.equal(rep.gate.goalposts.length, 900);
+});
+
+// ---- The wheel, put back (proof-bench/wheel/PLAN.md, 2026-11-21) ------------------------------------------------------
+// `improve` (run any agent, check what it changed, keep it only if a measure improved), the record of every checked run
+// and the views over it were built in June and July 2026 and removed in November (0.7.5 and 0.8.0) for a smaller
+// surface. Neither cut followed a measurement. The tests below are the old ones, carried over, and what changed on the
+// way back: a short row in the git folder that worktrees share, no command line kept, a count of tests is not a win,
+// an attempt that commits is still checked as one change, and a thrown-away attempt says why.
+const recordPath = (d) => join(d, '.git', 'promptwheel', 'outcomes.jsonl');
+const ledger = (d) => { try { return readFileSync(recordPath(d), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+// stdout and stderr apart: an attempt's own output and the decision line go to stderr, and stdout is the report alone
+const pw2 = (d, args) => { const r = spawnSync(process.execPath, [ENGINE, ...args], { cwd: d, encoding: 'utf8' }); return { code: r.status, out: r.stdout, err: r.stderr }; };
+const gitOut = (d, a) => execFileSync('git', a, { cwd: d, encoding: 'utf8' }).trim();
+const runRow = (status, extra = {}) => ({ ts: '2026-07-02T00:00:00Z', cohort: 'local', metrics: [{ name: 'lint', status, delta: status === 'improved' ? -2 : status === 'regressed' ? 2 : 0 }], ...extra });
+
+test('the record: a run appends one short row in the git folder; --no-record and the library write none; the tree stays clean', () => {
+  const d = repoWith({ 'promptwheel.config.json': JSON.stringify({ linkNodeModules: false, metrics: [TODOS] }), 'app.js': 'a // TODO\nb // TODO\n' });   // no ignore rule in this repo
+  writeFileSync(join(d, 'app.js'), 'a\nb // TODO\n'); commitAll(d, 'one todo out');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  assert.equal(r.code, 0, r.out);
+  const rows = ledger(d); assert.equal(rows.length, 1, 'one row for one run');
+  const row = rows[0];
+  assert.deepEqual(Object.keys(row).sort(), ['base', 'cohort', 'files', 'head', 'metrics', 'mode', 'subsystems', 'ts', 'verdict']);
+  assert.deepEqual(row.metrics, [{ name: 'todos', guard: true, before: 2, after: 1, delta: -1, status: 'improved' }]);
+  assert.equal(row.verdict, 'pass'); assert.equal(row.cohort, process.env.CI ? 'ci' : 'local'); assert.deepEqual(row.subsystems, ['(root)']); assert.equal(row.files, 1);
+  assert.equal(existsSync(join(d, '.promptwheel')), false, 'nothing is written in the working tree');
+  assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '', 'the record does not show in git status');
+  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']); assert.equal(ledger(d).length, 1, '--no-record writes none');
+  check({ repo: d, base: 'HEAD~1', head: 'HEAD' }); assert.equal(ledger(d).length, 1, 'the library writes none unless asked');
+  check({ repo: d, base: 'HEAD~1', head: 'HEAD', record: true }); assert.equal(ledger(d).length, 2, 'and one when asked');
+  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--label', 'remove `todos`\nnow']); assert.equal(ledger(d)[2].label, 'remove todos now', 'a label is kept when the person gives one, as one plain line');
+  // a second worktree of the same repo writes the same record
+  const wt = mkdtempSync(join(tmpdir(), 'pw-wt-')); rmSync(wt, { recursive: true });
+  execFileSync('git', ['worktree', 'add', '-q', wt, '-b', 'side'], { cwd: d, stdio: 'ignore' });
+  assert.equal(pw(wt, ['run', '--base', 'HEAD~1', '--head', 'HEAD']).code, 0);
+  assert.equal(ledger(d).length, 4, 'a run in a worktree lands in the one record'); assert.equal(existsSync(join(wt, '.promptwheel')), false);
+  // a large change: the report runs long, the row does not
+  mkdirSync(join(d, 'fixtures'), { recursive: true });
+  for (let i = 0; i < 1500; i++) writeFileSync(join(d, 'fixtures', `case-${String(i).padStart(4, '0')}.json`), `{"case":${i}}\n`);
+  commitAll(d, 'fifteen hundred fixtures'); pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  const last = readFileSync(recordPath(d), 'utf8').trim().split('\n').pop();
+  assert.equal(JSON.parse(last).files, 1500); assert.ok(last.length < 4096, `the row of a large change is ${last.length} characters`);
+});
+test('the record: rows written before 0.8.0 in the working tree are read first and never written again; a line that is not a row is skipped', () => {
+  const d = tmpRepo([TODOS]);   // this repo ignores .promptwheel/, as every repo that had the old record did
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'app.js'), 'a\nb // TODO\n'); commitAll(d, 'c1');
+  mkdirSync(join(d, '.promptwheel'), { recursive: true });
+  const old = [JSON.stringify({ ts: '2026-07-01T00:00:00Z', verdict: 'pass', cohort: 'local', subsystems: ['(root)'], metrics: [{ name: 'todos', status: 'regressed', delta: 1, after: 3 }], provenance: { tool: 'promptwheel' } }), '{"cut', '[1,2]', '"x"', ''].join('\n');
+  writeFileSync(join(d, '.promptwheel', 'outcomes.jsonl'), old);
+  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  const data = JSON.parse(pw(d, ['insights', '--json']).out);
+  assert.equal(data.runs, 2, 'the old row and the new one'); assert.equal(data.metrics[0].regressed, 1); assert.equal(data.metrics[0].improved, 1);
+  assert.equal(readFileSync(join(d, '.promptwheel', 'outcomes.jsonl'), 'utf8'), old, 'the old file is as it was');
+  // junk in the record never breaks a view
+  writeFileSync(recordPath(d), [JSON.stringify({ metrics: 'no' }), JSON.stringify({ metrics: [null, { name: 7 }, { name: 'todos', status: 'runs' }], subsystems: 'x', label: 9, result: 'gamed', because: 'x' }), ''].join('\n'), { flag: 'a' });
+  for (const c of ['insights', 'playbook', 'suggest']) assert.equal(pw(d, [c]).code, 0, c);
+});
+
+test('improve: keeps on improvement (commits), reverts on regression (no new commit)', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  const base = rev(d);
+  let r = pw(d, ['improve', '--attempt', "sed -i 's| // TODO||' app.js"]);
+  assert.equal(r.code, 0, r.out); // exit 0 = kept (the decision line goes to stderr)
+  const kept = rev(d);
+  assert.notEqual(base, kept); // a commit was made
+  r = pw(d, ['improve', '--attempt', "echo 'x // TODO' >> app.js"]); // regression
+  assert.equal(r.code, 1);
+  assert.equal(rev(d), kept); // reverted, HEAD unchanged
+});
+test('improve: KEEPS a turn that adds a new file', () => {
+  const DONE = { name: 'done', cmd: 'grep -rho DONE . --include=*.js 2>/dev/null | wc -l', extract: 'number', direction: 'up', guard: true };
+  const d = tmpRepo([DONE]);
+  writeFileSync(join(d, 'app.js'), '// start\n'); commitAll(d, 'base');
+  const r = pw(d, ['improve', '--attempt', 'printf "DONE\\n" > done.js']);
+  assert.equal(r.code, 0, r.out);
+  assert.ok(existsSync(join(d, 'done.js')));
+});
+test('improve: exit 0=kept / 1=regression / 3=plateau, with --json result field, and each attempt in the record with its result', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  let r = pw2(d, ['improve', '--json', '--attempt', "echo the attempt speaks; sed -i 's| // TODO||' app.js"]); // improves, and prints
+  assert.equal(r.code, 0); assert.equal(JSON.parse(r.out).result, 'kept', 'stdout is the report alone'); assert.match(r.err, /the attempt speaks/, 'what the attempt prints goes to stderr'); assert.match(r.err, /kept, committed/);
+  r = pw2(d, ['improve', '--json', '--attempt', 'true']);                              // no-op
+  assert.equal(r.code, 3); assert.equal(JSON.parse(r.out).result, 'plateau');
+  r = pw2(d, ['improve', '--json', '--label', 'add a marker', '--attempt', "echo 'z // TODO' >> app.js"]);        // regresses
+  assert.equal(r.code, 1); assert.equal(JSON.parse(r.out).result, 'regression'); assert.deepEqual(JSON.parse(r.out).because, ['todos']);
+  const rows = ledger(d);
+  assert.deepEqual(rows.map((x) => x.result), ['kept', 'plateau', 'regression']);
+  assert.deepEqual(rows[2].because, ['todos'], 'a thrown-away attempt says which guard got worse');
+  assert.equal(rows[2].label, 'add a marker'); assert.equal(rows[0].commit, gitOut(d, ['rev-parse', '--short', 'HEAD']));
+  assert.ok(rows.every((x) => !JSON.stringify(x).includes('sed -i') && !JSON.stringify(x).includes('echo ')), 'the command line of an attempt is not kept');
+  assert.equal(gitOut(d, ['log', '-1', '--format=%s']), 'promptwheel improve: kept (improved todos)', 'nor is it in the commit');
+  assert.equal(pw(d, ['improve', '--no-record', '--attempt', 'true']).code, 3); assert.equal(ledger(d).length, 3, '--no-record adds no row');
+});
+test('improve: a gamed attempt (test edited to pass, source untouched) exits 2 and is reverted', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');   // BUG
+  writeFileSync(join(d, 'calc.test.mjs'), "import { test } from 'node:test'; import assert from 'node:assert'; import { sub } from './calc.mjs'; test('s', () => assert.strictEqual(sub(5, 3), 2));\n");
+  commitAll(d, 'base: red'); const base = rev(d);
+  const r = pw2(d, ['improve', '--json', '--attempt', "sed -i 's|, 2))|, 8))|' calc.test.mjs"]); // green by editing the TEST
+  assert.equal(r.code, 2, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'gamed');
+  assert.equal(rev(d), base);
+  assert.match(readFileSync(join(d, 'calc.test.mjs'), 'utf8'), /, 2\)\)/);
+  assert.equal(ledger(d)[0].result, 'gamed'); assert.deepEqual(ledger(d)[0].because, ['tests_pass']);
+});
+test('improve: more tests and nothing else gained is not a win (a count that guards is not a goal)', () => {
+  const d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test a.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true },
+    { name: 'test_count', cmd: 'grep -rIoE "\\btest ?\\(" --include="*.mjs" . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false }]);
+  writeFileSync(join(d, 'a.test.mjs'), "import { test } from 'node:test';\ntest('a', () => {});\n"); commitAll(d, 'base'); const base = rev(d);
+  const r = pw2(d, ['improve', '--json', '--attempt', "printf \"test('b', () => {});\\n\" >> a.test.mjs"]);
+  assert.equal(r.code, 3, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'plateau'); assert.match(r.err, /only test_count moved/); assert.equal(rev(d), base, 'put back: nothing was earned from the source');
+  assert.deepEqual(ledger(d)[0].because, ['test_count']);
+});
+test('improve: an attempt that makes commits of its own is still checked, as one change', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base'); const base = rev(d);
+  // worse, and committed by the attempt: put back to where it started
+  let r = pw(d, ['improve', '--attempt', "echo 'x // TODO' >> app.js && git commit -qam 'agent: done' && echo 'y // TODO' >> app.js && git commit -qam 'Promptwheel-Allow: trust me'"]);
+  assert.equal(r.code, 1, r.out); assert.equal(rev(d), base, 'the commits of the attempt are gone'); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
+  // better, committed by the attempt, with one more edit left uncommitted: kept as ONE commit of the loop
+  r = pw(d, ['improve', '--attempt', "sed -i '1s| // TODO||' app.js && git commit -qam 'agent: one' && sed -i '2s| // TODO||' app.js"]);
+  assert.equal(r.code, 0, r.out); assert.equal(gitOut(d, ['rev-list', '--count', `${base}..HEAD`]), '1'); assert.equal(rev(d, 'HEAD~1'), base);
+  assert.equal(readFileSync(join(d, 'app.js'), 'utf8'), 'a\nb\n'); assert.equal(gitOut(d, ['log', '-1', '--format=%s']), 'promptwheel improve: kept (improved todos)');
+  // an attempt that leaves the repo on another branch is not judged, and nothing is touched
+  r = pw(d, ['improve', '--attempt', 'git checkout -q -b elsewhere']);
+  assert.equal(r.code, 64); assert.match(r.out, /another branch/); assert.equal(gitOut(d, ['symbolic-ref', '--short', 'HEAD']), 'elsewhere');
+});
+test('improve needs an attempt and a clean tree, and never takes untracked work of the person with it', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  assert.equal(pw(d, ['improve']).code, 64);
+  writeFileSync(join(d, 'notes.txt'), 'mine\n');                                             // untracked work
+  execFileSync('git', ['config', 'status.showUntrackedFiles', 'no'], { cwd: d });           // a setting of the person's that hides it from a plain status
+  const r = pw(d, ['improve', '--attempt', "echo 'x // TODO' >> app.js"]);
+  assert.equal(r.code, 64, r.out); assert.match(r.out, /not clean/); assert.equal(readFileSync(join(d, 'notes.txt'), 'utf8'), 'mine\n');
+});
+
+test('insights: aggregates the record into per-metric stats', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\nc // TODO\n'); commitAll(d, 'base');
+  let r = pw(d, ['insights']); assert.equal(r.code, 64, 'no record yet is said plainly, not a crash'); assert.match(r.out, /no record yet/);
+  writeFileSync(join(d, 'app.js'), 'a\nb // TODO\n'); commitAll(d, 'c1');
+  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']); // records an improvement
+  r = pw(d, ['insights', '--json']);
+  assert.equal(r.code, 0, r.out);
+  const data = JSON.parse(r.out);
+  assert.equal(data.runs, 1); assert.equal(data.metrics[0].name, 'todos'); assert.equal(data.metrics[0].improved, 1);
+});
+test('foldOutcomes: keys by metric, subsystem, and label; counts moved evidence', () => {
+  const runs = [runRow('improved', { subsystems: ['src'], label: 'fix lint' }), runRow('improved', { subsystems: ['src'] }), runRow('regressed', { subsystems: ['docs'] }), runRow('unchanged')];
+  const byKey = Object.fromEntries(foldOutcomes(runs).map((k) => [k.key, k]));
+  assert.ok(byKey['lint'].imp > byKey['lint'].reg);
+  assert.ok(byKey['lint @ src']); assert.ok(byKey['lint # fix lint']);
+  assert.equal(byKey['lint'].n, 4);
+  assert.ok(byKey['lint'].moved < byKey['lint'].w); // an unchanged run adds weight but not movement
+  assert.ok(foldOutcomes([{ metrics: [{ name: 'test_count', status: 'improved', delta: 1 }] }])[0].key === 'test_count', 'an underscore in a name stays');
+});
+test('foldOutcomes: decay, recent outcomes outweigh old ones (order flips the verdict)', () => {
+  const oldGoodNewBad = [...Array(30).fill(0).map(() => runRow('improved')), ...Array(30).fill(0).map(() => runRow('regressed'))];
+  const oldBadNewGood = [...Array(30).fill(0).map(() => runRow('regressed')), ...Array(30).fill(0).map(() => runRow('improved'))];
+  const p1 = betaMean(foldOutcomes(oldGoodNewBad)[0].imp, foldOutcomes(oldGoodNewBad)[0].reg);
+  const p2 = betaMean(foldOutcomes(oldBadNewGood)[0].imp, foldOutcomes(oldBadNewGood)[0].reg);
+  assert.ok(p1 < 0.5, `recent regressions must dominate (p=${p1})`); assert.ok(p2 > 0.5, `recent improvements must dominate (p=${p2})`);
+});
+test('betaMean is pulled toward a half at low evidence, and scoreKey gives the less tried arm the larger bonus', () => {
+  assert.equal(betaMean(0, 0), 0.5); assert.ok(betaMean(1, 0) < 1 && betaMean(1, 0) > 0.5);
+  const s1 = scoreKey({ imp: 8, reg: 2, moved: 10, w: 20, effects: [] }, 100), s2 = scoreKey({ imp: 0.8, reg: 0.2, moved: 1, w: 2, effects: [] }, 100);
+  assert.ok(s2.ucb - s2.lever > s1.ucb - s1.lever, 'the bonus shrinks with evidence');
+});
+test('playbook and suggest run over a real record; the playbook lists what was tried and thrown away, and why; three attempts with nothing kept is a stall', () => {
+  const d = tmpRepo([TODOS]);
+  mkdirSync(join(d, 'app'), { recursive: true });
+  writeFileSync(join(d, 'app/x.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  let r = pw(d, ['playbook']); assert.equal(r.code, 64, 'no record yet is said plainly, not a crash'); assert.match(r.out, /no record yet/);
+  writeFileSync(join(d, 'app/x.js'), 'a\nb\n'); commitAll(d, 'improve');
+  pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--label', 'remove todos']);
+  r = pw(d, ['playbook']); assert.equal(r.code, 0, r.out); assert.match(r.out, /Nothing has earned a line yet/); assert.doesNotMatch(r.out, /Tried and thrown away/);
+  writeFileSync(join(d, 'app/x.js'), 'a\nb // TODO\nc // TODO\n'); commitAll(d, 'regress2'); pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  writeFileSync(join(d, 'app/x.js'), 'a\nb\nc\n'); commitAll(d, 'improve2'); pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  writeFileSync(join(d, 'app/x.js'), 'a // TODO\n'); commitAll(d, 'regress3'); pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
+  r = pw(d, ['playbook']); assert.equal(r.code, 0); assert.match(r.out, /\*\*todos @ app\*\*: helped/);
+  // two attempts of the loop, both thrown away: they are listed with the reason, newest first
+  pw(d, ['improve', '--label', 'mark the file', '--attempt', "echo 'z // TODO' >> app/x.js"]);
+  pw(d, ['improve', '--attempt', 'true']);
+  r = pw(d, ['playbook']);
+  assert.match(r.out, /## Tried and thrown away/); assert.match(r.out, /- nothing moved \(in: nothing changed\)\n- \*\*mark the file\*\*: `todos` got worse \(in: app\)/, r.out);
+  const j = JSON.parse(pw(d, ['playbook', '--json']).out); assert.deepEqual(j.tried.map((t) => t.result), ['plateau', 'regression']);
+  r = pw(d, ['suggest', '--json']); assert.equal(r.code, 0);
+  let s = JSON.parse(r.out); assert.ok(s.arms.length >= 1 && typeof s.arms[0].ucb === 'number'); assert.equal(s.stalled, false, 'two attempts are not a stall');
+  pw(d, ['improve', '--attempt', 'true']);
+  s = JSON.parse(pw(d, ['suggest', '--json']).out); assert.equal(s.stalled, true); assert.equal(typeof s.leastTried, 'string');
+  assert.match(pw(d, ['suggest']).out, /The last 3 attempts kept nothing/); assert.match(pw(d, ['playbook']).out, /- nothing moved \(in: nothing changed\), 2 times/);
+});
+test('backfill: seeds the record oldest first, marked as backfill, commit types as labels, and a second run adds nothing', () => {
+  const d = tmpRepo([TODOS]);
+  writeFileSync(join(d, 'x.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'x.js'), 'a\nb // TODO\n'); commitAll(d, 'fix: remove a todo');
+  writeFileSync(join(d, 'x.js'), 'a\nb // TODO\nc // TODO\n'); commitAll(d, 'feat: add thing');
+  writeFileSync(join(d, 'x.js'), 'a\nb\nc\n'); commitAll(d, 'refactor: clean up');
+  writeFileSync(join(d, 'x.js'), 'a // TODO\nb\nc\n'); commitAll(d, 'test: reintroduce one');
+  let r = pw(d, ['backfill', '-n', '10']); assert.equal(r.code, 0, r.out);
+  const rows = ledger(d);
+  assert.equal(rows.length, 4);                                 // the first commit has no parent to hold it against
+  assert.ok(rows.every((x) => x.cohort === 'backfill'));
+  assert.deepEqual(rows.map((x) => x.label), ['fix', 'feat', 'refactor', 'test']);
+  assert.deepEqual(rows.map((x) => x.metrics[0].status), ['improved', 'regressed', 'improved', 'regressed']);
+  r = pw(d, ['backfill', '-n', '10']); assert.equal(r.code, 0); assert.equal(ledger(d).length, 4);
+  r = pw(d, ['playbook']); assert.equal(r.code, 0); assert.match(r.out, /todos/);
+  assert.equal(pw(d, ['backfill', '-n', 'ten']).code, 64, 'a count that is not a number is a usage error');
+});
+test('the wheel in the CLI: --help names each command, and an unknown flag to one is a usage error', () => {
+  const r = pw(tmpdir(), ['--help']);
+  for (const c of ['improve', 'insights', 'playbook', 'suggest', 'backfill']) assert.match(r.out, new RegExp(`promptwheel ${c}\\b`), c);
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  assert.equal(pw(d, ['improve', '--attempt', 'true', '--allow', 'because']).code, 64, 'the loop takes no reason: a person lets a change through, not a loop');
+  assert.equal(pw(d, ['improve', '--attempt']).code, 64);
+});
+test('the compounding test: its own self-test passes (scripted attempts, no agent)', () => {
+  const r = spawnSync(process.execPath, [join(dirname(ENGINE), '..', 'bench', 'compounding-ab.mjs'), '--self-test'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, /self-test passed/);
+});
+// Found on the first real record the views met (224 rows from before 0.8.0, proof-bench/wheel/raw/legacy-*.txt): the
+// four arms `suggest` put first were measures that one old run had held and no contract holds any more, because an
+// arm's bonus grows as its runs get old. And the line that had "helped" most was a count of tests going up.
+test('suggest offers no arm for a measure that is gone from the contract, or for a count that only guards; the playbook says which lines those are', () => {
+  const COUNT = { name: 'test_count', cmd: 'grep -rIoE "\\btest ?\\(" --include="*.mjs" . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'up', guard: true, gamingCheck: false };
+  const d = tmpRepo([TODOS, COUNT]);
+  writeFileSync(join(d, 'app.js'), 'a // TODO\n'); writeFileSync(join(d, 'a.test.mjs'), "test('a', () => {});\n"); commitAll(d, 'base');
+  mkdirSync(join(d, '.promptwheel'), { recursive: true });
+  writeFileSync(join(d, '.promptwheel', 'outcomes.jsonl'), JSON.stringify({ ts: '2026-07-01T00:00:00Z', verdict: 'pass', cohort: 'local', metrics: [{ name: 'bundle_kb', status: 'unchanged', delta: 0 }] }) + '\n');
+  for (let i = 0; i < 4; i++) { writeFileSync(join(d, 'a.test.mjs'), readFileSync(join(d, 'a.test.mjs'), 'utf8') + `test('n${i}', () => {});\n`); commitAll(d, `more ${i}`); pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']); }
+  const s = JSON.parse(pw(d, ['suggest', '--json']).out);
+  assert.deepEqual([...new Set(s.arms.map((a) => a.metric))], ['todos'], 'only a measure of the contract that can be a goal');
+  assert.equal(s.retired, 1, 'one measure in the record is gone from the contract');
+  const p = pw(d, ['playbook']).out;
+  assert.match(p, /\*\*test_count\*\*: .* · a count that guards, not a goal/); assert.doesNotMatch(p, /\*\*todos.* · a count that guards/);
+  const j = JSON.parse(pw(d, ['playbook', '--json']).out);
+  assert.equal(j.entries.find((e) => e.key === 'bundle_kb').retired, true); assert.equal(j.entries.find((e) => e.key === 'test_count').tripwire, true);
 });

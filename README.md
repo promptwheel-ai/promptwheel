@@ -176,6 +176,33 @@ The Action runs straight from its own checkout, no npm install, no build. See [`
 
 Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommitted changes). See [`plugins/promptwheel/`](plugins/promptwheel/). A Stop-hook that refuses to let an agent end a turn on a `GAMED` win ships at [`examples/detect-gaming-stop.sh`](examples/detect-gaming-stop.sh).
 
+## The loop: keep a change only if it measured better
+
+`improve` runs any agent or script, checks what it changed, and keeps it only if a measure improved.
+
+```
+promptwheel improve --attempt "claude -p 'fix the failing test' < /dev/null"
+
+#   ▲ tests_pass                0 →        1  (+1, improved) [guard✓, high]
+#   VERDICT: PASS
+#   ✓ kept, committed ee9ee9b (improved tests_pass)
+```
+
+- **Kept means one commit. Anything else means the tree is put back as it was.** Exit `0` kept, `1` a guard got
+  worse, `2` the win came from a change to the tests, `3` nothing improved. So this stops by itself:
+  `while promptwheel improve --attempt "..."; do :; done`
+- **More tests is not a win.** A count that only guards (tests, assertions) can go up with nothing earned from the source.
+- **A commit the agent makes is still checked.** Its commits are folded back and checked as one change.
+- **Start from a clean tree.** A thrown-away attempt is undone with `git reset` and `git clean`.
+
+Every checked run adds one short row to a record in the repo's git folder (never the working tree; `run --no-record`
+adds none). Three commands read it: `insights` (how each measure responds), `playbook` (what has paid here, and what
+was tried and thrown away, with the measured reason) and `suggest` (where to spend the next attempt). `backfill`
+fills the record from past commits.
+
+We do not say the loop gets better with use. That has a test, and the test has not been passed:
+[docs/LEARNING.md](docs/LEARNING.md).
+
 ## Trust model
 
 **What it catches.** After the normal gate, every *win* is re-proven using the agent's source edits alone. If the win only survived by skipping or deleting a test, mocking the grader, editing a golden, relaxing a declared config, or touching zero source files, the verdict is `GAMED` (exit 2). A grader is recognized by its file name in a scripting language (`eval.py`, `grader.sh`, `score.js`, `scoring.ts`) or by an `evals/` or `grader(s)/` directory; a production file with one of those names (`src/score.py`) is treated as a grader too, so a fix there needs `--allow`, and a grader with any other name (`evaluate.py`, `check.py`) is source unless you list it in `evaluatorPaths`. On top of that:
@@ -208,6 +235,7 @@ The core gamed-win check is git only and runs anywhere git does: it classifies t
 - [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md), how the source-only re-run fits as the deterministic layer alongside held-out tests, LLM judges, and human review: the coverage matrix and the honest in/out-of-scope boundary.
 - [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md), making "the agent can't skip it" real: the two places to enforce (CI + branch protection, a Claude Code Stop-hook), the exact wiring, and the protect-the-gate's-own-config caveat.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), how the engine works: schemas, extract modes, the trust/noise model.
+- [docs/LEARNING.md](docs/LEARNING.md), the loop (`improve`), the record and its views: what may be said about them, and the test that would open the claim.
 - [CHANGELOG.md](CHANGELOG.md), what shipped in each version.
 - [CLAUDE.md](CLAUDE.md), the working notes for anyone (human or agent) changing this repo.
 

@@ -27,7 +27,10 @@ The working tree is **never** touched - every read happens in a temp worktree th
 | `run [--base R] [--head R] [--repeat N] [--json\|--markdown]` | gate a change between two refs |
 | `run --detect-gaming` / `--no-detect-gaming` | antihack is **on by default**: re-prove each win from source edits alone (verdict `gamed`, exit 2); `--no-detect-gaming` for the bare gate. `--markdown` emits a PR-comment table |
 | `run --working` | gate **uncommitted** changes incl. newly added files (temp-index `write-tree`/`commit-tree` snapshot; real index + tree untouched) |
-| `run --no-record` | accepted and does nothing; no record is written |
+| `run --no-record` | check without adding a row to the record |
+| `improve --attempt "<cmd>" [--label "<name>"] [--json]` | the loop's one step: run any agent or script, check what it changed (`--working`), keep it as one commit only if a measure improved, else put the tree back. Exit 0 kept, 1 a guard got worse, 2 gamed, 3 nothing improved. See [LEARNING.md](LEARNING.md) |
+| `insights` / `playbook` / `suggest` `[--json]` | views over the record of checked runs: how each measure responds, what has paid here and what was thrown away, where to spend the next attempt |
+| `backfill [-n N \| --since <ref>]` | fill the record from past commits, marked `backfill` |
 | `init [--preset <name> \| --list] [--no-agent-block]` | write a starter config (detect stack; presets `antihack`/`no-ai-tells`/`supply-chain`) and an agent-orienting block in `AGENTS.md` |
 | `lock` | write `promptwheel.lock.json`, the shape of the repo, held by the `supply-chain` preset |
 | `pr-allow` | read a PR's comments as JSON on stdin and print the newest `sawbuck-allow:` reason from someone with write access (the Action's approval step). With `--author <login>` the account that opened the PR is left out, unless the contract at `--base <ref>` holds `"allowFromAuthor": true` |

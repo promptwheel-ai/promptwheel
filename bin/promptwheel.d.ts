@@ -120,6 +120,10 @@ export interface CheckOptions {
   detectGaming?: boolean;
   /** A declared override reason (the same as `--allow` or a `Promptwheel-Allow:` commit trailer): a would-be `gamed`, or an `unprovable` win (its source-only re-run could not be applied), reads `pass`, recorded in `report.allowed`. */
   allow?: string;
+  /** Add one short row for this run to the record (in the repo's git folder, never the working tree). Default `false`: the CLI's `run` adds a row unless `--no-record`, the library only when asked. The record never changes a verdict. */
+  record?: boolean;
+  /** A short name for the change, kept in the row when `record` is on. */
+  label?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -437,3 +441,34 @@ export declare function environmentNote(env?: Record<string, string | undefined>
 export declare function allowFromComments(comments: unknown[], opts?: { author?: string; allowFromAuthor?: boolean }): string;
 /** The same, with the login whose comment was left out because it opened the pull request (`skipped`, '' if none). */
 export declare function allowDecision(comments: unknown[], opts?: { author?: string; allowFromAuthor?: boolean }): { reason: string; skipped: string };
+
+// ---------------------------------------------------------------------------
+// The record's views. The CLI's `insights`, `playbook` and `suggest` are built on these.
+// ---------------------------------------------------------------------------
+
+/** One key of the record, folded with decay: a metric, a metric in a folder (`metric @ folder`), or a metric under a label (`metric # label`). */
+export interface RecordKey {
+  key: string;
+  metric: string;
+  /** Weighted runs that measured this key. */
+  w: number;
+  /** Runs that measured this key, unweighted. */
+  n: number;
+  /** Weighted runs in which it improved, and in which it got worse. */
+  imp: number;
+  reg: number;
+  /** Weighted runs in which it moved either way. A key earns a line in the playbook at 3. */
+  moved: number;
+  effects: number[];
+  cohorts: Record<string, { imp: number; reg: number }>;
+  last: string | null;
+}
+
+/** Fold rows of the record (oldest first) into decayed counts for each key. A row counts half as much every 20 rows after it. A row that is not a row is skipped. */
+export declare function foldOutcomes(runs: ReadonlyArray<Record<string, unknown>>): RecordKey[];
+
+/** How often a key helped when it moved, pulled toward a half while there is little to go on: `(1 + improved) / (2 + improved + regressed)`. */
+export declare function betaMean(improved: number, regressed: number): number;
+
+/** A key's lever (how often it helped, times how often it moved) and its UCB score, which adds a bonus that shrinks as the key is tried more. */
+export declare function scoreKey(key: Pick<RecordKey, 'imp' | 'reg' | 'moved' | 'w' | 'effects'>, totalWeight: number): { p: number; move: number; lever: number; ucb: number; effect: number };
