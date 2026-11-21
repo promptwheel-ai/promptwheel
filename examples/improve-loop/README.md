@@ -80,6 +80,21 @@ If an attempt touched one, the line for that attempt says which (`restored`), an
 says so too. If an attempt deleted earlier tries so they cannot be put back, the line lists them
 (`refsLost`).
 
+Git's own files are held the same way. Git does not track them, an attempt can write them, and
+the step and the gate both run git:
+
+- the repo's git config, its hooks folder and its `info` folder (attributes, exclude)
+- your global git config, and a global attributes or ignore file
+- every ref but the branch the step is on: tags, other branches, replace refs
+
+So a hook, a filter, a replace ref or an fsmonitor command that an attempt sets is gone before the
+change is judged. After the attempt, the step's git calls and the gate's run no hook at all,
+whatever folder the hooks are in. A branch the attempt made and left the repo on is not removed:
+the step stops, and the branch is there for you to look at.
+
+One thing to know: if you change your own global git config while an attempt is running, the
+step reads that as the attempt's doing and puts it back. The line names the file.
+
 ## What it will not do
 
 - It will not run on a dirty tree. It needs a clean commit to put a change back to. An edited file
@@ -99,8 +114,10 @@ says so too. If an attempt deleted earlier tries so they cannot be put back, the
 
 - **Not a sandbox.** The attempt runs as you, with your shell. What git does not track is out of
   sight: an installed dependency the scorer runs, a database, a process the attempt leaves running.
-  An attempt that edits `node_modules` can move the score, and nothing here will see it. To hold
-  those, run the attempt where it cannot write them: a container, or another user.
+  An attempt that edits `node_modules` can move the score, and nothing here will see it. A process
+  it leaves running can edit the copy the gate measures in, which sits in the temp folder, and a
+  change that moved no number is then kept as a win. To hold those, run the attempt where it cannot
+  write them and cannot leave a process behind: a container, or another user.
 - **Not a judge of what a rule would still prevent.** `--cheaper` keeps a change that holds the score
   and lowers a cost. A safety rule that a second rule still covers can be deleted that way, and no
   score shows it. Freeze what protects with a mandate in the contract, and the gate sends such a

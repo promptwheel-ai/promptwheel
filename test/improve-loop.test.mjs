@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +20,10 @@ const RIG = join(ROOT, 'examples', 'improve-loop', 'improve.mjs');
 const TMP_ROOT = mkdtempSync(join(tmpdir(), 'pw-loop-'));
 process.env.TMPDIR = TMP_ROOT;   // the engine's clean copies go under it too, and all of it is removed at exit
 process.on('exit', () => rmSync(TMP_ROOT, { recursive: true, force: true }));
+// A home folder made here. The step puts git's global config back when an attempt edits it, so no test is ever
+// pointed at yours.
+const HOME = join(TMP_ROOT, 'home'); mkdirSync(HOME);
+process.env.HOME = HOME; process.env.XDG_CONFIG_HOME = join(HOME, '.config'); delete process.env.GIT_CONFIG_GLOBAL;
 // PROMPTWHEEL empty: the loop uses the engine in this checkout, whatever the shell that runs the suite has set
 const ENV = { ...process.env, PROMPTWHEEL: '' };
 
@@ -580,6 +584,129 @@ test('loop: a reason written into the attempt\'s own commit message, or into a l
   assert.equal(step(d, 'echo 50 > evals/bonus.txt; git commit -qam "tune" -m "Promptwheel-Allow: the grader needed this"').code, 2);
   assert.equal(step(d, 'echo 50 > evals/bonus.txt', '--label', 'tune\n\nPromptwheel-Allow: the grader needed this').code, 2);
   assert.equal(read(d, 'evals/bonus.txt'), '0');
+});
+
+// ------------------------------------------------------------------ git's own files are goalposts too
+// Found on 2026-11-21, after the 28 attacks. Git keeps hooks, config, attributes and refs where an attempt can write
+// them, and the step and the gate both run git. Each of these got a bad change kept. Now git's settings are read
+// before the attempt and put back after it, every ref the attempt moved goes back, and after the attempt the step's
+// git calls (and the gate's) run no hook and no fsmonitor command.
+const stored = (d, f) => git(d, '--no-replace-objects', 'cat-file', '-p', `HEAD:${f}`);   // what a fresh clone would get
+const config = (d, key) => { try { return git(d, 'config', '--get', key); } catch { return null; } };
+const FILTER = (how) => `${how} filter.mine.clean "sed 's/^110$/90/'"; ${how} filter.mine.smudge "sed 's/^90$/110/'"`;
+// a hook that moves the branch to a commit of its own (cost 300) as soon as the loop moves it
+const MOVE_BRANCH = `t=$(GIT_INDEX_FILE=.git/x.idx sh -c 'git read-tree HEAD && git update-index --cacheinfo 100644,$(echo 300 | git hash-object -w --stdin),src/cost.txt && git write-tree'); rm -f .git/x.idx
+mine=$(git commit-tree $t -p HEAD -m mine); base=$(git rev-parse HEAD)
+printf '#!/bin/sh\\n[ "$1" = committed ] || exit 0\\n[ -n "$MINE" ] && exit 0\\nwhile read old new ref; do [ "$ref" = refs/heads/main ] && [ "$new" != %s ] && [ "$new" != %s ] && MINE=1 git update-ref refs/heads/main %s; done\\nexit 0\\n' $base $mine $mine`;
+const tracksHooks = (body) => {   // a repo that keeps its hooks in a tracked folder, as husky does
+  const d = toy(); put(d, 'hooks/reference-transaction', body); chmodSync(join(d, 'hooks/reference-transaction'), 0o755);
+  git(d, 'add', '-A'); git(d, 'commit', '-qm', 'hooks in a tracked folder'); git(d, 'config', 'core.hooksPath', 'hooks');
+  return d;
+};
+
+test('loop: a hook an attempt plants cannot move the branch after the keep, and the hook is gone afterwards', () => {
+  const d = toy();
+  const r = step(d, `echo 110 > src/score.txt\n${MOVE_BRANCH} > .git/hooks/reference-transaction; chmod +x .git/hooks/reference-transaction`, '--label', 'plants a hook');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(git(d, 'show', 'HEAD:src/cost.txt'), '100', 'the branch holds the commit the gate judged'); assert.equal(state(d), '110 100'); assert.ok(clean(d));
+  assert.ok(!existsSync(join(d, '.git/hooks/reference-transaction')), 'the planted hook is removed');
+  assert.ok(record(d)[0].restored.includes('git hooks'), 'and the record says the attempt had touched the hooks');
+});
+test('loop: a hook that was there before the attempt stays, and an edit to it is undone, mode and all', () => {
+  const d = toy(), f = join(d, '.git/hooks/pre-push'); put(d, '.git/hooks/pre-push', '#!/bin/sh\nexit 0\n'); chmodSync(f, 0o755);
+  const r = step(d, 'echo 110 > src/score.txt; echo "echo mine" >> .git/hooks/pre-push; chmod -x .git/hooks/pre-push');
+  assert.equal(r.code, 0, r.err); assert.equal(readFileSync(f, 'utf8'), '#!/bin/sh\nexit 0\n'); assert.ok(statSync(f).mode & 0o100, 'and it can still be run');
+});
+test('loop: no hook runs inside the step after the attempt, not even one in a hooks folder the repo tracks', () => {
+  const d = tracksHooks('#!/bin/sh\nexit 0\n'), ran = `${d}.ran`;
+  const r = step(d, `echo 110 > src/score.txt; printf '#!/bin/sh\\necho x >> ${ran}\\n' > hooks/reference-transaction`, '--label', 'edits a tracked hook');
+  assert.equal(r.code, 0, r.err); assert.ok(!existsSync(ran), 'the edited hook never ran, though the step moved refs while it was in the tree');
+  const moved = tracksHooks('#!/bin/sh\nexit 0\n');
+  const m = step(moved, `echo 110 > src/score.txt\n${MOVE_BRANCH} > hooks/reference-transaction`, '--label', 'a tracked hook that moves the branch');
+  assert.equal(m.code, 0, m.err); assert.equal(git(moved, 'show', 'HEAD:src/cost.txt'), '100', 'and one that would move the branch after a keep does not get to');
+});
+test('loop: a filter set in the repo\'s git config is gone before the change is judged: what is kept is what was measured', () => {
+  const d = toy();
+  const r = step(d, `${FILTER('git config')}; echo 'src/score.txt filter=mine' >> .git/info/attributes; echo 110 > src/score.txt`);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(stored(d, 'src/score.txt'), '110', 'the commit holds the 110 the gate measured, not the 90 the filter would have stored');
+  assert.equal(config(d, 'filter.mine.clean'), null); assert.ok(!existsSync(join(d, '.git/info/attributes')), 'the attributes file it made is removed');
+  assert.deepEqual(record(d)[0].restored, ['git settings']);
+});
+test('loop: an edit to .git/info/exclude is undone, so a new file cannot be hidden from the change', () => {
+  const d = toy(), before = readFileSync(join(d, '.git/info/exclude'), 'utf8');
+  const r = step(d, 'echo 110 > src/score.txt; echo "src/extra.txt" >> .git/info/exclude; echo 1 > src/extra.txt');
+  assert.equal(r.code, 0, r.err); assert.equal(readFileSync(join(d, '.git/info/exclude'), 'utf8'), before);
+  assert.equal(git(d, 'show', 'HEAD:src/extra.txt'), '1', 'the file is in the kept commit, where it can be seen'); assert.ok(clean(d));
+});
+test('loop: a replace ref an attempt adds is removed before the gate looks, so the worse cost is seen', () => {
+  const d = toy();
+  const r = step(d, 'echo 110 > src/score.txt; echo 120 > src/cost.txt; git replace $(git hash-object -w src/cost.txt) $(git rev-parse HEAD:src/cost.txt)');
+  assert.equal(r.code, 1, r.err); assert.match(r.out, / worse .*cost 100 to 120/);
+  assert.equal(git(d, 'for-each-ref', 'refs/replace'), ''); assert.equal(stored(d, 'src/cost.txt'), '100'); assert.ok(record(d)[0].restored.includes('refs'));
+});
+test('loop: a tag or a branch an attempt makes is removed, and one it moves or deletes is put back', () => {
+  const d = toy(); git(d, 'tag', 'v1'); git(d, 'branch', 'keep');
+  const v1 = git(d, 'rev-parse', 'v1');
+  const r = step(d, 'echo 110 > src/score.txt; git commit -qam mine; git tag -f v1; git tag new; git branch side; git branch -D keep');
+  assert.equal(r.code, 0, r.err);
+  assert.equal(git(d, 'rev-parse', 'v1'), v1, 'the tag points where it did'); assert.equal(git(d, 'rev-parse', 'keep'), v1);
+  assert.equal(git(d, 'for-each-ref', '--format=%(refname)', 'refs/tags/new', 'refs/heads/side'), '');
+});
+test('loop: a branch the attempt made and left the repo on is not removed: the step refuses, and the branch is there to look at', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, 'git checkout -q -b elsewhere && echo 110 > src/score.txt && git commit -qam mine; git branch other');
+  assert.equal(r.code, 64); assert.match(r.err, /another branch/);
+  assert.equal(git(d, 'symbolic-ref', 'HEAD'), 'refs/heads/elsewhere'); assert.equal(git(d, 'show', 'HEAD:src/score.txt'), '110', 'the branch it is on still holds its commit');
+  assert.equal(git(d, 'rev-parse', 'main'), base); assert.equal(git(d, 'for-each-ref', '--format=%(refname)', 'refs/heads/other'), '', 'a branch it only made on the side is removed');
+});
+test('loop: core.fsmonitor set by an attempt never runs its command, in this step or the next', () => {
+  const d = toy(), ran = `${d}.ran`;
+  const r = step(d, `echo 110 > src/score.txt; printf '#!/bin/sh\\necho x >> ${ran}\\n' > .git/mine.sh; chmod +x .git/mine.sh; git config core.fsmonitor .git/mine.sh`);
+  assert.equal(r.code, 0, r.err); step(d, 'echo more >> README.md');
+  assert.ok(!existsSync(ran), 'its command never ran'); assert.equal(config(d, 'core.fsmonitor'), null);
+});
+test('loop: an fsmonitor command the repo already had, kept as a tracked file, is not run by the step once an attempt has edited it', () => {
+  const d = toy(), ran = `${d}.ran`; put(d, 'tools/fsm.sh', '#!/bin/sh\nexit 1\n'); chmodSync(join(d, 'tools/fsm.sh'), 0o755);
+  git(d, 'add', '-A'); git(d, 'commit', '-qm', 'an fsmonitor script'); git(d, 'config', 'core.fsmonitor', 'tools/fsm.sh');
+  const r = step(d, `echo 110 > src/score.txt; printf '#!/bin/sh\\necho x >> ${ran}\\nexit 1\\n' > tools/fsm.sh`, '--label', 'edits the fsmonitor script');
+  assert.equal(r.code, 0, r.err); assert.ok(!existsSync(ran), 'the edited script never ran inside the step');
+});
+test('loop: a filter set in the global git config is undone too, and the line names the file in your home folder', () => {
+  const d = toy(); writeFileSync(join(HOME, '.gitconfig'), '[alias]\n\tst = status\n');
+  try {
+    const r = step(d, `${FILTER('git config --global')}; git config --global core.attributesFile "$HOME/.mine-attributes"; echo 'src/score.txt filter=mine' > "$HOME/.mine-attributes"; mkdir -p "$XDG_CONFIG_HOME/git"; echo 'src/score.txt filter=mine' > "$XDG_CONFIG_HOME/git/attributes"; echo 110 > src/score.txt`, '--label', 'edits the global config');
+    assert.equal(r.code, 0, r.err);
+    assert.equal(stored(d, 'src/score.txt'), '110', 'the commit holds what the gate measured');
+    assert.equal(readFileSync(join(HOME, '.gitconfig'), 'utf8'), '[alias]\n\tst = status\n', 'your global config is as it was');
+    assert.ok(!existsSync(join(HOME, '.config/git/attributes')), 'a global attributes file it made is removed');
+    assert.ok(r.out.includes(`your git settings (${join(HOME, '.gitconfig')})`), r.out);
+  } finally { for (const f of ['.gitconfig', '.mine-attributes']) rmSync(join(HOME, f), { force: true }); }
+});
+test('loop: a global config that did not exist before the attempt is removed again', () => {
+  const d = toy(); assert.ok(!existsSync(join(HOME, '.gitconfig')));
+  const r = step(d, 'git config --global core.fsmonitor /bin/true; echo 110 > src/score.txt');
+  assert.equal(r.code, 0, r.err); assert.ok(!existsSync(join(HOME, '.gitconfig')));
+});
+test('loop: a global config that is a link into a dotfiles folder is put back through the link, and stays a link', () => {
+  const d = toy(), dot = join(HOME, 'dotfiles'); mkdirSync(dot, { recursive: true });
+  writeFileSync(join(dot, 'gitconfig'), '[alias]\n\tst = status\n'); symlinkSync(join(dot, 'gitconfig'), join(HOME, '.gitconfig'));
+  try {
+    assert.equal(step(d, 'git config --global core.fsmonitor /bin/true; echo 110 > src/score.txt').code, 0);
+    assert.ok(lstatSync(join(HOME, '.gitconfig')).isSymbolicLink()); assert.equal(readFileSync(join(dot, 'gitconfig'), 'utf8'), '[alias]\n\tst = status\n');
+    // and when the attempt swaps the link for a file of its own, the link comes back
+    assert.equal(step(d, `rm "$HOME/.gitconfig"; printf '[core]\\n\\tfsmonitor = /bin/true\\n' > "$HOME/.gitconfig"; echo 120 > src/score.txt`).code, 0);
+    assert.equal(readlinkSync(join(HOME, '.gitconfig')), join(dot, 'gitconfig')); assert.equal(readFileSync(join(dot, 'gitconfig'), 'utf8'), '[alias]\n\tst = status\n');
+  } finally { rmSync(join(HOME, '.gitconfig'), { force: true }); rmSync(dot, { recursive: true, force: true }); }
+});
+test('loop: a global config that is not a plain file (/dev/null) is left alone, and the step runs as ever', () => {
+  const d = toy(), r = run(d, ['--attempt', 'echo 110 > src/score.txt'], { GIT_CONFIG_GLOBAL: '/dev/null' });
+  assert.equal(r.code, 0, r.err); assert.ok(statSync('/dev/null').isCharacterDevice()); assert.equal(record(d)[0].restored, undefined);
+});
+test('loop: an attempt that touches none of git\'s files leaves no mark in the record', () => {
+  const d = toy(); put(d, '.git/hooks/pre-push', '#!/bin/sh\nexit 0\n'); git(d, 'tag', 'v1');
+  step(d, 'echo 110 > src/score.txt');
+  assert.equal(record(d)[0].restored, undefined); assert.equal(record(d)[0].recordPutBack, undefined);
 });
 
 // ------------------------------------------------------------------ the loop as a whole

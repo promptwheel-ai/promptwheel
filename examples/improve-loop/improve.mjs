@@ -31,6 +31,11 @@
 // earlier tries, the base cache, the gate program (when PROMPTWHEEL names its file) and this step. The record line
 // says which the attempt had touched. A file the attempt hides from git is shown again, so it is judged too.
 //
+// Git's own files are held the same way, because the step and the gate both run git: the repo's config, hooks and
+// info folder, your global git config, and every ref but the branch the step is on. A hook, a filter, a replace
+// ref or an fsmonitor command that an attempt sets is gone before the change is judged. After the attempt, the
+// step's git calls and the gate's run no hook at all, whatever folder the hooks are in.
+//
 // This is not a sandbox. The attempt runs as you, with your shell. Stop it with Ctrl-C and the attempt is put back.
 // What git does not track is out of sight: an installed dependency the scorer runs, a database, a process the
 // attempt leaves running. To hold those, run the attempt where it cannot write them.
@@ -40,7 +45,8 @@
 //   0 kept · 1 put back, a guard got worse or the floor held · 2 put back, gamed ·
 //   3 put back, nothing improved or nothing could be measured · 64 could not run.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -84,10 +90,24 @@ const bytes = (file) => (isFile(file) ? readFileSync(file) : null);
 const gateFile = gateCommand.slice(1).filter((a) => /\.[cm]?js$/.test(a)).map((a) => resolve(a)).find(isFile);
 const cacheDir = args['--base-cache'] ? resolve(args['--base-cache']) : null;
 const cached = () => (cacheDir && existsSync(cacheDir) ? readdirSync(cacheDir).map((f) => join(cacheDir, f)).filter(isFile) : []);
-const own = [[record, 'record'], [bestFile, 'floor'], [fileURLToPath(import.meta.url), 'step'], ...(gateFile ? [[gateFile, 'gate']] : []), ...cached().map((f) => [f, 'base cache'])]
-  .map(([file, what]) => ({ file, what, was: bytes(file), mode: isFile(file) ? statSync(file).mode : null }));
+// Git's own files. An attempt can write them, git does not track them, and they change what git does for the step
+// and for the gate: a hook runs, a filter rewrites a file on its way in or out, a replace ref swaps one object for
+// another. The config files are the ones git names for this repo, and the places it would look for a global one.
+const common = resolve(git('rev-parse', '--git-common-dir')), home = process.env.HOME || homedir(), xdg = process.env.XDG_CONFIG_HOME || join(home, '.config');
+const named = (key) => { try { return git('config', '--path', '--get', key); } catch { return null; } };
+const settings = [...new Set([
+  join(common, 'config'), join(git('rev-parse', '--absolute-git-dir'), 'config.worktree'), process.env.GIT_CONFIG_GLOBAL || join(home, '.gitconfig'),
+  join(xdg, 'git', 'config'), join(xdg, 'git', 'attributes'), join(xdg, 'git', 'ignore'), named('core.attributesFile'), named('core.excludesFile'),
+  ...execFileSync('git', ['config', '--list', '--show-origin', '-z'], { encoding: 'utf8' }).split('\0').filter((x) => x.startsWith('file:')).map((x) => x.slice(5)),
+].filter(Boolean).map((f) => resolve(f)))].filter((f) => !existsSync(f) || isFile(f));   // a plain file, or nothing there yet. Never /dev/null or a folder.
+const gitDirs = [[join(common, 'hooks'), 'git hooks'], [join(common, 'info'), 'git settings']];
+const inGitDirs = () => gitDirs.flatMap(([dir, what]) => (existsSync(dir) ? readdirSync(dir, { recursive: true }).map((f) => [join(dir, f), what]).filter(([f]) => isFile(f)) : []));
+const linkOf = (file) => { try { return readlinkSync(file); } catch { return null; } };   // where a link points, or null for a plain file
+const own = [[record, 'record'], [bestFile, 'floor'], [fileURLToPath(import.meta.url), 'step'], ...(gateFile ? [[gateFile, 'gate']] : []), ...cached().map((f) => [f, 'base cache']),
+  ...settings.map((f) => [f, f.startsWith(`${common}/`) ? 'git settings' : `your git settings (${f})`]), ...inGitDirs()]
+  .map(([file, what]) => ({ file, what, was: bytes(file), mode: isFile(file) ? statSync(file).mode : null, link: linkOf(file) }));
 const text = (what) => { const { was } = own.find((x) => x.what === what); return was == null ? null : was.toString('utf8'); };
-const refs = () => Object.fromEntries(git('for-each-ref', '--format=%(refname) %(objectname)', 'refs/improve').split('\n').filter(Boolean).map((l) => l.split(' ')));
+const refs = () => Object.fromEntries(git('for-each-ref', '--format=%(refname) %(objectname)').split('\n').filter(Boolean).map((l) => l.split(' ')).filter(([ref]) => ref !== on));   // every ref but the branch this is on
 const refsAtStart = refs();
 const n = (text('record') || '').split('\n').filter(Boolean).length + 1;
 let best = null;   // the best commit so far and what it scored; nothing until a change is kept under --floor
@@ -100,6 +120,12 @@ if (floor && text('floor') != null) {
 // Ctrl-C reaches this step and the attempt together. Stay alive through it, so a half-made change is put back.
 process.on('SIGINT', () => {});
 const tried = spawnSync(attempt, { shell: true, stdio: ['inherit', 2, 2], env: { ...process.env, IMPROVE_RECORD: record, IMPROVE_TARGET: target } });
+
+// From here on, no git call of this step or of the gate runs a hook or an fsmonitor command, whatever the repo's
+// config says and whatever folder the hooks are in. A repo that keeps its hooks in a tracked folder has them edited
+// like any other file. These settings outrank every config file.
+const k = Number(process.env.GIT_CONFIG_COUNT) || 0;
+Object.assign(process.env, { GIT_CONFIG_COUNT: String(k + 2), [`GIT_CONFIG_KEY_${k}`]: 'core.hooksPath', [`GIT_CONFIG_VALUE_${k}`]: '/dev/null', [`GIT_CONFIG_KEY_${k + 1}`]: 'core.fsmonitor', [`GIT_CONFIG_VALUE_${k + 1}`]: 'false' });
 
 const restored = new Set(), refsLost = [];   // which of the loop's own files the attempt touched, and what could not be put back
 const putBack = () => { git('reset', '-q', '--hard', base); git('clean', '-qfd'); };
@@ -118,18 +144,25 @@ const finish = (result, why, exit, extra) => {
 try {
   // The loop's own files, as they were. Anything the attempt added to the base cache goes too: a number planted
   // there before the base is first measured would be read as the base.
-  for (const { file, what, was, mode } of own) {
+  for (const { file, what, was, mode, link } of own) {
     const now = bytes(file);
     if (now == null ? was == null && !existsSync(file) : was != null && now.equals(was)) continue;
-    restored.add(what); rmSync(file, { recursive: true, force: true });
+    restored.add(what);
+    // a file that was a link to a file elsewhere (a dotfiles folder) stays that link, and is written through it
+    if (link == null || linkOf(file) !== link) { rmSync(file, { recursive: true, force: true }); if (link != null) symlinkSync(link, file); }
     if (was != null) { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, was); chmodSync(file, mode); }
   }
   for (const file of cached()) if (!own.some((x) => x.file === file)) { restored.add('base cache'); rmSync(file, { force: true }); }
+  for (const [file, what] of inGitDirs()) if (!own.some((x) => x.file === file)) { restored.add(what); rmSync(file, { force: true }); }   // a hook or an attributes file the attempt made
   mkdirSync(recordDir, { recursive: true });
+  // Every ref goes back to where it was, and a ref the attempt made is removed: a tag, a branch, a replace ref.
+  // The branch this is on is the one thing an attempt may move, and it is dealt with just below.
+  const refsNow = refs(), here = branch();   // a branch the attempt made and left the repo on is not removed: it is refused below, and yours to look at
   for (const [ref, sha] of Object.entries(refsAtStart)) {
-    if (refs()[ref] === sha) continue;
-    if (holds('cat-file', '-e', `${sha}^{commit}`)) { git('update-ref', ref, sha); restored.add('refs'); } else refsLost.push(ref);
+    if (refsNow[ref] === sha) continue;
+    if (holds('cat-file', '-e', sha)) { git('update-ref', ref, sha); restored.add('refs'); } else refsLost.push(ref);
   }
+  for (const ref of Object.keys(refsNow)) if (!(ref in refsAtStart) && ref !== here) { git('update-ref', '-d', ref); restored.add('refs'); }
   // a file the attempt hid from git is shown again, so its change is judged and put back like any other
   const hid = hidden().filter((f) => !hiddenAtStart.includes(f));
   for (const show of hid.length ? ['--no-skip-worktree', '--no-assume-unchanged'] : []) git('update-index', show, '--', ...hid);   // one flag a call: git clears only one when both are given
