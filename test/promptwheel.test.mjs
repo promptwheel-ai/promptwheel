@@ -198,16 +198,19 @@ test('a declared band, end to end: a contract with no band keeps the gate finger
 // goalpost, every win is measured again with the source edits alone. That second reading was read without the band:
 // on a scorer with jitter, an honest win beside an edited test read gamed whenever the re-run rolled low. The score
 // here is the source's value plus a bonus kept in a test-side file, so the second reading is known to the digit.
-function bonusRepo({ noise, threshold, bonusFile = 'test/bonus.json', evaluatorPaths } = {}) {
+function bonusRepo(opts = {}) {
+  const bonusFile = opts.bonusFile || 'test/bonus.json';
   const d = mkdtempSync(join(TMP_ROOT, 'band2-')); const g = (...a) => execFileSync('git', a, { cwd: d, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@b.c', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@b.c' } });
   mkdirSync(join(d, 'src')); mkdirSync(join(d, dirname(bonusFile)), { recursive: true });
   const put = (score, bonus) => { writeFileSync(join(d, 'src/values.js'), `module.exports = { score: ${score} }\n`); writeFileSync(join(d, bonusFile), JSON.stringify({ bonus }) + '\n'); };
   writeFileSync(join(d, 'measure.js'), `console.log(require('./src/values.js').score + require('./${bonusFile}').bonus)\n`);
-  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...(evaluatorPaths ? { evaluatorPaths } : {}), metrics: [{ name: 'score', cmd: 'node measure.js', extract: 'number', direction: 'up', guard: true, ...(noise === undefined ? {} : { noise }), ...(threshold === undefined ? {} : { gamingThreshold: threshold }) }] }, null, 2));
-  put(80, 0); g('init', '-q'); g('add', '-A'); g('commit', '-qm', 'base');
+  // the contract: `top` is spread at the top level, `metric` over the one metric; called again, it is the change's edit
+  const cfg = (over = {}) => { const { noise, threshold, evaluatorPaths, top = {}, metric = {} } = { ...opts, ...over };
+    writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ ...top, ...(evaluatorPaths ? { evaluatorPaths } : {}), metrics: [{ name: 'score', cmd: 'node measure.js', extract: 'number', direction: 'up', guard: true, ...(noise === undefined ? {} : { noise }), ...(threshold === undefined ? {} : { gamingThreshold: threshold }), ...metric }] }, null, 2)); };
+  cfg(); put(80, 0); g('init', '-q'); g('add', '-A'); g('commit', '-qm', 'base');
   const run = () => { const r = spawnSync(process.execPath, [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--json'], { cwd: d, encoding: 'utf8' }); let j = null; try { j = JSON.parse(r.stdout); } catch {} return { code: r.status, j, score: j && j.metrics.find((x) => x.name === 'score') }; };
   const human = () => spawnSync(process.execPath, [ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD'], { cwd: d, encoding: 'utf8' }).stdout;
-  return { d, g, put, run, human };
+  return { d, g, put, cfg, run, human };
 }
 test('the band and the second measurement: a win whose source-only reading is inside the band of both the base and the full change is not called gamed, and is not counted as a win', () => {
   const a = bonusRepo({ noise: 3 }); a.put(81.5, 2.5); a.g('commit', '-qam', 'four up in all, past a band of three: a point and a half from the source, the rest beside an edited test file');
@@ -3972,6 +3975,167 @@ test('a report larger than a pipe holds arrives whole through a reader that star
   r = lateReader(); rep = whole(r);
   assert.ok(rep, `the failing report did not arrive whole: ${Buffer.byteLength(r.text)} bytes came`);
   assert.equal(rep.verdict, 'fail'); assert.equal(r.code, 1); assert.equal(rep.gate.goalposts.length, 900);
+});
+
+// ---- The gate's own code, broken on purpose (proof-bench/wheel/PLAN-3.md, 2026-11-21) --------------------------
+// Another session's lead: the loop's tests had been broken on purpose and the gate's never had. So evaluate,
+// judgeGaming, deriveVerdict, applyBudgets, checkMandates and the pass that calls them were broken in 63 small ways,
+// one at a time (teeth-gate.json), and the suite caught 55. Then a second reader proposed 20 breaks it expected no
+// test to catch (teeth-gate-extra.json), and 18 were not caught. The tests below are the gaps: each one failed on its
+// broken copy first. Three of my own eight change nothing anyone could see and have no test (PLAN-3's result).
+test('evaluate: the band measured across repeats is the widest gap on either side, the head side too', () => {
+  const ev = evaluate(m({ direction: 'up' }), [10, 10, 10], [9, 12, 15], 3);   // the base holds still; the head's readings are six apart
+  assert.equal(ev.noise, 6); assert.equal(ev.status, 'inconclusive', 'two up, inside the head side\'s own gap of six');
+});
+test('evaluate: a side is read as the median of its readings, not the first one', () => {
+  const ev = evaluate(m({ direction: 'up' }), [10, 10, 10], [20, 10, 10], 3);
+  assert.equal(ev.after, 10); assert.equal(ev.delta, 0); assert.equal(ev.status, 'unchanged');
+});
+test('evaluate: a count of lines is taken to hold still, like an exit code: high confidence on one read, where a number is unverified', () => {
+  assert.equal(evaluate(m({ extract: 'lines' }), [3], [3], 1).confidence, 'high');
+  assert.equal(evaluate(m({ extract: 'number' }), [3], [3], 1).confidence, 'unverified');
+});
+test('budget: a rate or a base below zero is no budget, and a cost at exactly its budget is paid', () => {
+  const defs = (budget) => [bDefs[0], { ...bDefs[1], budget }];
+  for (const budget of [{ gain: 'score', base: 0.5, rate: -1 }, { gain: 'score', base: -0.1, rate: 44.5 }]) {
+    const [, t] = applyBudgets([bScore(0.02), bTokens(100, 110)], defs(budget));
+    assert.equal(t.ok, false, JSON.stringify(budget)); assert.equal(t.paid, undefined); assert.equal(t.overBudget, undefined);
+  }
+  const [, edge] = applyBudgets([bScore(0.02), bTokens(100, 110)], defs({ gain: 'score', base: 0.1, rate: 0 }));   // +10% against exactly 10%
+  assert.equal(edge.ok, true); assert.deepEqual(edge.paid, { gain: 'score', share: 0.1, allowed: 0.1 });
+});
+test('budget: the gain may be on a metric that counts down, and the cost on one that counts up', () => {
+  // the gain: latency fell from 200 to 180, a delta of -20. The cost: coverage fell, as a share of what it was
+  const latency = { name: 'latency', direction: 'down', guard: true, before: 200, after: 180, delta: -20, status: 'improved', ok: true };
+  const coverage = (after) => ({ name: 'coverage', direction: 'up', guard: true, before: 80, after, delta: after - 80, status: 'regressed', ok: false });
+  const defs = [{ name: 'latency', direction: 'down', guard: true }, { name: 'coverage', direction: 'up', guard: true, budget: { gain: 'latency', base: 0, rate: 0.005 } }];   // 20 of gain buys 10%
+  const [, paid] = applyBudgets([latency, coverage(76)], defs);
+  assert.equal(paid.ok, true); assert.deepEqual(paid.paid, { gain: 'latency', share: 0.05, allowed: 0.1 });
+  const [, over] = applyBudgets([latency, coverage(40)], defs);   // half of it gone
+  assert.equal(over.ok, false); assert.deepEqual(over.overBudget, { gain: 'latency', share: 0.5, allowed: 0.1 });
+});
+test('the band and the second measurement: a part exactly as wide as the band is inside it, on both counts', () => {
+  const up = (before, after) => ({ name: 'score', direction: 'up', before, after });
+  const src = (v) => ({ samples: [v], hadSourceChange: true });
+  // ten up in all, seven of it from the source: the three that did not survive are exactly the band
+  const lost = judgeGaming(up(80, 90), src(87), 0.9, 3);
+  assert.equal(lost.gamed, false); assert.equal(lost.inBand, undefined, 'the source alone is past the band, so the win stands');
+  // five up in all, three of it from the source: the source alone moved the number by exactly the band, which is not past it
+  const kept = judgeGaming(up(80, 85), src(83), 0.9, 3);
+  assert.equal(kept.gamed, false); assert.equal(kept.inBand, true);
+  assert.equal(judgeGaming(up(80, 90), src(87), 0.9).gamed, true, 'with no band both read as before'); assert.equal(judgeGaming(up(80, 85), src(83), 0.9, 0).gamed, true);
+});
+test('gamingThreshold: the one written on a metric decides over the one written for the whole contract', () => {
+  const a = bonusRepo({ threshold: 0.9, top: { gamingThreshold: 0.2 } }); a.put(85, 5); a.g('commit', '-qam', 'ten up, half of it beside an edited test file');
+  const r = a.run(); assert.equal(r.score.retained, 0.5); assert.equal(r.j.verdict, 'gamed', 'half is under the 0.9 the metric asks for, whatever the contract says for the rest'); assert.equal(r.code, 2);
+  rmSync(a.d, { recursive: true, force: true });
+});
+test('gamingThreshold: a change cannot lower the threshold written on the metric it wins on (the stricter of before and after decides)', () => {
+  const a = bonusRepo({ threshold: 0.9 }); a.cfg({ threshold: 0.1 }); a.put(85, 5); a.g('commit', '-qam', 'ten up, half of it beside an edited test file, and the threshold lowered in the same change');
+  const r = a.run(); assert.equal(r.score.retained, 0.5); assert.equal(r.j.verdict, 'gamed'); assert.equal(r.j.gate.changed, true, 'and the report says the gate was edited');
+  rmSync(a.d, { recursive: true, force: true });
+});
+test('gate integrity: a win under a guard edited in the same change is held to the threshold that guard had, not the default', () => {
+  const a = bonusRepo({ threshold: 0.9 }); a.cfg({ metric: { cmd: 'echo 1' } }); a.put(86, 4); a.g('commit', '-qam', 'the guard now measures nothing, and under its old command the change wins ten, six of it from the source');
+  const r = a.run(); assert.equal(r.code, 2, JSON.stringify(r.j && r.j.gate));
+  assert.ok(r.j.gate.weakened.some((w) => w.name === 'score' && w.change === 'guard-edited' && w.status === 'gamed'), JSON.stringify(r.j.gate.weakened));
+  rmSync(a.d, { recursive: true, force: true });
+});
+test('gate integrity: a count whose gains live in test files, edited in the same change, is not re-proven from the source under its old command', () => {
+  const a = bonusRepo({ metric: { gamingCheck: false } }); a.cfg({ metric: { gamingCheck: false, cmd: 'echo 1' } }); a.put(80, 5); a.g('commit', '-qam', 'the count is measured another way, and under its old command it rose with no source change');
+  const r = a.run(); assert.equal(r.code, 0, JSON.stringify(r.j && r.j.gate)); assert.equal(r.j.gate.weakened, undefined); assert.equal(r.j.gate.changed, true);
+  rmSync(a.d, { recursive: true, force: true });
+});
+test('old tests on new source: the note is for a suite green at both ends, never for one that is red at both', () => {
+  const d = srcRepo(BAD_SRC, { metrics: [TESTS_PASS] });   // red at the base
+  writeFileSync(join(d, 'src.js'), 'module.exports = { add: (a, b) => a * b };\n'); writeFileSync(join(d, 'app.test.js'), RIGGED_TEST); commitAll(d, 'the source and the test both change, and the suite is still red');
+  const r = lastChange(d); const t = r.rep.metrics.find((x) => x.name === 'tests_pass');
+  assert.equal(t.inert, true); assert.equal(t.heldByTestEdit, undefined, 'a suite that never passed holds nothing by a test edit');
+  rmSync(d, { recursive: true, force: true });
+});
+test('setup: a watch-only guard (report: true) is not measured again the old way when a change edits how the gate measures; the report says the gate changed', () => {
+  // as the code stands: a guard that only notes is left out of that second measurement, so a setup that hides what it
+  // would have noted is seen as a gate change and nothing more
+  const WATCH = { ...TESTS_PASS, report: true };
+  const d = srcRepo(GOOD_SRC, { metrics: [WATCH] });
+  cfgFile(d, { setup: 'echo "// rigged" > app.test.js', metrics: [WATCH] }); writeFileSync(join(d, 'src.js'), BAD_SRC); commitAll(d, 'break the source, and a setup that overwrites the test in every checkout');
+  const r = lastChange(d);
+  assert.equal(r.code, 0, r.out); assert.equal(r.rep.gate.weakened, undefined); assert.equal(r.rep.gate.changed, true);
+  rmSync(d, { recursive: true, force: true });
+});
+test('a guard that measures nothing: `ran` names the one ref where its command did run', () => {
+  const mk = (atBase, atHead) => {
+    const d = bareRepo(); cfgFile(d, { metrics: [{ name: 'tests_pass', cmd: './t.sh', extract: 'exit', direction: 'pass', guard: true }] });
+    const script = (on) => { if (on) { writeFileSync(join(d, 't.sh'), '#!/bin/sh\nexit 1\n'); chmodSync(join(d, 't.sh'), 0o755); } else if (existsSync(join(d, 't.sh'))) unlinkSync(join(d, 't.sh')); };
+    writeFileSync(join(d, 'a.js'), '1\n'); script(atBase); commitAll(d, 'base'); writeFileSync(join(d, 'a.js'), '2\n'); script(atHead); commitAll(d, 'head');
+    const rep = lastChange(d).rep, human = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record']).out; rmSync(d, { recursive: true, force: true });
+    return { t: rep.metrics[0], human };
+  };
+  const head = mk(false, true); assert.equal(head.t.inert, true); assert.equal(head.t.ran, 'head'); assert.match(head.human, /ran and failed at the head ref and did not run at the other/);
+  // at the head the command is gone. Where the shell's words name what is missing, the hint says so, and it must not
+  // say "at either ref": the command did run at the base (it said that until 2026-11-21, found by writing this test)
+  const base = mk(true, false); assert.equal(base.t.inert, true); assert.equal(base.t.ran, 'base');
+  assert.match(base.human, /ran and failed at the base ref and did not run at the other|could not run in the clean copy at one ref and failed at the other \(it ran at the base ref\)/);
+  assert.doesNotMatch(base.human, /at either ref/);
+});
+test('a watch-only guard (report: true) that cannot be measured still fails: only its regression is a note', () => {
+  const WATCH = { name: 'todos', cmd: 'cat count.txt', extract: 'number', direction: 'down', guard: true, report: true };
+  const d = bareRepo(); cfgFile(d, { metrics: [WATCH] }); writeFileSync(join(d, 'count.txt'), '3\n'); commitAll(d, 'base');
+  writeFileSync(join(d, 'count.txt'), '5\n'); commitAll(d, 'two more');
+  let r = lastChange(d); assert.equal(r.code, 0, r.out); assert.equal(r.rep.metrics[0].noted, true, 'a regression is a note');
+  writeFileSync(join(d, 'count.txt'), 'no number here\n'); commitAll(d, 'the count cannot be read');
+  r = lastChange(d); assert.equal(r.code, 1, r.out); assert.equal(r.rep.metrics[0].status, 'unmeasurable'); assert.equal(r.rep.metrics[0].ok, false); assert.equal(r.rep.metrics[0].noted, undefined);
+  rmSync(d, { recursive: true, force: true });
+});
+test('mandates: a rule edited in the change that breaks it, hit in both its versions, is one entry: the files of both, marked edited, with the reason it had', () => {
+  const d = tmpRepo([TODOS]); mkdirSync(join(d, 'test')); mkdirSync(join(d, 'docs'));
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, mandates: [{ name: 'frozen', paths: ['test/**'], reason: 'the tests are the spec' }], metrics: [TODOS] }));
+  writeFileSync(join(d, 'test', 'a.js'), '1\n'); writeFileSync(join(d, 'docs', 'b.md'), '1\n'); writeFileSync(join(d, 'app.js'), 'x // TODO\n'); commitAll(d, 'base');
+  // at the head the rule names other paths and gives no reason; the change touches a file under each version
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, mandates: [{ name: 'frozen', paths: ['docs/**'] }], metrics: [TODOS] }));
+  writeFileSync(join(d, 'app.js'), 'x\n'); writeFileSync(join(d, 'test', 'a.js'), '2\n'); writeFileSync(join(d, 'docs', 'b.md'), '2\n'); commitAll(d, 'head');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'fail'); assert.equal(r.mandates.length, 1, JSON.stringify(r.mandates));
+  assert.deepEqual([...r.mandates[0].files].sort(), ['docs/b.md', 'test/a.js']); assert.equal(r.mandates[0].edited, true); assert.equal(r.mandates[0].reason, 'the tests are the spec');
+  rmSync(d, { recursive: true, force: true });
+});
+test('mandates: the same paths in another order is the same rule, not an edited one', () => {
+  const d = tmpRepo([TODOS]); const rule = (paths) => writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, mandates: [{ name: 'frozen', paths, reason: 'frozen' }], metrics: [TODOS] }));
+  rule(['a.lock', 'b.lock']); writeFileSync(join(d, 'a.lock'), '1\n'); writeFileSync(join(d, 'b.lock'), '1\n'); writeFileSync(join(d, 'app.js'), 'x // TODO\n'); commitAll(d, 'base');
+  rule(['b.lock', 'a.lock']); writeFileSync(join(d, 'app.js'), 'x\n'); writeFileSync(join(d, 'a.lock'), '2\n'); commitAll(d, 'head');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'fail'); assert.equal(r.mandates.length, 1); assert.equal(r.mandates[0].edited, undefined, 'the rule reads the same; only the order of its paths moved'); assert.deepEqual(r.mandates[0].files, ['a.lock']);
+  rmSync(d, { recursive: true, force: true });
+});
+test('mandates: a hit names up to twenty of the files that changed, and no fewer', () => {
+  const d = tmpRepo([TODOS]); mkdirSync(join(d, 'frozen')); const all = (v) => { for (let i = 0; i < 25; i++) writeFileSync(join(d, 'frozen', `f${String(i).padStart(2, '0')}.txt`), `${v}\n`); };
+  writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, mandates: [{ name: 'frozen', paths: ['frozen/**'] }], metrics: [TODOS] }));
+  all(1); writeFileSync(join(d, 'app.js'), 'x // TODO\n'); commitAll(d, 'base'); all(2); writeFileSync(join(d, 'app.js'), 'x\n'); commitAll(d, 'head');
+  const r = check({ repo: d, base: 'HEAD~1', head: 'HEAD' });
+  assert.equal(r.verdict, 'fail'); assert.equal(r.mandates[0].files.length, 20);
+  rmSync(d, { recursive: true, force: true });
+});
+test('gain: a pass metric that already passed and still passes gained nothing', () => {
+  assert.equal(gain({ direction: 'pass' }, 1, 1), 0); assert.equal(gain({ direction: 'pass' }, 0, 1), 1); assert.equal(gain({ direction: 'pass' }, 1, 0), -1);
+});
+test('a path pattern: ? is one character and does not cross a folder', () => {
+  const q = evaluatorMatcher({ evaluatorPaths: ['ci/limit?.json'] });
+  assert.equal(q('ci/limit1.json'), true); assert.equal(q('ci/limit/.json'), false); assert.equal(q('ci/limit12.json'), false);
+});
+// The other session's lead S24, as a claims test: `--base-cache` asks for a folder outside the repository. That is
+// true and not enough when the attempt runs as the person: it can write the folder. The engine takes the kept number.
+test('--base-cache: the folder is only as safe as who can write it: a kept number edited between two runs is the base the next run reads, and both pages say so', () => {
+  const a = countedRepo(), base = rev(a.d);
+  a.level(2, 'a first try'); assert.equal(check({ repo: a.d, base, head: 'HEAD', baseCache: a.keep }).metrics[0].before, 1);
+  const files = readdirSync(a.keep).filter((f) => f.endsWith('.json')); assert.equal(files.length, 1);
+  const kept = JSON.parse(readFileSync(join(a.keep, files[0]), 'utf8')); kept.samples.score = [-50]; writeFileSync(join(a.keep, files[0]), JSON.stringify(kept));   // what an attempt that runs as the person can do
+  a.level(0, 'a second try that makes the score WORSE than the base it started from');
+  const r = check({ repo: a.d, base, head: 'HEAD', baseCache: a.keep });
+  assert.equal(r.metrics[0].before, -50, 'the edited number is read as the base'); assert.equal(r.metrics[0].status, 'improved'); assert.equal(r.verdict, 'pass');
+  assert.equal(check({ repo: a.d, base, head: 'HEAD' }).verdict, 'fail', 'measured fresh, the same change fails');
+  const said = /The folder is only as safe as who can write it: an attempt that runs as you can edit a kept number/;
+  for (const f of ['README.md', 'INTEGRATE.md']) assert.match(readFileSync(join(dirname(ENGINE), '..', f), 'utf8').replace(/\s+/g, ' '), said, f);
+  a.done();
 });
 
 // ---- The wheel, put back (proof-bench/wheel/PLAN.md, 2026-11-21) ------------------------------------------------------
