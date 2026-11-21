@@ -3629,3 +3629,34 @@ test('a comment longer than GitHub takes is cut short and says where the rest is
   assert.match(p.body, /\(Cut short: the whole report is in the job summary\.\)\n*$/);
   assert.ok(p.summary.length > p.body.length, 'the job summary has all of it');
 });
+
+// Found 2026-11-20 by reading every benchmark pair through the engine's own commands (proof-bench/gatekeep-study,
+// then proof-bench/live/release-0.2.3): `run` printed its report and called process.exit() at once. Node writes to a
+// pipe in the background, and an exit drops what the pipe has not taken yet. A report larger than a pipe holds
+// arrived cut, with the verdict's exit code: at 146,176 bytes when the reader was quick, at 65,536 when it was slow.
+// The report lists every test and config file a change touches, so it happened on a change of a few thousand of them.
+// sawbuck reads the engine through a pipe: `sawbuck check` then said "could not run", and the end of a turn said
+// nothing about a test edited to pass in that same change.
+test('a report larger than a pipe holds arrives whole through a reader that starts late, with the exit code of its verdict', () => {
+  const d = repoWith({ 'package.json': JSON.stringify({ name: 'a', scripts: { test: 'node --test test/a.test.js' } }), 'src/a.js': 'exports.f = () => 1\n', 'test/a.test.js': NODE_TEST("require('../src/a.js').f(), 1") });
+  const deep = 'test/generated/a-folder-name-long-enough-that-nine-hundred-files-in-it-make-a-report-no-pipe-holds';
+  const add = (tag) => { mkdirSync(join(d, deep), { recursive: true }); for (let i = 0; i < 900; i++) writeFileSync(join(d, deep, `${tag}-${String(i).padStart(4, '0')}.test.js`), `require('node:test').test('${tag} ${i}', () => {})\n`); };
+  // A reader that takes nothing for a second: a busy parent, a slow tool, a pipe that is full. A real pipe between two
+  // processes, made by the shell (a paused stream in this process would still be read by Node underneath).
+  const lateReader = () => {
+    const o = join(TMP_ROOT, 'late.out'), c = join(TMP_ROOT, 'late.code');
+    spawnSync('sh', ['-c', '( "$0" "$@" 2>/dev/null; echo $? > "$CODE" ) | ( sleep 1; cat ) > "$OUT"', process.execPath, ENGINE, 'run', '--base', 'HEAD~1', '--head', 'HEAD', '--no-record', '--json'], { cwd: d, env: { ...process.env, OUT: o, CODE: c } });
+    return { code: +readFileSync(c, 'utf8'), text: readFileSync(o, 'utf8') };
+  };
+  const whole = (r) => { try { return JSON.parse(r.text); } catch { return null; } };
+  add('held'); commitAll(d, 'nine hundred test files');
+  let r = lateReader(), rep = whole(r);
+  assert.ok(rep, `the report did not arrive whole: ${Buffer.byteLength(r.text)} bytes came, ending ${JSON.stringify(r.text.slice(-30))}`);
+  assert.ok(Buffer.byteLength(r.text) > 65536, `this test means nothing unless the report is larger than a pipe holds: ${Buffer.byteLength(r.text)} bytes`);
+  assert.equal(rep.verdict, 'pass'); assert.equal(r.code, 0); assert.equal(rep.gate.goalposts.length, 900);
+  // the same with a verdict that is not a pass: the code is the verdict's, and the report is still whole
+  writeFileSync(join(d, 'src/a.js'), 'exports.f = () => 2\n'); add('broke'); commitAll(d, 'break the source, and nine hundred more');
+  r = lateReader(); rep = whole(r);
+  assert.ok(rep, `the failing report did not arrive whole: ${Buffer.byteLength(r.text)} bytes came`);
+  assert.equal(rep.verdict, 'fail'); assert.equal(r.code, 1); assert.equal(rep.gate.goalposts.length, 900);
+});

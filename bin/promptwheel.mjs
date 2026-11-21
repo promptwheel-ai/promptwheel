@@ -1399,7 +1399,11 @@ function run(argv) {
   if (args.json) console.log(JSON.stringify(report, null, 2));
   else if (args.markdown) console.log(renderMarkdown(report));
   else printHuman(report);
-  process.exit(verdictExitCode(report.verdict));
+  // The code is set and the process ends by itself, so everything printed is written first. Until 0.8.15 this line was
+  // process.exit(): Node writes to a pipe in the background and an exit drops what the pipe has not taken yet, so a
+  // report larger than a pipe holds arrived cut, with the verdict's exit code (at 146,176 bytes when the reader was
+  // quick, at 65,536 when it was slow). The report lists every test and config file a change touches.
+  process.exitCode = verdictExitCode(report.verdict);
 }
 
 // ---------------------------------------------------------------------------
