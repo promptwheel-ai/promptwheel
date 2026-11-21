@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, utimesSync, symlinkSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, utimesSync, symlinkSync, unlinkSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -4784,6 +4784,99 @@ test('improve: a check the attempt runs itself adds a row and is no tampering; a
   const x = spawnSync(process.execPath, [ENGINE, 'improve', '--json', '--attempt', "sed -i 's| // TODO||' app.js"], { cwd: d, encoding: 'utf8', env });
   assert.equal(x.status, 1, x.stdout + x.stderr); assert.equal(JSON.parse(x.stdout).result, 'refused'); assert.deepEqual(JSON.parse(x.stdout).because, ['commit']); assert.match(x.stderr, /the commit could not be made/);
   assert.equal(rev(d), base); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
+});
+
+// ---- Git's own files (the other session's second list, attacks 29 to 36, 2026-11-21) ----------------------------------
+// Git does not track its own files: the repo's config, its hooks and info folders, the refs, the person's global config.
+// An attempt can write all of them, and both the loop and the gate run git. Five ways through this command went by them
+// (proof-bench/wheel/raw/their-attacks-36-command.txt): a reference-transaction hook moved the branch after the keep, a
+// filter made the commit hold another number than the one measured (in the repo's config, and in the global one), a
+// replace ref swapped the object the check read, and an fsmonitor command ran inside the loop's own git calls. Now git's
+// own files are put back before the change is judged, and the engine's own git calls run no hook, no fsmonitor command
+// and read no replace object. The person's commands (a metric, the setup, the attempt) get their own environment.
+const pwEnv = (d, args, env) => { const r = spawnSync(process.execPath, [ENGINE, ...args], { cwd: d, encoding: 'utf8', env }); return { code: r.status, out: r.stdout, err: r.stderr }; };
+const homeEnv = (h) => { const e = { ...process.env, HOME: h, XDG_CONFIG_HOME: join(h, '.config') }; delete e.GIT_CONFIG_GLOBAL; return e; };
+const scoreRepo = (more = []) => { const d = tmpRepo([{ name: 'score', cmd: 'cat src/score.txt', extract: 'number', direction: 'up', guard: true }, ...more]); mkdirSync(join(d, 'src')); writeFileSync(join(d, 'src', 'score.txt'), '100\n'); writeFileSync(join(d, 'src', 'cost.txt'), '100\n'); commitAll(d, 'base'); return d; };
+const FILTER = (scope) => `git config ${scope} filter.mine.clean "sed s/110/90/"; git config ${scope} filter.mine.smudge "sed s/90/110/"`;
+test("improve: git's own files are put back before the change is judged: a hook, an fsmonitor command and a filter the attempt set do not stand, and none of them runs in the engine's git calls", () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'pw-gitown-'));
+  let d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  const hook = `#!/bin/sh\\ntouch ${tmp}/hook-ran\\n`, fsm = `#!/bin/sh\\ntouch ${tmp}/fsm-ran\\n`;
+  let r = pw2(d, ['improve', '--json', '--attempt', `sed -i '1s| // TODO||' app.js; printf '${hook}' > .git/hooks/reference-transaction; chmod +x .git/hooks/reference-transaction; printf '${hook}' > .git/hooks/post-index-change; chmod +x .git/hooks/post-index-change; printf '${fsm}' > .git/fsm.sh; chmod +x .git/fsm.sh; git config core.fsmonitor .git/fsm.sh`]);
+  assert.equal(r.code, 0, r.out + r.err); let j = JSON.parse(r.out); assert.equal(j.result, 'kept', 'the change itself is judged as usual');
+  assert.equal(existsSync(join(tmp, 'hook-ran')), false, 'no hook the attempt planted ran'); assert.equal(existsSync(join(tmp, 'fsm-ran')), false, 'nor its fsmonitor command');
+  assert.equal(existsSync(join(d, '.git', 'hooks', 'reference-transaction')), false); assert.equal(existsSync(join(d, '.git', 'hooks', 'post-index-change')), false);
+  assert.throws(() => gitOut(d, ['config', '--get', 'core.fsmonitor']), 'the setting is gone'); assert.equal(treeOf(d, 'HEAD'), treeOf(d, j.provenance.headSha));
+  assert.match(r.err, /put back/); assert.match(r.err, /\.git\/hooks\/reference-transaction|hooks/);
+  // a filter in the repo's own config and attributes: the commit must hold the number that was measured
+  d = scoreRepo();
+  r = pw2(d, ['improve', '--json', '--attempt', `${FILTER('')}; echo 'src/score.txt filter=mine' >> .git/info/attributes; echo 110 > src/score.txt`]);
+  assert.equal(r.code, 0, r.out + r.err); j = JSON.parse(r.out);
+  const measured = j.metrics.find((x) => x.name === 'score').after;
+  assert.equal(Number(gitOut(d, ['show', 'HEAD:src/score.txt'])), measured, 'what was kept is what was measured');
+  assert.throws(() => gitOut(d, ['config', '--get', 'filter.mine.clean'])); assert.equal(existsSync(join(d, '.git', 'info', 'attributes')), false, 'the attributes file it made is removed');
+  rmSync(tmp, { recursive: true, force: true });
+});
+test('improve: a replace ref the attempt adds is removed, and the engine never reads a replaced object: a worse cost is seen and put back', () => {
+  const d = scoreRepo([{ name: 'cost', cmd: 'cat src/cost.txt', extract: 'number', direction: 'down', guard: true }]); const base = rev(d);
+  const r = pw2(d, ['improve', '--json', '--attempt', 'echo 101 > src/score.txt; old=$(git rev-parse HEAD:src/cost.txt); echo 120 > src/cost.txt; git replace $(git hash-object -w src/cost.txt) $old']);
+  assert.equal(r.code, 1, r.out + r.err); const j = JSON.parse(r.out); assert.notEqual(j.result, 'kept'); assert.equal(j.metrics.find((x) => x.name === 'cost').after, 120, 'the cost read is the one in the tree');
+  assert.equal(gitOut(d, ['for-each-ref', 'refs/replace']), ''); assert.equal(rev(d), base); assert.equal(readFileSync(join(d, 'src', 'cost.txt'), 'utf8'), '100\n');
+});
+test('run: the check reads the objects as they are stored: a replace ref in the repo does not swap what is measured', () => {
+  const d = scoreRepo([{ name: 'cost', cmd: 'cat src/cost.txt', extract: 'number', direction: 'down', guard: true }]);
+  const old = gitOut(d, ['rev-parse', 'HEAD:src/cost.txt']); writeFileSync(join(d, 'src', 'cost.txt'), '120\n'); commitAll(d, 'dearer');
+  execFileSync('git', ['replace', gitOut(d, ['rev-parse', 'HEAD:src/cost.txt']), old], { cwd: d });
+  assert.equal(execFileSync('git', ['show', 'HEAD:src/cost.txt'], { cwd: d, encoding: 'utf8' }), '100\n', 'git itself now shows the old number');
+  const r = pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json', '--no-record']);
+  assert.equal(r.code, 1, r.out); assert.equal(reportOf(r.out).metrics.find((x) => x.name === 'cost').after, 120);
+});
+test('improve: refs are put back: a tag or a branch the attempt makes on the side is removed, one it moves is put back, and the change is judged as usual', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base'); execFileSync('git', ['branch', 'other'], { cwd: d }); const base = rev(d);
+  writeFileSync(join(d, 'note.txt'), 'x\n'); commitAll(d, 'a second commit'); execFileSync('git', ['reset', '-q', '--hard', base], { cwd: d });
+  const r = pw2(d, ['improve', '--json', '--attempt', `sed -i '1s| // TODO||' app.js; git tag new; git branch side; git update-ref refs/heads/other HEAD@{1}`]);
+  assert.equal(r.code, 0, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'kept');
+  assert.equal(gitOut(d, ['for-each-ref', '--format=%(refname)', 'refs/tags/new', 'refs/heads/side']), ''); assert.equal(gitOut(d, ['rev-parse', 'other']), base, 'a branch it moved is where it was');
+});
+test("improve: a hook in a tracked hooks folder (core.hooksPath) that the attempt edits does not run in the engine's git calls", () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'pw-hookspath-'));
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); mkdirSync(join(d, 'hooks'));
+  writeFileSync(join(d, 'hooks', 'reference-transaction'), '#!/bin/sh\nexit 0\n'); chmodSync(join(d, 'hooks', 'reference-transaction'), 0o755); commitAll(d, 'base');
+  execFileSync('git', ['config', 'core.hooksPath', 'hooks'], { cwd: d });
+  const r = pw2(d, ['improve', '--json', '--attempt', `sed -i '1s| // TODO||' app.js; printf '#!/bin/sh\\ntouch ${tmp}/ran\\n' > hooks/reference-transaction`]);
+  assert.equal(r.code, 0, r.out + r.err); assert.equal(existsSync(join(tmp, 'ran')), false, 'the edited hook never ran');
+  rmSync(tmp, { recursive: true, force: true });
+});
+test('improve: your global git config is put back if it changed while the attempt ran, the line names the file, and a link stays a link', () => {
+  const h = mkdtempSync(join(tmpdir(), 'pw-home-')); const env = homeEnv(h);
+  writeFileSync(join(h, '.gitconfig'), '[alias]\n\tst = status\n');
+  let d = scoreRepo();
+  let r = pwEnv(d, ['improve', '--json', '--attempt', `${FILTER('--global')}; git config --global core.attributesFile "$HOME/.mine-attributes"; echo 'src/score.txt filter=mine' > "$HOME/.mine-attributes"; echo 110 > src/score.txt`], env);
+  assert.equal(r.code, 0, r.out + r.err); let j = JSON.parse(r.out);
+  assert.equal(Number(gitOut(d, ['show', 'HEAD:src/score.txt'])), j.metrics.find((x) => x.name === 'score').after, 'what was kept is what was measured');
+  assert.equal(readFileSync(join(h, '.gitconfig'), 'utf8'), '[alias]\n\tst = status\n', 'your global config is as it was');
+  assert.ok(r.err.includes(`your git settings (${join(h, '.gitconfig')})`), r.err);
+  // none before the attempt: none after it
+  rmSync(join(h, '.gitconfig')); d = scoreRepo();
+  r = pwEnv(d, ['improve', '--json', '--attempt', 'git config --global core.fsmonitor /bin/true; echo 110 > src/score.txt'], env);
+  assert.equal(r.code, 0, r.out + r.err); assert.equal(existsSync(join(h, '.gitconfig')), false);
+  // a config kept in a dotfiles folder and linked: it stays a link, and the file it points to is as it was
+  const dot = mkdtempSync(join(tmpdir(), 'pw-dot-')); writeFileSync(join(dot, 'gitconfig'), '[alias]\n\tst = status\n'); symlinkSync(join(dot, 'gitconfig'), join(h, '.gitconfig'));
+  d = scoreRepo();
+  r = pwEnv(d, ['improve', '--json', '--attempt', 'git config --global core.fsmonitor /bin/true; echo 110 > src/score.txt'], env);
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.ok(lstatSync(join(h, '.gitconfig')).isSymbolicLink(), 'still a link'); assert.equal(readFileSync(join(dot, 'gitconfig'), 'utf8'), '[alias]\n\tst = status\n');
+  // a global config that is not a file (the suite's own /dev/null) is left alone
+  d = scoreRepo(); r = pwEnv(d, ['improve', '--json', '--attempt', 'echo 110 > src/score.txt'], { ...env, GIT_CONFIG_GLOBAL: '/dev/null' });
+  assert.equal(r.code, 0, r.out + r.err);
+  for (const x of [h, dot]) rmSync(x, { recursive: true, force: true });
+});
+test("the engine's own git settings are not handed to a command it runs for you: a metric sees your environment as you set it", () => {
+  const SEEN = { name: 'seen', cmd: `node -e "process.stdout.write(process.env.GIT_NO_REPLACE_OBJECTS || process.env.GIT_CONFIG_COUNT !== '1' || process.env.GIT_CONFIG_KEY_1 ? '0' : '1')"`, extract: 'number', direction: 'up', guard: true };
+  const d = tmpRepo([SEEN]); writeFileSync(join(d, 'a.txt'), '1\n'); commitAll(d, 'base'); writeFileSync(join(d, 'a.txt'), '2\n'); commitAll(d, 'head');
+  const env = { ...process.env, GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'user.name', GIT_CONFIG_VALUE_0: 'person' }; delete env.GIT_NO_REPLACE_OBJECTS;
+  const r = pwEnv(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--json', '--no-record'], env);
+  assert.equal(r.code, 0, r.out + r.err); const m = reportOf(r.out).metrics[0]; assert.equal(m.before, 1); assert.equal(m.after, 1);
 });
 
 // ------------------------------------------------ the improve loop is kept on purpose

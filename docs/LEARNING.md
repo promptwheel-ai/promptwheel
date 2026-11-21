@@ -53,6 +53,8 @@ trusted something the attempt could write. They are closed:
 | a file hidden from git | `skip-worktree` and `assume-unchanged` hide a change from `git status`, and `git reset --hard` does not put such a file back. The loop does not start while a file is hidden. If an attempt hides one, it is shown again and the attempt is put back |
 | the loop's own files | the record and the program itself (this file, and the packs beside it) are put back if an attempt changed them, and that attempt is put back too. The record may grow during an attempt (a check the attempt ran adds a row). The lines that were there must still be there |
 | the contract | an attempt that changes it is put back (above) |
+| git's own files | the repo's git config, its hooks and info folders, the refs, and your global git config and attributes file. Git does not track them and an attempt can write them. A second list of attacks from the same session went through them: a hook moved the branch after the keep, a filter made the commit hold another number than the one measured, a replace ref swapped the object the check read, an fsmonitor command ran inside the loop's own git calls. They are read before each attempt and put back after it, before the change is judged, and the change is then judged as usual. If your global config changed while the attempt ran, it is put back too, and the line names the file. A file that is a link stays a link |
+| the engine's own git calls | run no hook, no fsmonitor command, and read no replace object, whatever the repo's settings say. The commands it runs for you (a metric, the setup, the attempt) get your environment as you set it |
 
 **What this cannot hold, said plainly.** The attempt runs as you, with no wall around it.
 - **An installed dependency that a measure runs** (`node_modules`, a `vendor` folder git ignores). An attempt can
@@ -62,8 +64,11 @@ trusted something the attempt could write. They are closed:
   contract), not scored.
 - **A process the attempt leaves running.** It cannot get anything into the commit: the commit is the judged tree.
   It can write to the tree after the loop has finished. The next run will not start on a tree that is not clean,
-  and says so.
-- **Anything outside the repo:** a database, a service, a file in your home folder.
+  and says so. It can also write into the copy the check measures in, in the temp folder, while it is measured: a
+  new file that moved no number was kept as a win that way. Ending the attempt's process group would stop the plain
+  form and not one that leaves its group. A container stops both.
+- **Anything outside the repo:** a database, a service, a file in your home folder. Your global git config is
+  put back; a file it includes from somewhere else is not.
 - **A sparse checkout** hides files the same way an attack does, so the loop does not run in one.
 A container around the attempt, or the check run again where the attempt cannot reach (a pull request), is what
 holds these. The loop does not.

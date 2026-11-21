@@ -14,8 +14,8 @@
 
 import { execSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, realpathSync, readdirSync, lstatSync, copyFileSync, openSync, closeSync, appendFileSync, renameSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, realpathSync, readdirSync, lstatSync, copyFileSync, openSync, closeSync, appendFileSync, renameSync, readlinkSync, chmodSync, statSync } from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
 import { join, dirname, basename, isAbsolute, relative, sep, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,6 +28,36 @@ const git = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf8' }).
 // ("src/a\303\261adir.js", git's core.quotePath), and that string is no file: it matches no protected path and no
 // pathspec, so an honest fix in such a file read "gamed" and a new workflow with such a name was no protected path.
 const gitNames = (args, cwd) => execFileSync('git', [...args, '-z'], { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).split('\0').filter(Boolean);
+// The engine's own git calls run no hook, no fsmonitor command, and read no replace object, whatever the repo's or the
+// person's git settings say. A hook an agent planted ran inside the loop's own git calls and moved the branch after the
+// keep, an fsmonitor command ran in every later step, and a replace ref swapped the object the check read for an older
+// one (attacks 29, 31 and 33 of another session's second list, 2026-11-21). Set through GIT_CONFIG_COUNT, which outranks
+// every config file, for as long as the engine works. A command the engine runs FOR the person (a metric, the setup,
+// an attempt in the loop) gets the person's environment back: personEnv. Nothing in a library caller's own process is
+// left changed once a check returns.
+const OWN_GIT = { depth: 0, set: {}, was: {} };
+function ownGitOn() {
+  if (OWN_GIT.depth++ > 0) return;
+  const env = process.env, k = Number(env.GIT_CONFIG_COUNT) || 0;
+  OWN_GIT.set = { GIT_CONFIG_COUNT: String(k + 2), [`GIT_CONFIG_KEY_${k}`]: 'core.hooksPath', [`GIT_CONFIG_VALUE_${k}`]: '/dev/null', [`GIT_CONFIG_KEY_${k + 1}`]: 'core.fsmonitor', [`GIT_CONFIG_VALUE_${k + 1}`]: 'false', GIT_NO_REPLACE_OBJECTS: '1' };
+  OWN_GIT.was = Object.fromEntries(Object.keys(OWN_GIT.set).map((key) => [key, env[key]]));
+  Object.assign(env, OWN_GIT.set);
+}
+function ownGitOff() {
+  if (--OWN_GIT.depth > 0) return;
+  for (const [key, v] of Object.entries(OWN_GIT.was)) { if (v === undefined) delete process.env[key]; else process.env[key] = v; }
+  OWN_GIT.set = {}; OWN_GIT.was = {};
+}
+// the environment for a command run for the person: as they set it, without the engine's own git settings or its switch
+function personEnv(env) {
+  const e = { ...(env || process.env) };
+  // the engine's own switch: PROMPTWHEEL_NO_ALLOW_TRAILER tells THIS run to read no reason from a commit. Handed on, it
+  // reached the suite of a repo that tests trailers (this one), and six of its tests failed at both ends of every check
+  // Sawbuck ran here, so they were never checked there (found by another session, 2026-11-21).
+  delete e.PROMPTWHEEL_NO_ALLOW_TRAILER;
+  for (const [key, v] of Object.entries(OWN_GIT.set)) if (e[key] === v) { if (OWN_GIT.was[key] === undefined) delete e[key]; else e[key] = OWN_GIT.was[key]; }
+  return e;
+}
 // The engine's own throwaway checkouts run none of the person's git hooks. `git worktree add` fires post-checkout,
 // from the repo's hooks folder or the person's global one (core.hooksPath): a hook that rebuilds tags or installs
 // packages ran in every throwaway copy, and one that exits 1 on a detached HEAD made the add fail after the checkout
@@ -206,11 +236,8 @@ function runMetric(cwd, m, env, codes, notes) {
   // Never leak the harness's own node:test context into the measured gate: a metric like
   // `node --test` would see NODE_TEST_CONTEXT, act as a child reporter, and report a bogus
   // exit code (so the gate can't be trusted when PromptWheel itself runs under a test runner).
-  const childEnv = { ...(env || process.env) }; delete childEnv.NODE_TEST_CONTEXT;
-  // nor the engine's own switch: PROMPTWHEEL_NO_ALLOW_TRAILER tells THIS run to read no reason from a commit. Handed on,
-  // it reached the suite of a repo that tests trailers (this one), and six of its tests failed at both ends of every
-  // check Sawbuck ran here, so they were never checked there (found by another session, 2026-11-21).
-  delete childEnv.PROMPTWHEEL_NO_ALLOW_TRAILER;
+  // nor the engine's own switch and git settings (personEnv)
+  const childEnv = personEnv(env); delete childEnv.NODE_TEST_CONTEXT;
   try {
     // maxBuffer: the default is 1 MB, and a suite that prints more than that was killed and read as failing. A real
     // repo found it (tap prints every assertion when its output is a pipe): the check said "your tests fail" about
@@ -333,7 +360,7 @@ function bridgeEnv(repo, wt, cfg) {
 const OLD_PYTHON_SETUP = 'pip install -e . --quiet 2>/dev/null || true';
 function runSetup(wt, cfg, env) {
   if (!cfg.setup || cfg.setup === OLD_PYTHON_SETUP) return undefined;
-  try { const setupEnv = { ...(env || process.env) }; delete setupEnv.PROMPTWHEEL_NO_ALLOW_TRAILER; execSync(cfg.setup, { cwd: wt, env: setupEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000, maxBuffer: 1024 * 1024 * 1024 }); return undefined; }
+  try { const setupEnv = personEnv(env); execSync(cfg.setup, { cwd: wt, env: setupEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300_000, maxBuffer: 1024 * 1024 * 1024 }); return undefined; }
   catch (e) {
     const lines = `${e.stdout || ''}\n${e.stderr || ''}`.replace(/\x1b\[[0-9;]*m/g, '').split('\n').map((l) => l.trim()).filter(Boolean);
     return { exit: e.status ?? null, lastLine: (lines[lines.length - 1] || '').slice(0, 200) };   // the metric goes inert → inconclusive
@@ -1063,7 +1090,7 @@ function writeBlobs(repo, targets) {
 }
 // the contract's own command, counted by file instead of in all: { file: count }
 const countByFile = (dir, def, env) => {
-  const out = execSync(def.cmd.replace(TRIP_TAIL, '| cut -d: -f1 | sort | uniq -c'), { cwd: dir, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 256 * 1024 * 1024, timeout: 120000 });
+  const out = execSync(def.cmd.replace(TRIP_TAIL, '| cut -d: -f1 | sort | uniq -c'), { cwd: dir, env: personEnv(env), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 256 * 1024 * 1024, timeout: 120000 });
   return Object.fromEntries(out.split('\n').map((l) => l.match(/^\s*(\d+)\s+(.+)$/)).filter(Boolean).map((x) => [x[2].replace(/^\.\//, ''), +x[1]]));
 };
 // Map of metric name -> { file: [before, after] } for the tripwires among `defs`, over the files base..head touched.
@@ -1318,7 +1345,8 @@ export function deriveVerdict(metrics, gateInfo = null, mandated = false) {
   return (mandated || failed) ? 'fail' : gamed ? 'gamed' : inconclusive ? 'inconclusive' : 'pass';
 }
 
-function gate(repo, opts) {
+function gate(repo, opts) { ownGitOn(); try { return gateInner(repo, opts); } finally { ownGitOff(); } }
+function gateInner(repo, opts) {
   selfHeal(repo);
   const cfg = opts.config ?? loadConfig(repo);
 
@@ -1585,6 +1613,7 @@ function recordRun(repo, report, cfg, extra = {}) {
       ...(extra.episode ? { episode: extra.episode } : {}),
       ...(typeof extra.turn === 'number' ? { turn: extra.turn, standing: extra.standing } : {}),
       ...(typeof extra.turns === 'number' ? { turns: extra.turns, best: extra.best } : {}),
+      ...(extra.restored && extra.restored.length ? { restored: extra.restored.slice(0, 4).map((x) => oneLine(x, 40)) } : {}),
     };
     let line = JSON.stringify(row);
     if (line.length > ROW_MAX) { row.metrics = row.metrics.filter((m) => m.status !== 'unchanged'); row.cut = true; line = JSON.stringify(row); }
@@ -1720,6 +1749,71 @@ const bytesOf = (f) => { try { return readFileSync(f); } catch { return null; } 
 // run says what happened and prints the line that does. It deletes nothing by itself: by then the tree may hold work
 // of the person's.
 const markFile = (repo) => join(dirname(recordFile(repo)), 'running.json');
+// Git's own files, which git does not track and an attempt can write: the repo's config (and the worktree's), its hooks
+// and info folders, and the person's global config and attributes file. Read before each attempt and put back after it,
+// before anything is judged: a filter set there made the commit hold another number than the one measured, a hook and
+// an fsmonitor command ran inside the loop's own git calls (attacks 29, 30, 33 and 34 of another session's second list,
+// 2026-11-21). A file that is a link stays a link; a path that is not a plain file (the /dev/null of a test) is left alone.
+function gitOwnPaths(repo) {
+  const abs = (p) => resolve(repo, p);
+  const common = abs(git(['rev-parse', '--git-common-dir'], repo)), gitDir = abs(git(['rev-parse', '--git-dir'], repo));
+  const home = process.env.HOME || homedir(), xdg = process.env.XDG_CONFIG_HOME || join(home, '.config');
+  const globals = process.env.GIT_CONFIG_GLOBAL ? [process.env.GIT_CONFIG_GLOBAL] : [join(xdg, 'git', 'config'), join(home, '.gitconfig')];
+  let attrs = ''; try { attrs = execFileSync('git', ['config', '--global', '--path', '--get', 'core.attributesFile'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* not set */ }
+  return { common, files: [join(common, 'config'), join(gitDir, 'config.worktree'), attrs || join(xdg, 'git', 'attributes')], globals, dirs: [join(common, 'hooks'), join(common, 'info')] };
+}
+function readGitOwn(repo) {
+  const at = gitOwnPaths(repo), snap = new Map();
+  const one = (f) => {
+    let st; try { st = lstatSync(f); } catch { snap.set(f, { missing: true }); return; }
+    if (st.isSymbolicLink()) { let bytes = null; try { if (statSync(f).isFile()) bytes = readFileSync(f); } catch { /* a link to nothing */ } snap.set(f, { link: readlinkSync(f), bytes }); }
+    else if (st.isFile()) snap.set(f, { bytes: readFileSync(f), mode: st.mode & 0o7777 });
+    else snap.set(f, { skip: true });
+  };
+  const walk = (dir) => { let names = []; try { names = readdirSync(dir); } catch { return; } for (const n of names) { const f = join(dir, n); let st; try { st = lstatSync(f); } catch { continue; } if (st.isDirectory()) walk(f); else one(f); } };
+  for (const f of [...at.files, ...at.globals]) one(f);
+  for (const d of at.dirs) walk(d);
+  return { at, snap };
+}
+// puts back what changed, removes what was added, and says which: { repo: [names], global: [paths] }
+function putBackGitOwn({ at, snap }) {
+  const changed = new Set();
+  const same = (a, b) => (a == null && b == null) || (a != null && b != null && a.equals(b));
+  for (const [f, was] of snap) {
+    if (was.skip) continue;
+    let st = null; try { st = lstatSync(f); } catch { /* gone */ }
+    try {
+      if (was.missing) { if (st) { rmSync(f, { recursive: true, force: true }); changed.add(f); } continue; }
+      if (was.link) {
+        if (!st || !st.isSymbolicLink() || readlinkSync(f) !== was.link) { rmSync(f, { recursive: true, force: true }); mkdirSync(dirname(f), { recursive: true }); symlinkSync(was.link, f); changed.add(f); }
+        let now = null; try { now = readFileSync(f); } catch { /* a link to nothing */ }
+        if (was.bytes && !same(now, was.bytes)) { writeFileSync(f, was.bytes); changed.add(f); }
+        continue;
+      }
+      let now = null; try { if (st && st.isFile()) now = readFileSync(f); } catch { /* unreadable */ }
+      if (!st || !st.isFile() || !same(now, was.bytes)) { if (st && !st.isFile()) rmSync(f, { recursive: true, force: true }); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, was.bytes); changed.add(f); }
+      if ((statSync(f).mode & 0o7777) !== was.mode) { chmodSync(f, was.mode); changed.add(f); }
+    } catch { /* best effort: what could not be put back is still named */ changed.add(f); }
+  }
+  // a file the attempt added in the hooks or info folder (a hook, an attributes file)
+  const walk = (dir) => { let names = []; try { names = readdirSync(dir); } catch { return; } for (const n of names) { const f = join(dir, n); let st; try { st = lstatSync(f); } catch { continue; } if (st.isDirectory()) walk(f); else if (!snap.has(f)) { rmSync(f, { force: true }); changed.add(f); } } };
+  for (const d of at.dirs) walk(d);
+  const all = [...changed], inRepo = (f) => f.startsWith(at.common + sep);
+  return { repo: all.filter(inRepo).map((f) => relative(dirname(at.common), f) || f), global: all.filter((f) => !inRepo(f)) };
+}
+// every ref but the branch the run is on: a tag or a branch an attempt makes is removed, one it moves or deletes is put
+// back. The branch the attempt left HEAD on is not touched here: an attempt that leaves the branch is not judged, and the
+// branch is brought back where the run started (as before), with what the attempt made on the other branch left there.
+const refsOf = (repo, branch) => new Map(git(['for-each-ref', '--format=%(refname) %(objectname) %(symref)'], repo).split('\n').filter(Boolean).map((l) => l.split(' ')).filter(([ref, , sym]) => ref !== branch && !sym).map(([ref, sha]) => [ref, sha]));
+function putBackRefs(repo, before, branch) {
+  let on = ''; try { on = git(['symbolic-ref', '-q', 'HEAD'], repo); } catch { /* detached */ }
+  const now = refsOf(repo, branch), changed = [];
+  if (on && on !== branch) { before = new Map(before); before.delete(on); now.delete(on); }
+  for (const [ref, sha] of before) if (now.get(ref) !== sha) { try { git(['update-ref', ref, sha], repo); changed.push(ref); } catch { /* the object is gone */ } }
+  for (const ref of now.keys()) if (!before.has(ref)) { try { git(['update-ref', '-d', ref], repo); changed.push(ref); } catch { /* best effort */ } }
+  return changed;
+}
+
 function checkMark(repo) {
   let m; try { m = JSON.parse(readFileSync(markFile(repo), 'utf8')); } catch { return; }
   let alive = false; try { if (m && m.pid && m.pid !== process.pid) { process.kill(m.pid, 0); alive = true; } } catch { /* gone */ }
@@ -1742,7 +1836,8 @@ function checkMark(repo) {
 // left the tree, the WHOLE change so far is checked against the commit the run started from (so a test edited at one
 // turn makes no win at a later one), the reading is handed to the next turn, and the best turn is kept, as one
 // commit. The best so far lives in this process and nowhere an attempt can write.
-async function improve(argv) {
+async function improve(argv) { ownGitOn(); try { return await improveInner(argv); } finally { ownGitOff(); } }
+async function improveInner(argv) {
   const args = parseArgs(argv);
   if (!args.attempt) bad('promptwheel improve: needs --attempt "<a command that changes the repo>"');
   const repo = repoRoot(process.cwd());
@@ -1788,6 +1883,7 @@ async function improve(argv) {
   const episode = turns > 1 ? `${start.sha.slice(0, 7)}-${Date.now().toString(36)}` : undefined;
   const cfgNow = () => { try { return config ?? loadConfig(repo); } catch { return { metrics: [] }; } };   // a contract an attempt broke still gets its row
   let best = null, last = null, sinceBest = 0, prevTree = tree(start.sha), turnsRun = 0, moved = false, why = '';
+  const restoredAll = new Set();   // git's own files or refs an attempt changed, put back (named in the run's row)
   const path = [];
   try {
     mkdirSync(dirname(markFile(repo)), { recursive: true });
@@ -1795,14 +1891,22 @@ async function improve(argv) {
     for (let t = 1; t <= turns; t++) {
       try { writeFileSync(feedback, feedbackText(t, turns, last)); } catch { /* the attempt runs without it */ }
       const recFile = recordFile(repo), rec0 = bytesOf(recFile);
+      const gitOwn = readGitOwn(repo), refs0 = refsOf(repo, start.branch);
       // the attempt's own output goes to stderr, so stdout carries the report and nothing else; it reads no input
       console.error(turns > 1 ? `▶ turn ${t} of ${turns}: ${args.attempt}` : `▶ attempt: ${args.attempt}`);
       let code = 0;   // how the attempt's own command ended: 0 is "it finished", anything else is "it was cut off, or it failed"
-      try { execSync(args.attempt, { cwd: repo, stdio: ['ignore', 2, 2], env: { ...process.env, PW_TURN: String(t), PW_TURNS: String(turns), PW_FEEDBACK: feedback } }); }
+      try { execSync(args.attempt, { cwd: repo, stdio: ['ignore', 2, 2], env: { ...personEnv(process.env), PW_TURN: String(t), PW_TURNS: String(turns), PW_FEEDBACK: feedback } }); }
       catch (e) { code = e.status ?? 1; if (e.signal === 'SIGINT' || e.signal === 'SIGTERM' || e.status === 130) stopped = stopped || 'SIGINT'; else console.error(`  (the attempt ended with code ${code}; checking whatever it changed)`); }
       // What judges is put back before anything is judged, and before an interrupt is acted on: a file the attempt hid
       // from git, this program, the loop's record. The record may GROW during an attempt (a check the attempt ran itself
       // adds a row): what counts is that the lines that were there are still there.
+      // git's own files and the refs, first: a hook, a filter, an fsmonitor command or a replace ref the attempt set is gone
+      // before the change is judged. The change itself is judged as usual: with these put back, what is kept is what is measured.
+      const put = putBackGitOwn(gitOwn), refsPut = putBackRefs(repo, refs0, start.branch), restoredNow = [];
+      for (const f of put.global) console.error(`  (your git settings (${f}) changed while the attempt ran: put back as they were before it)`);
+      if (put.repo.length || refsPut.length) { const names = [...put.repo, ...refsPut]; console.error(`  (the attempt changed git's own files, put back before the change was judged: ${names.slice(0, 4).join(', ')}${names.length > 4 ? ` and ${names.length - 4} more` : ''})`); }
+      if (put.repo.length) restoredNow.push('git settings'); if (put.global.length) restoredNow.push('global git settings'); if (refsPut.length) restoredNow.push('refs');
+      for (const x of restoredNow) restoredAll.add(x);
       const touched = [];
       const hid = hiddenFiles(repo); if (hid.length) { showAgain(repo, hid); touched.push(['hidden', `the attempt hid ${hid.slice(0, 3).join(', ')} from git`]); }
       if (putBackOwn(own).length) touched.push(['program', 'the attempt changed the program that judges it']);
@@ -1841,7 +1945,7 @@ async function improve(argv) {
       path.push({ turn: t, standing: s.standing, gain: s.gain });
       if (turns > 1) {
         console.error(`  turn ${t}: ${s.standing === 'win' ? `ahead (${s.wins.join(', ')})` : s.standing === 'level' ? 'level with the start' : s.standing === 'worse' ? 'a guard is worse than at the start' : s.standing === 'gamed' ? 'gamed' : 'nothing could be told'}`);
-        if (!args.noRecord) recordRun(repo, report, cfgNow(), { label: args.label, goal, episode, turn: t, standing: s.standing });
+        if (!args.noRecord) recordRun(repo, report, cfgNow(), { label: args.label, goal, episode, turn: t, standing: s.standing, restored: restoredNow });
       }
       if (s.standing === 'win' && (!best || s.gain > best.s.gain)) { best = last; sinceBest = 0; } else if (best) sinceBest++;
       if (turns === 1) break;
@@ -1911,7 +2015,7 @@ async function improve(argv) {
     if (result !== 'kept') revert(repo, start.sha, start.branch);
     if (stopped) { note = `${note}\n  (interrupted${turns > 1 ? ` at turn ${Math.min(turnsRun + 1, turns)}` : ''}: ${result === 'kept' ? 'the best turn had passed its check and is kept' : 'nothing is left half-made'})`; if (result !== 'kept') exit = 130; }
     else if (why && turns > 1) note = `${note}\n  (the run ended after turn ${turnsRun}: ${why})`;
-    if (!args.noRecord && shown) recordRun(repo, shown, cfgNow(), { label: args.label, result, because, commit, goal, episode, ...(turns > 1 ? { turns: turnsRun, best: best ? best.t : 0 } : {}) });
+    if (!args.noRecord && shown) recordRun(repo, shown, cfgNow(), { label: args.label, result, because, commit, goal, episode, restored: [...restoredAll], ...(turns > 1 ? { turns: turnsRun, best: best ? best.t : 0 } : {}) });
 
     // stdout carries the report (JSON, or the table); the decision line goes to stderr, so a loop's driver reads clean
     // stdout. The code is set and the process ends by itself, so a large report is written whole (see run).
@@ -3062,6 +3166,7 @@ function dispatch() {
 let isMain = false;
 try { isMain = !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { /* not main */ }
 async function main() {
+  ownGitOn();   // every command: the engine's own git calls run no hook, no fsmonitor command, read no replace object
   try { await dispatch(); }
   catch (e) { if (e && e.name === 'ConfigError') die(e.message); throw e; }
 }
