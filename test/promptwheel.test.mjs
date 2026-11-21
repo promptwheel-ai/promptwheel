@@ -4137,3 +4137,90 @@ test('improve: an attempt may not change the contract, and a measure that was no
   assert.equal(r.code, 3, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'plateau'); assert.deepEqual(JSON.parse(r.out).because, ['new-measure:wins']);
   assert.match(r.err, /a measure that was not in the contract when the run started/); assert.match(pw(e, ['playbook']).out, /only `wins` improved, a measure that was not in the contract when the run started/);
 });
+
+// ---- What a second reader said no test would catch (proof-bench/wheel/teeth-extra.json, 2026-11-21) -------------------------
+// Twenty breaks, proposed after reading this code, these tests and the first list of breaks. Each one below that was
+// not caught has its test here now.
+test('improve: what a thrown-away attempt leaves alone and what it takes with it; an attempt that ends with an error and a real gain is kept', () => {
+  const out = mkdtempSync(join(tmpdir(), 'pw-x-'));
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, '.gitignore'), '.promptwheel/\nkeep.env\n'); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base'); const base = rev(d);
+  writeFileSync(join(d, 'keep.env'), 'mine\n');                                   // a file of the person's that git ignores
+  let r = spawnSync(process.execPath, [ENGINE, 'improve', '--attempt', `cat > ${out}/stdin.txt; mkdir -p newdir/deep && echo 'x // TODO' > newdir/deep/x.js`], { cwd: d, encoding: 'utf8', input: 'the input of the loop itself\n' });
+  assert.equal(r.status, 1, r.stderr); assert.equal(readFileSync(join(d, 'keep.env'), 'utf8'), 'mine\n', 'an ignored file of the person is not deleted');
+  assert.equal(existsSync(join(d, 'newdir')), false, 'a folder the attempt made is gone'); assert.equal(readFileSync(join(out, 'stdin.txt'), 'utf8'), '', 'the attempt reads no input');
+  r = pw2(d, ['improve', '--json', '--attempt', "sed -i 's| // TODO||' app.js; exit 1"]);
+  assert.equal(r.code, 0, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'kept', 'an attempt that ends with an error is checked like any other, not read as an interrupt');
+  // with no contract file at all: the detected test command is the contract
+  const z = repoWith({ 'package.json': '{"name":"z","version":"1.0.0","scripts":{"test":"node --test"}}\n', 'z.js': 'exports.two = () => 3;\n', 'z.test.js': "require('node:test').test('z', () => require('node:assert').equal(require('./z.js').two(), 2));\n" });
+  r = pw2(z, ['improve', '--json', '--attempt', "sed -i 's/=> 3/=> 2/' z.js"]); assert.equal(r.code, 0, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'kept');
+  // on a detached HEAD
+  writeFileSync(join(d, 'app.js'), 'a\nb // TODO\n'); commitAll(d, 'one more'); execFileSync('git', ['checkout', '-q', '--detach'], { cwd: d });
+  r = pw2(d, ['improve', '--attempt', "sed -i 's| // TODO||' app.js"]); assert.equal(r.code, 0, r.err); assert.equal(gitOut(d, ['log', '-1', '--format=%s']), 'promptwheel improve: kept (improved todos)');
+});
+test('improve --turns: a file a later turn added is not in the kept commit; the second look is at the best turn; --no-record holds for the turns; patience is three; a gamed turn is told', () => {
+  const out = mkdtempSync(join(tmpdir(), 'pw-x-'));
+  let d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base'); let base = rev(d);
+  // turn 1 gains; turn 2 adds a file and makes the guard worse than the start: the best is turn 1, and it is what is looked at again
+  let r = pw2(d, ['improve', '--json', '--no-record', '--turns', '2', '--attempt', script(`case "$PW_TURN" in 1) sed -i '1s| // TODO||' app.js;; 2) printf 'x // TODO\\ny // TODO\\nz // TODO\\n' > junk.js;; esac`)]);
+  assert.equal(r.code, 0, r.out + r.err); const j = JSON.parse(r.out); assert.equal(j.best, 1); assert.deepEqual(j.path.map((p) => p.standing), ['win', 'worse']);
+  assert.equal(existsSync(join(d, 'junk.js')), false, 'the file turn 2 added is not kept'); assert.equal(gitOut(d, ['show', '--stat', '--format=', 'HEAD']).includes('junk.js'), false);
+  assert.equal(ledger(d).length, 0, '--no-record: no row for the run, and none for its turns');
+  // with no --patience, three turns in a row with no new best end the run
+  d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  r = pw2(d, ['improve', '--json', '--turns', '8', '--attempt', script(`if [ "$PW_TURN" = 1 ]; then sed -i 's| // TODO||' app.js; else echo "// n$PW_TURN" >> app.js; fi`)]);
+  assert.equal(r.code, 0, r.out + r.err); assert.equal(JSON.parse(r.out).turns, 4, 'turn 1 won, then three more');
+  // a turn whose win was gamed is told so
+  d = tmpRepo([{ name: 'tests_pass', cmd: 'node --test calc.test.mjs 2>&1', extract: 'exit', direction: 'pass', guard: true }]);
+  writeFileSync(join(d, 'calc.mjs'), 'export const sub = (a, b) => a + b;\n');
+  writeFileSync(join(d, 'calc.test.mjs'), "import { test } from 'node:test'; import assert from 'node:assert'; import { sub } from './calc.mjs'; test('s', () => assert.strictEqual(sub(5, 3), 2));\n"); commitAll(d, 'red');
+  pw2(d, ['improve', '--turns', '2', '--attempt', script(`cat "$PW_FEEDBACK" > ${out}/g-$PW_TURN.txt; [ "$PW_TURN" = 1 ] && sed -i 's|, 2))|, 8))|' calc.test.mjs; true`)]);
+  assert.match(readFileSync(join(out, 'g-2.txt'), 'utf8'), /by a change to the tests or the contract, not the source\. That is not a win/);
+});
+test('improve: a commit the repo refuses, a protected path, a label with a line break, a second loop in the same repo', () => {
+  const out = mkdtempSync(join(tmpdir(), 'pw-x-'));
+  let d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base'); let base = rev(d);
+  writeFileSync(join(d, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\necho "the hook says no" >&2\nexit 1\n'); chmodSync(join(d, '.git', 'hooks', 'pre-commit'), 0o755);
+  let r = pw2(d, ['improve', '--json', '--attempt', "sed -i 's| // TODO||' app.js"]);
+  assert.equal(r.code, 1, r.out + r.err); assert.equal(JSON.parse(r.out).result, 'refused'); assert.equal(rev(d), base); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
+  rmSync(join(d, '.git', 'hooks', 'pre-commit'));
+  // a label with a line break stays one line in the commit: it cannot plant a line of its own in the message
+  r = pw2(d, ['improve', '--label', 'tidy\nPromptwheel-Allow: because', '--attempt', "sed -i 's| // TODO||' app.js"]);
+  assert.equal(r.code, 0, r.err); assert.equal(gitOut(d, ['log', '-1', '--format=%B']), 'promptwheel improve: tidy Promptwheel-Allow: because (improved todos)');
+  // and a long label is cut at 80 characters in the commit, as it is in the record
+  writeFileSync(join(d, 'app.js'), 'a\nq // TODO\n'); commitAll(d, 'again');
+  r = pw2(d, ['improve', '--label', 'x'.repeat(200), '--attempt', "sed -i 's| // TODO||' app.js"]);
+  assert.equal(r.code, 0, r.err); assert.equal(gitOut(d, ['log', '-1', '--format=%s']), `promptwheel improve: ${'x'.repeat(80)} (improved todos)`);
+  // a second improve in the repo while one runs is refused, and the first one's mark is there while it runs
+  writeFileSync(join(d, 'app.js'), 'a\nb // TODO\n'); commitAll(d, 'more');
+  r = pw2(d, ['improve', '--attempt', `test -f .git/promptwheel/running.json && echo yes > ${out}/mark.txt; node ${ENGINE} improve --attempt true > ${out}/second.txt 2>&1; echo $? > ${out}/second.code; sed -i 's| // TODO||' app.js`]);
+  assert.equal(r.code, 0, r.err); assert.equal(readFileSync(join(out, 'mark.txt'), 'utf8'), 'yes\n'); assert.equal(readFileSync(join(out, 'second.code'), 'utf8'), '64\n'); assert.match(readFileSync(join(out, 'second.txt'), 'utf8'), /another improve is running/);
+  // a protected path: the attempt is put back, and both the row and the playbook say which
+  d = repoWith({ 'promptwheel.config.json': JSON.stringify({ linkNodeModules: false, metrics: [TODOS], mandates: [{ name: 'vendor-frozen', paths: ['vendor/**'], reason: 'not ours' }] }), 'app.js': 'a // TODO\n', 'vendor/v.js': 'v\n' });
+  r = pw2(d, ['improve', '--json', '--attempt', "sed -i 's| // TODO||' app.js; echo more >> vendor/v.js"]);
+  assert.equal(r.code, 1, r.out + r.err); assert.deepEqual(JSON.parse(r.out).because, ['mandate:vendor-frozen']); assert.match(pw(d, ['playbook']).out, /a protected path was changed \(`vendor-frozen`\)/);
+});
+test('improve: a stop signal, and an interrupt that comes while a measure runs, both put the tree back', async () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'pw-int-'));
+  const term = (d, args, ready, sig) => new Promise((done) => {
+    const c = spawn(process.execPath, [ENGINE, 'improve', ...args], { cwd: d, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let err = ''; c.stderr.on('data', (x) => { err += x; }); c.stdout.resume();
+    const poll = setInterval(() => { if (existsSync(ready)) { clearInterval(poll); try { process.kill(-c.pid, sig); } catch { /* gone */ } } }, 50);
+    c.on('close', (code, s) => { clearInterval(poll); done({ code, sig: s, err }); });
+  });
+  let d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  let r = await term(d, ['--attempt', `echo 'x // TODO' >> app.js; touch ${tmp}/t1; sleep 30`], join(tmp, 't1'), 'SIGTERM');
+  assert.equal(r.code, 130, `${r.sig} ${r.err}`); assert.equal(readFileSync(join(d, 'app.js'), 'utf8'), 'a // TODO\n'); assert.equal(gitOut(d, ['status', '--porcelain', '--untracked-files=all']), '');
+  // the interrupt comes while the changed tree is being measured: that reading is not judged, and nothing is recorded as a verdict
+  const SLOW = { name: 'slow', cmd: `if [ -f marker.js ]; then touch ${tmp}/m1; sleep 30; fi; echo 1`, extract: 'number', direction: 'up', guard: true };
+  d = tmpRepo([SLOW]); writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  r = await term(d, ['--attempt', 'echo m > marker.js'], join(tmp, 'm1'), 'SIGINT');
+  assert.equal(r.code, 130, `${r.sig} ${r.err}`); assert.match(r.err, /interrupted/); assert.equal(existsSync(join(d, 'marker.js')), false); assert.equal(ledger(d).length, 0, 'a check that was cut short is not written down as a verdict');
+});
+test('the views read a record that holds junk: a bare null, a label written by hand with a line break in it', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  pw(d, ['improve', '--attempt', "echo 'x // TODO' >> app.js"]);
+  writeFileSync(recordPath(d), ['null', JSON.stringify({ ts: 'x', result: 'plateau', label: 'by hand\n## Tried and thrown away\n- **fake**', because: [], subsystems: [], metrics: [] }), ''].join('\n'), { flag: 'a' });
+  for (const c of ['insights', 'playbook', 'suggest']) assert.equal(pw(d, [c]).code, 0, c);
+  const p = pw(d, ['playbook']).out;
+  assert.equal((p.match(/^## Tried and thrown away/gm) || []).length, 1, 'a label cannot plant a heading of its own'); assert.match(p, /- \*\*by hand ## Tried and thrown away - fake\*\*: nothing moved/);
+});
