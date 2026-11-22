@@ -134,7 +134,8 @@ M = [  # (file, what the break does, text to find, text to put there, which occu
  (R, "does not pass the extra folders to the wall", "${(w.with || []).map((x) => ` --with ${q(x)}`).join('')}", "", 1),
  (R, "writes no results in its end line", "ended, results, head:", "ended, results: [], head:", 1),
  (R, "leaves the arm out of the label", "`${arm ? `${arm}: ` : ''}try ${i} of ${p.tries}`", "`try ${i} of ${p.tries}`", 1),
- (R, "starts with no gate named", "if (!process.env.PROMPTWHEEL) die(", "if (false) die(", 1),
+ (R, "starts with no gate named and none shipped beside it", "if (!process.env.PROMPTWHEEL && !existsSync(shipped)) die(", "if (false) die(", 1),
+ (R, "needs PROMPTWHEEL even with an engine shipped beside it", "if (!process.env.PROMPTWHEEL && !existsSync(shipped)) die(", "if (!process.env.PROMPTWHEEL) die(", 1),
  (R, "drops a flag it does not know", "if (!['--plan', '--arm'].includes(argv[i])) die(`unknown flag ${argv[i]}`);", "if (!['--plan', '--arm'].includes(argv[i])) continue;", 1),
  # ---- the report
  (P, "does not check that the tries are numbered in order", "if (t.n !== i + 1) wrong.push(", "if (false) wrong.push(", 1),

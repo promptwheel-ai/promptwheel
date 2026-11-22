@@ -1635,17 +1635,24 @@ const freeCount = (m) => (m.tripwire === true || m.gamingCheck === false) && (m.
 // of it in treegate, and a keeper inside this file); this command is now a door onto the one. The step's flags are
 // its own and it refuses one it does not know, its output and exit code are this command's, and `--goal <measure>`
 // is another name for its `--target`.
+// Two more doors onto the programs that ship beside the step (the owner's word, 2026-11-22: "yes make it promptwheel's
+// loop"): `--plan <file>` is a run of many tries under a plan committed first (run.mjs), and `--report` is every try
+// on the loop's record and whether the record, the kept changes and the runs' account agree (report.mjs).
 function improve(argv) {
   const step = join(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'improve-loop', 'improve.mjs');
-  if (!existsSync(step)) bad(`promptwheel improve: the loop step is not where it ships (${step})`);
-  const args = []; for (let i = 0; i < argv.length; i++) args.push(argv[i] === '--goal' ? '--target' : argv[i]);
-  args.push(...targetOf(args));
-  // the person's environment, and no PROMPTWHEEL: the step asks the engine it ships with, this one
+  if (argv.includes('--plan') && argv.includes('--report')) bad('promptwheel improve: --plan starts a run and --report reads the record: give one of them');
+  const other = argv.includes('--report') ? 'report.mjs' : argv.includes('--plan') ? 'run.mjs' : null;
+  const program = other ? join(dirname(step), other) : step;   // the run and the report ship in the step's folder
+  if (!existsSync(program)) bad(`promptwheel improve: the loop ${other ? `program ${other}` : 'step'} is not where it ships (${program})`);
+  const args = [];
+  if (other) { for (const a of argv) if (a !== '--report') args.push(a); }
+  else { for (let i = 0; i < argv.length; i++) args.push(argv[i] === '--goal' ? '--target' : argv[i]); args.push(...targetOf(args)); }
+  // the person's environment, and no PROMPTWHEEL: the step (and a run, through the step) asks the engine it ships with, this one
   const env = personEnv(process.env); delete env.PROMPTWHEEL;
   // Ctrl-C reaches the step and this door together. The step puts the attempt back; the door waits for it.
   process.on('SIGINT', () => {});
-  const r = spawnSync(process.execPath, [step, ...args], { stdio: 'inherit', env });
-  if (r.error) bad(`promptwheel improve: could not start the loop step (${r.error.message})`);
+  const r = spawnSync(process.execPath, [program, ...args], { stdio: 'inherit', env });
+  if (r.error) bad(`promptwheel improve: could not start the loop ${other ? `program ${other}` : 'step'} (${r.error.message})`);
   process.exitCode = r.status ?? (r.signal ? 130 : 1);
 }
 
@@ -2787,6 +2794,9 @@ function dispatch() {
       '                                               Also --cheaper, --floor, --repeat, --base-cache, --may-change "<patterns>": see that file, or node examples/improve-loop/improve.mjs.',
       '  promptwheel improve --attempt "<cmd>" --turns N [--patience P]   judge over a number of turns: each turn goes on from the last, the whole change so far is checked against the start,',
       '                                               the reading is handed to the next turn (PW_FEEDBACK, PW_TURN, PW_TURNS), and the best turn is kept as one commit.',
+      '  promptwheel improve --plan <file> [--arm <name>]   many tries under a plan committed first: what a try may touch, how many tries, when to stop, a held-out',
+      '                                               number at both ends. Each try runs in a copy of the tree (a copy, not a sandbox). See examples/improve-loop/run.mjs.',
+      '  promptwheel improve --report [--json]        every try on the loop\'s record, and whether the record, the kept changes and the runs\' account agree.',
       '  promptwheel insights [--json]                how each measure has responded, from the record of checked runs (kept in the git folder, never in the tree; run --no-record adds no row)',
       '  promptwheel playbook [--json]                what has paid here, and what the loop tried and threw away, with the measured reason',
       '  promptwheel suggest [--json]                 where to spend the next attempt (a lever that has paid, or what was tried least)',

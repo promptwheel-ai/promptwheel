@@ -43,7 +43,8 @@
 // Stop it with Ctrl-C: the try in hand is put back, and the run can be started again later. It goes on from where
 // it stopped, and the count of tries carries over.
 //
-// The gate is PromptWheel: set PROMPTWHEEL to its command, for example "node /path/to/promptwheel.mjs".
+// The gate is PromptWheel. Each try asks the engine this run ships beside (../../bin/promptwheel.mjs, as the step
+// does), or the one PROMPTWHEEL names: its command, for example "node /path/to/promptwheel.mjs".
 // Exit codes: 0 the run ended by its plan (its tries are used, or one of its stop rules held) · 1 it could not go on (a try could not run, or it was stopped) · 64 it never started.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -62,7 +63,8 @@ for (let i = 0, argv = process.argv.slice(2); i < argv.length; i++) {
   if (argv[i + 1] === undefined) die(`${argv[i]} needs a value`);
   args[argv[i]] = argv[++i];
 }
-if (!process.env.PROMPTWHEEL) die('set PROMPTWHEEL to the gate command, for example: PROMPTWHEEL="node /path/to/promptwheel.mjs"');
+const shipped = join(HERE, '..', '..', 'bin', 'promptwheel.mjs');   // with no PROMPTWHEEL, the step asks this one
+if (!process.env.PROMPTWHEEL && !existsSync(shipped)) die('no engine ships beside this run: set PROMPTWHEEL to the gate command, for example: PROMPTWHEEL="node /path/to/promptwheel.mjs"');
 let root; try { root = git('rev-parse', '--show-toplevel'); } catch { die('not inside a git repository'); }
 process.chdir(root);
 if (git('status', '--porcelain')) die('the working tree is not clean: commit or stash first. The plan is read from HEAD, and a try needs something to be put back to');

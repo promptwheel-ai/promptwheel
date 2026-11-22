@@ -5,9 +5,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ENV, NODE, REPORT, RUN, TMP_ROOT, asked, at, bump, clean, git, head, lines, put, read, record, run, step, toy } from './improve-loop-helpers.mjs';
+import { ENV, GATE, HERE, NODE, REPORT, RUN, TMP_ROOT, asked, at, bump, clean, git, head, lines, put, read, record, run, step, toy } from './improve-loop-helpers.mjs';
 
 let made = 0;
 // a proposer: try k runs line k of `acts`. Returns the attempt command for a plan.
@@ -70,9 +70,24 @@ test('run: a key it does not know, a value of the wrong kind, or a missing attem
   }
   const d = planned([WIN]); assert.equal(go(d, ['--plans', 'x']).code, 64); assert.equal(go(d, ['--plan']).code, 64); assert.equal(go(d, ['--plan', 'other.json']).code, 64);
 });
-test('run: without the gate named in PROMPTWHEEL it never starts (exit 64)', () => {
-  const d = planned([WIN]), r = go(d, [], { PROMPTWHEEL: '' });
+test('run: with no gate named in PROMPTWHEEL and no engine shipped beside it, it never starts (exit 64)', () => {
+  // the loop's programs, copied to a folder with no engine beside them
+  const lone = mkdtempSync(join(TMP_ROOT, 'lone-')); for (const f of ['run.mjs', 'improve.mjs', 'wall.mjs']) copyFileSync(join(HERE, f), join(lone, f));
+  const d = planned([WIN]), r = run(join(lone, 'run.mjs'), d, [], { PROMPTWHEEL: '' });
   assert.equal(r.code, 64); assert.match(r.err, /PROMPTWHEEL/); assert.deepEqual(runs(d), []);
+});
+test('run: with no gate named in PROMPTWHEEL, a run asks the engine it ships beside', () => {
+  const d = planned([WIN]), r = go(d, [], { PROMPTWHEEL: '' });
+  assert.equal(r.code, 0, r.err); assert.deepEqual(results(d), ['kept']);
+});
+test('door: promptwheel improve --plan runs the plan and --report reads the record, each with the engine they ship with', () => {
+  const d = planned([WIN, WORSE]), elsewhere = { PROMPTWHEEL: `${NODE} /no/such/gate.mjs` };
+  const r = run(GATE, d, ['improve', '--plan', 'improve.plan.json'], elsewhere);
+  assert.equal(r.code, 0, r.err); assert.deepEqual(results(d), ['kept', 'worse']); assert.equal(runs(d)[1].ended, 'tries');
+  const rep = run(GATE, d, ['improve', '--report'], elsewhere);
+  assert.equal(rep.code, 0, rep.err); assert.match(rep.out, /whole: yes/);
+  const both = run(GATE, d, ['improve', '--plan', 'improve.plan.json', '--report']);
+  assert.equal(both.code, 64); assert.match(both.err, /give one of them/);
 });
 test('run: stopAfterFlat ends the run early when tries in a row keep nothing', () => {
   const d = planned([WIN, WORSE, NOTHING, WIN2, WIN2], { stopAfterFlat: 2 }), r = go(d);
