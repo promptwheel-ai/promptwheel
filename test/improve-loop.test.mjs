@@ -1122,18 +1122,32 @@ test('loop: a git version it cannot read is refused too: it does not guess', () 
   assert.equal(r.code, 64, r.err); assert.deepEqual(record(d), []);
 });
 
-// ------------------------------------------------------------------ an attempt that could not run, over turns
-// (one keeper, 2026-11-21: the rule above, read for a run of several turns. "No file changed" is the turn's own
-// change: the tree as the last turn left it.)
-test('turns: at the first turn, an attempt that could not run is no try at all, over turns too', () => {
-  const d = toy(), base = head(d), r = step(d, 'exit 64', '--turns', '3');
-  assert.equal(r.code, 64, r.err); assert.match(r.err, /could not run/); assert.deepEqual(record(d), []); assert.equal(asks(d), 0); assert.equal(head(d), base); assert.ok(clean(d));
+// ------------------------------------------------------------------ could not run, in a run over turns
+test('turns: a first turn that could not run is not a try: exit 64, nothing on record, the gate not asked', () => {
+  const d = toy(), r = step(d, 'exit 64', '--turns', '3');
+  assert.equal(r.code, 64, r.err); assert.match(r.err, /could not run/); assert.deepEqual(record(d), []); assert.equal(asks(d), 0); assert.ok(clean(d));
 });
+test('turns: when a later turn could not run the run ends there, and a turn that had passed its check is kept', () => {
+  const d = toy(), r = step(d, byTurn('echo 110 > src/score.txt', 'exit 64'), '--turns', '3');
+  assert.equal(r.code, 0, r.err); assert.equal(at(d, 'src/score.txt'), '110'); assert.ok(clean(d));
+  assert.match(record(d).pop().why, /could not run at turn 2/);
+});
+test('turns: when a later turn could not run and no turn had passed, all of it is put back and the line says why (exit 64)', () => {
+  const d = toy(), base = head(d), r = step(d, byTurn('echo 120 > src/cost.txt', 'exit 64'), '--turns', '3');
+  assert.equal(r.code, 64, r.err); assert.equal(head(d), base); assert.equal(state(d), '100 100'); assert.ok(clean(d));
+  const last = record(d).pop(); assert.equal(last.result, 'stopped'); assert.match(last.why, /could not run \(exit 64\) at turn 2/);
+});
+test('turns: a later turn the shell could not find (127) that changed nothing ends the run too', () => {
+  const d = toy(), r = step(d, byTurn('echo 110 > src/score.txt', 'no-such-command-anywhere'), '--turns', '3');
+  assert.equal(r.code, 0, r.err); assert.equal(at(d, 'src/score.txt'), '110'); assert.match(record(d).pop().why, /could not run at turn 2/);
+});
+// ------------------------------------------------------------------ could not run over turns: what this port adds
+// ("No file changed" is the turn's own change: the tree as the last turn left it.)
 test('turns: an attempt that could not run at a later turn ends the run there, and a best turn that had passed is kept', () => {
   const d = toy(), r = step(d, byTurn('echo 110 > src/score.txt', 'echo 120 > src/score.txt; exit 64', 'echo 130 > src/score.txt'), '--turns', '3');
   assert.equal(r.code, 0, r.err); assert.equal(state(d), '110 100', 'turn 1 is kept, and what turn 2 did before it said it could not run is not'); assert.ok(clean(d));
   const lines = record(d); assert.deepEqual(lines.map((l) => l.result), ['turn', 'kept'], 'turn 2 is no turn on record');
-  assert.equal(lines.at(-1).best, 1); assert.equal(lines.at(-1).turns, 1); assert.match(lines.at(-1).why, /turn 2's attempt could not run \(exit 64\)/);
+  assert.equal(lines.at(-1).best, 1); assert.equal(lines.at(-1).turns, 1); assert.match(lines.at(-1).why, /the attempt could not run at turn 2 \(exit 64\)/);
 });
 test('turns: with no best turn, an attempt that could not run at a later turn puts the run back, and a stopped line closes it (exit 64)', () => {
   const d = toy(), base = head(d), r = step(d, byTurn('echo 90 > src/score.txt', 'exit 64'), '--turns', '3');
@@ -1145,4 +1159,11 @@ test('turns: a later turn the shell could not find, that changed nothing, ends t
   assert.equal(r.code, 0, r.err); assert.equal(state(d), '110 100'); assert.deepEqual(record(d).map((l) => l.result), ['turn', 'kept']);
   const e = toy(), k = step(e, byTurn('echo 90 > src/score.txt', 'echo 120 > src/score.txt; no-such-command-anywhere'), '--turns', '2');
   assert.equal(k.code, 0, k.err); assert.equal(state(e), '120 100'); assert.deepEqual(record(e).map((l) => l.result), ['turn', 'turn', 'kept']);
+});
+test('turns: a run that ends on a turn that could not run measures its best turn once more before keeping it, as any run that ends does', () => {
+  const steps = (third) => byTurn('echo 90 > src/score.txt', 'echo 110 > src/score.txt', third);
+  const a = toy(), r = step(a, steps('exit 64'), '--turns', '4');
+  assert.equal(r.code, 0, r.err); assert.equal(state(a), '110 100'); assert.match(record(a).at(-1).why, /\(turn 2 of 2\) \(the run ended after turn 2: the attempt could not run at turn 3 \(exit 64\)\)/);
+  const b = toy(); assert.equal(step(b, steps('true'), '--turns', '4').code, 0, 'the same run, ended by a turn that changed nothing');
+  assert.equal(asks(a), asks(b), 'the gate is asked as often: both runs measure the best turn once more');
 });

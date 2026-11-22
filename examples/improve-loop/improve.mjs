@@ -72,15 +72,15 @@
 // An attempt that could not run is not a try. If the attempt command ends with 64 (how the programs here say "could
 // not run"), or the shell could not run or find it (126, 127) and no file changed, the step puts back whatever is
 // there, writes no line and exits 64. So a broken command stops a loop and cannot use up its tries. An attempt that
-// fails any other way and changed nothing is a try, on record as "nothing". Over several turns the rule reads for the
-// turn (its own change): at a later turn the run ends there, a best turn that had passed is kept, and with none the
-// run is put back and exits 64. (From treegate's step, 2026-11-21, found in the first real run of a loop on it.)
+// fails any other way and changed nothing is a try, on record as "nothing". In a run over turns this holds for the
+// first turn. At a later turn the run ends there, as a run ends: a best turn that had passed is kept once it wins
+// again when measured once more, and anything else is put back.
 //
 // stdout is one line (or with --json, the record line). What the attempt prints goes to stderr.
 // Exit codes, so `while node improve.mjs --attempt ...; do :; done` stops by itself:
 //   0 kept · 1 put back, a guard got worse, the floor held, it changed what it may not, or it changed the contract ·
-//   2 put back, gamed · 3 put back, nothing improved or nothing could be measured · 64 could not run, or the attempt
-//   could not.
+//   2 put back, gamed · 3 put back, nothing improved or nothing could be measured · 64 could not run, or the
+//   attempt could not.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -229,6 +229,13 @@ const finish = (result, why, exit, extra) => {
   process.exit(exit);
 };
 
+// An attempt that could not run is not a try. 64 is how the programs here say "could not run", and 126 and 127 are
+// the shell saying the command could not be run or was not found. Nothing is judged and no line is written, so a
+// broken attempt command stops a loop and does not use up its tries. A command that changed files and then ended
+// 126 or 127 did run in part, and that change is judged like any other.
+const couldNotRun = (tried, changedSomething) => tried.status === 64 || (!changedSomething && (tried.status === 126 || tried.status === 127));
+const notATry = (tried, when = '') => `the attempt could not run (exit ${tried.status})${when}. Nothing was tried and nothing is on record: fix the attempt command, then run this again`;
+
 // Runs the attempt once, then puts back whatever it did to what judges it. Returns how the attempt's command ended.
 const tryOnce = (env) => {
   own = snapshot(); refsAtStart = refs();
@@ -330,12 +337,6 @@ const judge = ({ files, candidate }) => {
   const topped = (t.direction === 'pass' && t.after === 1) || (t.direction === 'down' && t.after === 0);
   return { standing: 'win', why, extra: seen, report, t, gain: gainOf(t) + gainOf(c) * 1e-9, topped };
 };
-// An attempt that could not run is not a try. 64 is how the programs here say "could not run", and 126 and 127 are
-// the shell saying the command could not be run or was not found. Nothing is judged and no line is written, so a
-// broken attempt command stops a loop and does not use up its tries. A command that changed files and then ended
-// 126 or 127 did run in part, and that change is judged like any other.
-const couldNotRun = (tried, changedSomething) => tried.status === 64 || (!changedSomething && (tried.status === 126 || tried.status === 127));
-const notRun = (tried) => `the attempt could not run (exit ${tried.status}). Nothing was tried and nothing is on record: fix the attempt command, then run this again`;
 const exitOf = { gamed: 2, worse: 1, unsure: 3, flat: 3, outside: 1, contract: 1, nothing: 3 };
 
 // The floor, then the keep. The change also has to hold against the best commit so far: a second ask of the gate,
@@ -389,7 +390,7 @@ try {
     if (tried.signal) { putBack(); const why = `the attempt was stopped (${tried.signal}), so it is put back`; note('stopped', why); die(why); }
     const refused = foldOrRefuse(); if (refused) die(refused);
     const changedSomething = git('status', '--porcelain') !== '';
-    if (couldNotRun(tried, changedSomething)) { putBack(); die(notRun(tried)); }
+    if (couldNotRun(tried, changedSomething)) { putBack(); die(notATry(tried)); }
     if (!changedSomething) finish('nothing', 'the attempt changed no file', 3);
     const made = candidateOf(`attempt ${n}: ${label.replace(/\s+/g, ' ')}`);
     const j = judge(made);
@@ -400,7 +401,7 @@ try {
   // ---- a run over several turns: each turn goes on from the last, and the whole change is judged against the start ----
   const episode = `${base.slice(0, 7)}-${Date.now().toString(36)}`;
   const baseTree = git('rev-parse', `${base}^{tree}`);
-  let lead = null, last = null, judged = null, sinceBest = 0, prevTree = baseTree, turnsRun = 0, ended = '', couldNot = '';
+  let lead = null, last = null, judged = null, sinceBest = 0, prevTree = baseTree, turnsRun = 0, ended = '', couldNot = null;
   for (let t = 1; t <= turns; t++) {
     try { writeFileSync(feedbackFile, feedbackText(t, last)); } catch { /* the attempt runs without it */ }
     console.error(`▶ turn ${t} of ${turns}: ${label}`);
@@ -417,12 +418,14 @@ try {
     // the whole change so far, as a tree. A turn that left it as the last turn did is not judged again: the gate is
     // not asked twice about one tree.
     git('add', '-A'); const treeNow = git('write-tree'); git('reset', '-q');
-    // An attempt that could not run is not a try (couldNotRun, above). Over turns, what it changed is the turn's own
-    // change. At the first turn it is no try at all; at a later turn the run ends here, and what the turns before it
-    // did is kept or put back below.
+    // An attempt that could not run is not a try (couldNotRun, above). Over turns, what it changed is what the turn
+    // itself changed. At the first turn it is no try at all. At a later turn the run ends here, as a run ends: a best
+    // turn is kept only if it wins again when measured once more (an unattended run is where a noisy win slips in),
+    // and anything else is put back, below.
     if (couldNotRun(tried, treeNow !== prevTree)) {
-      if (t === 1) { putBack(); die(notRun(tried)); }
-      couldNot = `turn ${t}'s attempt could not run (exit ${tried.status})`; ended = couldNot; break;
+      if (t === 1) { putBack(); die(notATry(tried)); }
+      console.error(`  (the attempt could not run at turn ${t}: the run ends there)`);
+      couldNot = { t, status: tried.status }; ended = `the attempt could not run at turn ${t} (exit ${tried.status})`; break;
     }
     turnsRun = t;
     const code = tried.status ?? 1;
@@ -458,7 +461,7 @@ try {
   if (lead) keep(lead.made, lead.j.t, `${lead.j.why}${turnsRun > 1 ? ` (turn ${lead.t} of ${turnsRun})` : ''}${after}`, { ...lead.j.extra, ...runExtra });
   putBack();
   // a run that ended on an attempt that could not run, with no best turn: put back, and the code for "could not run"
-  if (couldNot) { const why = `${couldNot}, and no turn before it had won, so the run is put back. Fix the attempt command, then run this again`; note('stopped', why, runExtra); die(why); }
+  if (couldNot) { const why = `the attempt could not run (exit ${couldNot.status}) at turn ${couldNot.t}, so the run ends there and is put back`; note('stopped', why, runExtra); die(why); }
   const s = judged ? judged.standing : 'nothing';   // the run reads as the last turn that was judged
   finish(s, `${judged ? judged.why : 'nothing was measured'}${after}`, exitOf[s] ?? 3, runExtra);
 } catch (e) {

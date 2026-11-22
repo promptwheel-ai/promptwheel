@@ -198,8 +198,8 @@ That was run as written, on a repo with one failing test and no config. Put your
 - **An attempt that could not run is not a try.** If your attempt command ends with 64, or the shell could not find
   or run it and no file changed, nothing is judged and nothing is written, and `improve` exits 64: the loop stops,
   and no try is used up. A wrapper script around an agent should end with 64 when the agent could not start at all:
-  no sign-in, a usage limit, no network. Over several turns, a later turn that could not run ends the run, and a
-  best turn that had passed is kept.
+  no sign-in, a usage limit, no network. Over several turns, a later turn that could not run ends the run as a run
+  ends: a best turn that had passed is kept once it wins again when measured once more.
 - **Only the target makes a win.** `--target <measure>` names it (`--goal` is another name). If you name none, it
   is the measure called `score`, or else the contract's only measure, or else its only measure that is not a
   tripwire. On the contract `init` writes, and with no config, that is the test run. If that still leaves a choice,

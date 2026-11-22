@@ -55,11 +55,6 @@ run or find it (126, 127) and no file changed, the step puts back whatever is th
 record and exits 64. So a broken command stops a `while` loop and does not fill the record with "nothing".
 An attempt that fails any other way and changed no file is a try, on record as `nothing`. A wrapper script
 around an agent should end with 64 when the agent could not start at all: no sign-in, a usage limit, no network.
-Over several turns the rule reads for each turn's own change: at a later turn the run ends there, a best turn
-that had passed is kept, and with none the run is put back and exits 64.
-
-It needs git 2.31 or newer, and refuses to run on an older one. An older git ignores the setting that holds
-hooks off for the step's own git calls, and says nothing.
 
 ## Why `--floor`
 
@@ -91,6 +86,8 @@ never be kept. With `--turns N`:
 
 The run ends early when a turn that ended by itself changed nothing, when the target can go no further, or after
 `--patience` turns with no new best. Ctrl-C puts the tree back, and keeps a best turn that had passed its check.
+A turn whose attempt could not run ends the run too, as a run ends: a best turn is kept once it wins again when
+measured once more. At the first turn nothing was tried, and no line is written.
 Every turn is a line in the record, and the run ends with a line of its own.
 
 ## The contract is yours
@@ -140,7 +137,7 @@ whatever folder the hooks are in. A branch the attempt made and left the repo on
 the step stops, and the branch is there for you to look at.
 
 This needs git 2.31 or newer. An older git ignores the setting that turns hooks off for the
-step's own git calls, and says nothing.
+step's own git calls, and says nothing, so the step refuses to run on one.
 
 One thing to know: if you change your own global git config while an attempt is running, the
 step reads that as the attempt's doing and puts it back. The line names the file.
