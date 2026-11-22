@@ -4343,6 +4343,64 @@ test('the views: a run\'s path starts at its first reading when its first turn w
   assert.equal(r.code, 0, r.out + r.err);
   assert.match(pw(d, ['playbook']).out, /- \*\*three turns\*\*: kept at turn 3 of 4: `cost` 100 → \? → 100 → 90 → 90/);
 });
+// The door picks the target when none is named (the owner's word, 2026-11-21: "let the door pick the only measure").
+// a tripwire (gamingCheck off), defined here: DASHES comes later in this file, and a test run alone starts before it
+const TRIP = { name: 'dashes', cmd: 'grep -rIo -- "--" --include="*.txt" . 2>/dev/null | wc -l | tr -d " "', extract: 'number', direction: 'down', guard: true, gamingCheck: false };
+const addRepo = () => {   // no config file: a package whose one test fails until add adds
+  const z = mkdtempSync(join(tmpdir(), 'pw-pick-')); const g = (...a) => execFileSync('git', a, { cwd: z, stdio: 'ignore' });
+  g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+  writeFileSync(join(z, 'package.json'), '{"name":"z","scripts":{"test":"node --test"}}\n'); mkdirSync(join(z, 'src')); mkdirSync(join(z, 'test'));
+  writeFileSync(join(z, 'src', 'add.js'), 'exports.add = (a, b) => a - b\n');
+  writeFileSync(join(z, 'test', 'add.test.js'), "const t = require('node:test'), a = require('node:assert')\nt.test('add', () => a.equal(require('../src/add.js').add(2, 2), 4))\n");
+  g('add', '-A'); g('commit', '-qm', 'base'); return { z, g };
+};
+const FIX_ADD = "sed -i 's/a - b/a + b/' src/add.js";
+// an attempt that leaves its mark outside the repo, where no put-back reaches: whether it ran at all
+const ranMark = () => { const f = join(mkdtempSync(join(tmpdir(), 'pw-ran-')), 'ran'); return { f, attempt: `touch '${f}'` }; };
+test('improve: with no target named, the door picks the contract\'s only measure: one measure, a target beside tripwires, no config file, and the contract init writes', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  let r = pw2(d, ['improve', '--attempt', "sed -i '1s| // TODO||' app.js"]);
+  assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, / kept .*todos 2 to 1/);
+  assert.equal(JSON.parse(readFileSync(join(d, '.git', 'improve', 'attempts.jsonl'), 'utf8').trim()).target, 'todos');
+  const t = tmpRepo([TRIP, TODOS]); writeFileSync(join(t, 'app.js'), 'a // TODO\n'); writeFileSync(join(t, 'notes.txt'), 'x\n'); commitAll(t, 'base');
+  r = pw2(t, ['improve', '--attempt', "sed -i 's| // TODO||' app.js"]); assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, / kept .*todos 1 to 0/, 'dashes is a tripwire');
+  const w = tmpRepo([TRIP]); writeFileSync(join(w, 'notes.txt'), 'a -- b\n'); commitAll(w, 'base');
+  r = pw2(w, ['improve', '--attempt', "sed -i 's/ -- / /' notes.txt"]); assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, / kept .*: dashes \d+ to \d+$/m, 'a contract\'s one measure, tripwire or not');
+  const { z } = addRepo();
+  r = pw2(z, ['improve', '--attempt', FIX_ADD]); assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, / kept .*tests_pass 0 to 1/);
+  const { z: y, g } = addRepo(); assert.equal(pw(y, ['init']).code, 0); g('add', '-A'); g('commit', '-qm', 'contract');
+  assert.ok(JSON.parse(readFileSync(join(y, 'promptwheel.config.json'), 'utf8')).metrics.length > 1, 'init writes a target and its tripwires');
+  r = pw2(y, ['improve', '--attempt', FIX_ADD]); assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, / kept .*tests_pass 0 to 1/);
+});
+test('improve: on a contract of several measures with none named score, the door asks for the target before the attempt runs, from a subfolder too; --goal names one; --help is the page', () => {
+  const LINES = { name: 'lines', cmd: 'cat app.js | wc -l', extract: 'number', direction: 'down', guard: true };
+  const d = tmpRepo([TODOS, LINES, TRIP]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base'); mkdirSync(join(d, 'sub'));
+  for (const cwd of [d, join(d, 'sub')]) {
+    const m = ranMark(); const r = pw2(cwd, ['improve', '--attempt', m.attempt]);
+    assert.equal(r.code, 64, r.out + r.err); assert.match(r.err, /improve: the contract has 2 measures a run could be for \(tripwires aside\) and none is named score, so name the one this run is for: --target <todos \| lines>/);
+    assert.equal(existsSync(m.f), false, 'the attempt never ran');
+  }
+  const h = pw2(d, ['improve', '--help']); assert.equal(h.code, 0, h.err); assert.match(h.out, /--attempt/);
+  const k = pw2(d, ['improve', '--goal', 'todos', '--attempt', "sed -i 's| // TODO||' app.js"]); assert.equal(k.code, 0, k.out + k.err); assert.match(k.out, / kept .*todos 1 to 0/);
+  const a = tmpRepo([TRIP, { ...TRIP, name: 'dashes2' }]); writeFileSync(join(a, 'notes.txt'), 'x\n'); commitAll(a, 'base');
+  const m = ranMark(); const r = pw2(a, ['improve', '--attempt', m.attempt]); assert.equal(r.code, 64); assert.equal(existsSync(m.f), false);
+  assert.match(r.err, /the contract's 2 measures are all tripwires and none is named score, so name the one this run is for: --target <dashes \| dashes2>/);
+});
+test('improve: a measure named score is left to the step\'s own default; a target you name is used as you named it', () => {
+  const SCORE = { name: 'score', cmd: 'cat score.txt', extract: 'number', direction: 'up', guard: true };
+  const e = tmpRepo([TODOS, SCORE]); writeFileSync(join(e, 'app.js'), 'a\n'); writeFileSync(join(e, 'score.txt'), '100\n'); commitAll(e, 'base');
+  const k = pw2(e, ['improve', '--attempt', 'echo 110 > score.txt']); assert.equal(k.code, 0, k.out + k.err); assert.match(k.out, / kept .*score 100 to 110/);
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
+  const r = pw2(d, ['improve', '--target', 'nope', '--attempt', 'echo x > y.txt']); assert.equal(r.code, 64); assert.match(r.err, /no metric named "nope"/);
+});
+test('improve: a contract that cannot be read stops the door before the attempt, with the words the gate would give after it; outside a repository the step speaks', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'promptwheel.config.json'), '{ "metrics": [\n'); commitAll(d, 'base');
+  const m = ranMark(); const r = pw2(d, ['improve', '--attempt', m.attempt]); assert.equal(r.code, 64, r.out + r.err);
+  assert.match(r.err, /promptwheel\.config\.json/); assert.equal(existsSync(m.f), false, 'the attempt never ran');
+  const g = pw2(d, ['run', '--base', 'HEAD', '--json']); assert.equal(g.code, 64); assert.equal(r.err.trim().split('\n').pop().replace(/^.*?promptwheel\.config/, ''), g.err.trim().split('\n').pop().replace(/^.*?promptwheel\.config/, ''));
+  const o = mkdtempSync(join(tmpdir(), 'pw-norepo-')); const n = pw2(o, ['improve', '--attempt', 'true']);
+  assert.equal(n.code, 64, n.err); assert.match(n.err, /^improve: not inside a git repository/m);
+});
 test('the compounding test: its own self-test passes (scripted attempts, no agent)', () => {
   const r = spawnSync(process.execPath, [join(dirname(ENGINE), '..', 'bench', 'compounding-ab.mjs'), '--self-test'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, /self-test passed/);

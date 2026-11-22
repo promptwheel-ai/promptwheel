@@ -27,7 +27,7 @@ enough: the gate passes a change that does nothing.
 
 | flag | what it does |
 |---|---|
-| `--target <metric>` | the metric the loop is raising. Default `score`. |
+| `--target <metric>` | the metric the loop is raising. Default `score`. Through `promptwheel improve`, a contract with no `score` gets its only measure, or its only one that is not a tripwire; one that leaves a choice is refused before the attempt runs. |
 | `--cheaper <metric>` | also keep a change that holds the target (or moves it inside its noise band) and lowers this metric. |
 | `--floor` | hold every kept change against the best target value so far, not only against its parent. |
 | `--label <name>` | a name for the attempt in the record. Default: the attempt command. |

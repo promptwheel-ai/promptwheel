@@ -1639,6 +1639,7 @@ function improve(argv) {
   const step = join(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'improve-loop', 'improve.mjs');
   if (!existsSync(step)) bad(`promptwheel improve: the loop step is not where it ships (${step})`);
   const args = []; for (let i = 0; i < argv.length; i++) args.push(argv[i] === '--goal' ? '--target' : argv[i]);
+  args.push(...targetOf(args));
   // the person's environment, and no PROMPTWHEEL: the step asks the engine it ships with, this one
   const env = personEnv(process.env); delete env.PROMPTWHEEL;
   // Ctrl-C reaches the step and this door together. The step puts the attempt back; the door waits for it.
@@ -1646,6 +1647,25 @@ function improve(argv) {
   const r = spawnSync(process.execPath, [step, ...args], { stdio: 'inherit', env });
   if (r.error) bad(`promptwheel improve: could not start the loop step (${r.error.message})`);
   process.exitCode = r.status ?? (r.signal ? 130 : 1);
+}
+
+// The target, when none is named (the owner's word, 2026-11-21: "let the door pick the only measure"). A contract is a
+// target and its tripwires: `promptwheel init` writes the test run and four counts of the tests themselves, and those
+// counts guard (they can rise with nothing earned, so the gaming check leaves them alone) but are never what a run is
+// for. So the door names the contract's only measure, or else its only measure that is not a tripwire; with no config
+// file that is the test run the engine finds. A measure named `score` is the step's own default and is left to it.
+// Any other contract is refused here, before the attempt spends anything, with the names to choose from: the step
+// would only find out after it. So is a contract that cannot be read, with the words the gate would give after it.
+// Outside a repository nothing is added, and the step says so in its own words.
+function targetOf(args) {
+  if (args.some((a) => a === '--target' || a === '--help' || a === '-h')) return [];
+  let repo; try { repo = repoRoot(process.cwd()); } catch { return []; }
+  const named = (hasConfigFile(repo) ? loadConfig(repo) : autoConfig(repo)).metrics.filter((m) => m && typeof m.name === 'string');
+  if (named.some((m) => m.name === 'score')) return [];
+  const aims = named.length === 1 ? named : named.filter((m) => m.gamingCheck !== false);
+  if (aims.length === 1) return ['--target', aims[0].name];
+  const what = aims.length ? `the contract has ${aims.length} measures a run could be for${named.length > aims.length ? ' (tripwires aside)' : ''}` : `the contract's ${named.length} measures are all tripwires`;
+  bad(`improve: ${what} and none is named score, so name the one this run is for: --target <${(aims.length ? aims : named).map((m) => m.name).join(' | ')}>`);
 }
 
 // The loop's record: one line a try, written by the keeper in the repo's git folder (.git/improve/attempts.jsonl),

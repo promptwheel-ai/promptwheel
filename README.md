@@ -184,7 +184,7 @@ Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommit
 `improve` runs any agent or script, checks what it changed, and keeps it only if the target measure improved.
 
 ```
-promptwheel improve --target tests_pass --attempt "sed -i 's/a - b/a + b/' src/add.js"
+promptwheel improve --attempt "sed -i 's/a - b/a + b/' src/add.js"
 
 #  1  kept     sed -i 's/a - b/a + b/' src/add.js: tests_pass 0 to 1
 ```
@@ -195,9 +195,11 @@ That was run as written, on a repo with one failing test and no config. Put your
   worse (or the floor held, or it changed a file it may not, or the contract), `2` the win came from a change to the
   tests, `3` nothing improved, `64` it could not run. So this stops by itself:
   `while promptwheel improve --attempt "..."; do :; done`
-- **Only the target makes a win.** `--target <measure>` names it (`score` if you name none; `--goal` is another
-  name). More tests alone is no win unless tests are what you named. `--cheaper <measure>` also keeps a change that
-  holds the target and costs less.
+- **Only the target makes a win.** `--target <measure>` names it (`--goal` is another name). If you name none, it
+  is the measure called `score`, or else the contract's only measure, or else its only measure that is not a
+  tripwire. On the contract `init` writes, and with no config, that is the test run. If that still leaves a choice,
+  `improve` stops before the attempt runs and lists the measures. More tests alone is no win unless tests are what
+  you named. `--cheaper <measure>` also keeps a change that holds the target and costs less.
 - **A commit the agent makes is still checked,** as one change with the rest.
 - **What is kept is exactly what was checked.** The commit is made from the tree that was judged. No git hook runs
   on it, and a file written after the check is not in it.

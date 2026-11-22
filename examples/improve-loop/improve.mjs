@@ -16,6 +16,10 @@
 // also kept when the target held (or moved inside its noise band) and that metric fell. A pass with nothing
 // improved is not kept: the gate passes a change that does nothing.
 //
+// --target is score unless named. `promptwheel improve` names it when the contract leaves no choice: its only
+// measure, or its only one that is not a tripwire (gamingCheck false). A contract that leaves a choice, or cannot be
+// read, is refused there before the attempt runs.
+//
 // --floor holds every kept change against the best target value so far, not only against its parent. Without it,
 // small drops that each sit inside the noise band add up: each step passes, and the score walks downhill. The gate
 // compares two commits and keeps no history, so the floor lives here, in .git/improve/best.json.
