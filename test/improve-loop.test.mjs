@@ -54,6 +54,7 @@ function toy(over = {}) {
   const score = { name: 'score', cmd: `echo x >> ${d}.asked; echo $(( $(cat src/score.txt) + $(cat evals/bonus.txt) ))`, extract: 'number', direction: 'up', guard: true, ...(over.score || {}) };
   const cost = { name: 'cost', cmd: 'cat src/cost.txt', extract: 'number', direction: 'down', guard: true, ...(over.cost || {}) };
   put(d, 'promptwheel.config.json', JSON.stringify({ metrics: [score, cost, ...(over.more || [])], evaluatorPaths: ['evals/bonus.txt', 'promptwheel.config.json'], ...(over.top || {}) }, null, 2) + '\n');
+  for (const [f, text] of Object.entries(over.files || {})) put(d, f, text);
   git(d, 'add', '-A'); git(d, 'commit', '-q', '-m', 'start: score 100, cost 100');
   return d;
 }
@@ -735,4 +736,116 @@ test('loop: the demo script shows the walk without a floor, the stop with one, a
     'ends at: score 90, cost 80. The scorer was asked 14 times.',
     'ends at: score 90, cost 80. The scorer was asked 10 times.',
   ]);
+});
+
+// ------------------------------------------------------------------ from treegate's step: what may change, and what a try cost
+// The other session's copy of this step (treegate/step.mjs on wavecutter) added two things: --may-change and a count
+// of gate asks. On 2026-11-21 the owner chose one keeper, so they are in this file now, with treegate's own tests for
+// them, carried over as they are (its test/step.test.mjs).
+const at = (d, f, ref = 'HEAD') => { try { return git(d, 'show', `${ref}:${f}`); } catch { return null; } };   // a file as a commit holds it
+const bump = (file, by) => `sh ${BUMP} ${file} ${by}`;
+const asked = asks;
+const GOOD = 'echo 110 > src/score.txt';
+const rules = () => toy({ files: { 'rules/safety.md': 'never send the key\nask before a refund\n', 'docs/guide.md': 'how\n' } });
+test('may-change: a win inside the list is kept', () => {
+  const d = toy(), r = step(d, GOOD, '--may-change', 'src/**');
+  assert.equal(r.code, 0, r.err); assert.match(r.out, / kept /);
+  assert.equal(at(d, 'src/score.txt'), '110'); assert.ok(clean(d));
+});
+test('may-change: a win that also edits a file outside the list is put back whole, exit 1, and the line names the file', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, `${GOOD}; echo more >> README.md`, '--may-change', 'src/**');
+  assert.equal(r.code, 1, r.err); assert.match(r.out, /^ 1 {2}outside .*README\.md/);
+  assert.equal(head(d), base, 'nothing is kept, not even the part inside the list');
+  assert.equal(read(d, 'src/score.txt'), '100'); assert.equal(read(d, 'README.md'), 'toy'); assert.ok(clean(d));
+});
+test('may-change: without the flag the same change is kept, so the test above can tell the difference', () => {
+  const d = toy(), r = step(d, `${GOOD}; echo more >> README.md`);
+  assert.equal(r.code, 0, r.err); assert.equal(at(d, 'README.md'), 'toy\nmore');
+});
+test('may-change: the try is on record as outside, with the files it changed, and stays reachable', () => {
+  const d = toy(); step(d, `${GOOD}; echo more >> README.md`, '--may-change', 'src/**');
+  const [line] = record(d);
+  assert.equal(line.result, 'outside'); assert.deepEqual(line.files, ['README.md', 'src/score.txt']); assert.deepEqual(line.outside, ['README.md']);
+  assert.equal(git(d, 'rev-parse', 'refs/improve/1'), line.candidate);
+  assert.equal(at(d, 'src/score.txt', 'refs/improve/1'), '110', 'the whole try can still be read');
+});
+test('may-change: the gate is not asked about a try that is outside the list', () => {
+  const d = toy(); step(d, `${GOOD}; echo more >> README.md`, '--may-change', 'src/**');
+  assert.equal(asked(d), 0, 'the scorer was never run');
+});
+test('may-change: a new file outside the list is outside', () => {
+  const d = toy(), r = step(d, `${GOOD}; echo x > notes.txt`, '--may-change', 'src/**');
+  assert.equal(r.code, 1); assert.match(r.out, /outside .*notes\.txt/); assert.ok(!existsSync(join(d, 'notes.txt'))); assert.ok(clean(d));
+});
+test('may-change: a deleted file outside the list is outside, and the file is back', () => {
+  const d = rules(), r = step(d, `${GOOD}; rm rules/safety.md`, '--may-change', 'src/**');
+  assert.equal(r.code, 1); assert.match(r.out, /outside .*rules\/safety\.md/);
+  assert.equal(read(d, 'rules/safety.md'), 'never send the key\nask before a refund');
+});
+test('may-change: a file moved out of a place it may not touch counts at both ends', () => {
+  const d = rules(), r = step(d, `${GOOD}; git mv rules/safety.md src/safety.md`, '--may-change', 'src/**');
+  assert.equal(r.code, 1); assert.match(r.out, /outside .*rules\/safety\.md/);
+  assert.equal(read(d, 'rules/safety.md'), 'never send the key\nask before a refund'); assert.ok(!existsSync(join(d, 'src/safety.md')));
+});
+test('may-change: a safety rule that a second rule still covers cannot be deleted for a saving when the rules are not in the list', () => {
+  // attack 27 of the attack list (masked erosion): the score holds, the cost falls, and no number shows the loss
+  const d = rules(), cut = `sed -i.bak '$d' rules/safety.md && rm -f rules/safety.md.bak && ${bump('src/cost.txt', -10)}`;
+  const r = step(d, cut, '--cheaper', 'cost', '--may-change', 'src/**');
+  assert.equal(r.code, 1, r.err); assert.equal(at(d, 'rules/safety.md'), 'never send the key\nask before a refund');
+  const open = rules(); assert.equal(step(open, cut, '--cheaper', 'cost').code, 0, 'and without the list the deletion is kept as a saving');
+});
+test('may-change: several patterns, with commas between them', () => {
+  const d = rules();
+  assert.equal(step(d, `${GOOD}; echo more >> docs/guide.md`, '--may-change', 'src/**, docs/*.md').code, 0);
+  assert.equal(step(d, 'echo 120 > src/score.txt; echo more >> README.md', '--may-change', 'src/**, docs/*.md').code, 1);
+});
+test('may-change: patterns read as they do in the gate: a bare name at any depth, * stops at a slash, ** crosses it', () => {
+  assert.equal(step(toy(), GOOD, '--may-change', 'score.txt').code, 0, 'a bare name matches that file at any depth');
+  assert.equal(step(toy(), GOOD, '--may-change', '*/score.txt').code, 0);
+  assert.equal(step(toy({ files: { 'src/deep/a.txt': 'a\n' } }), `${GOOD}; echo b > src/deep/a.txt`, '--may-change', 'src/*').code, 1, '* does not reach into a folder');
+  assert.equal(step(toy({ files: { 'src/deep/a.txt': 'a\n' } }), `${GOOD}; echo b > src/deep/a.txt`, '--may-change', 'src/**').code, 0);
+  assert.equal(step(toy(), GOOD, '--may-change', 'sr').code, 1, 'half a name matches nothing');
+});
+test('may-change: an empty list is exit 64, not a list that allows everything', () => {
+  const d = toy(), base = head(d);
+  for (const list of ['', ' , ']) {
+    const r = step(d, GOOD, '--may-change', list);
+    assert.equal(r.code, 64); assert.match(r.err, /may-change/);
+  }
+  assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100', 'the attempt never ran');
+});
+test('may-change: a gamed win outside the list reads outside, and the grader file is back', () => {
+  const d = toy(), r = step(d, 'echo 50 > evals/bonus.txt', '--may-change', 'src/**');
+  assert.equal(r.code, 1); assert.match(r.out, /outside .*evals\/bonus\.txt/); assert.equal(read(d, 'evals/bonus.txt'), '0');
+});
+test('may-change: an attempt that commits its own work is held to the list all the same', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, `${GOOD}; echo more >> README.md; git commit -qam mine`, '--may-change', 'src/**');
+  assert.equal(r.code, 1, r.err); assert.equal(head(d), base); assert.equal(read(d, 'README.md'), 'toy');
+});
+test('may-change: a file hidden from git is shown again and held to the list', () => {
+  const d = toy(), r = step(d, `${GOOD}; git update-index --skip-worktree README.md; echo hidden >> README.md`, '--may-change', 'src/**');
+  assert.equal(r.code, 1, r.err); assert.match(r.out, /outside .*README\.md/); assert.equal(read(d, 'README.md'), 'toy'); assert.ok(clean(d));
+});
+test('may-change: a name with a space or an accent is read as it is, inside the list and outside it', () => {
+  const inside = toy(); assert.equal(step(inside, `${GOOD}; echo x > 'src/café notes.txt'`, '--may-change', 'src/**').code, 0);
+  assert.equal(at(inside, 'src/café notes.txt'), 'x');
+  const out = toy(), r = step(out, `${GOOD}; echo x > 'café notes.txt'`, '--may-change', 'src/**');
+  assert.equal(r.code, 1); assert.deepEqual(record(out)[0].outside, ['café notes.txt']);
+});
+test('may-change: the line names a few files and counts the rest', () => {
+  const d = toy(), many = Array.from({ length: 8 }, (_, i) => `echo x > extra${i}.txt`).join('; ');
+  const r = step(d, `${GOOD}; ${many}`, '--may-change', 'src/**');
+  assert.match(r.out, /outside .*extra0\.txt.* and 5 more/); assert.equal(record(d)[0].outside.length, 8, 'the record holds them all');
+});
+test('asks: the record says how often the gate was asked in a try: once, or twice when the floor was checked too', () => {
+  const d = toy({ score: { noise: 10 } }), trade = `${bump('src/score.txt', -5)} && ${bump('src/cost.txt', -10)}`;
+  for (let i = 0; i < 3; i++) step(d, trade, '--cheaper', 'cost', '--floor');
+  step(d, 'true', '--floor');
+  assert.deepEqual(record(d).map((l) => [l.result, l.asks]), [['kept', 1], ['kept', 2], ['worse', 2], ['nothing', undefined]]);
+});
+test('asks: a try the gate was never asked about has no count', () => {
+  const d = toy(); step(d, `${GOOD}; echo more >> README.md`, '--may-change', 'src/**');
+  assert.equal(record(d)[0].asks, undefined);
 });

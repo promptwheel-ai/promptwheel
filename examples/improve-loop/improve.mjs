@@ -7,7 +7,7 @@
 // and reads the report. test/improve-loop.test.mjs holds it to what this header says.
 //
 //   node improve.mjs --attempt "<command that changes the repo>" [--label <name>] [--target score]
-//                    [--cheaper cost] [--floor] [--repeat N] [--base-cache <dir>] [--json]
+//                    [--cheaper cost] [--floor] [--repeat N] [--base-cache <dir>] [--may-change <patterns>] [--json]
 //
 // A change is kept only when the gate passes AND the target metric improved. With --cheaper <metric>, a change is
 // also kept when the target held (or moved inside its noise band) and that metric fell. A pass with nothing
@@ -18,6 +18,12 @@
 // compares two commits and keeps no history, so the floor lives here, in .git/improve/best.json.
 //
 // --base-cache <dir> is handed to the gate, so the base is measured once. The folder must sit outside the repo.
+//
+// --may-change "src/**, prompts/*.md" names the paths an attempt may touch. A try that changes, adds, deletes or
+// moves anything else is put back whole, and the gate is not asked. The patterns read as the gate reads its own:
+// a bare name matches at any depth, a pattern with a slash starts at the top of the repo, * stops at a slash and
+// ** crosses it. The names come from the commit that would be judged, so nothing gets round the list.
+// (From treegate's step, the other session's copy of this file, 2026-11-21: one step again.)
 //
 // Every attempt, kept or not, is one line in .git/improve/attempts.jsonl, and the change itself stays reachable as
 // refs/improve/<n>. The attempt command gets the path of that record in IMPROVE_RECORD (and the target's name in
@@ -42,7 +48,7 @@
 //
 // stdout is one line (or with --json, the record line). What the attempt prints goes to stderr.
 // Exit codes, so `while node improve.mjs --attempt ...; do :; done` stops by itself:
-//   0 kept · 1 put back, a guard got worse or the floor held · 2 put back, gamed ·
+//   0 kept · 1 put back, a guard got worse, the floor held, or it changed what it may not · 2 put back, gamed ·
 //   3 put back, nothing improved or nothing could be measured · 64 could not run.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -55,7 +61,7 @@ const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['
 const holds = (...args) => { try { git(...args); return true; } catch { return false; } };
 
 // A flag this does not know is an error, not a flag to drop: a mistyped --floor would turn the floor off.
-const VALUED = ['--attempt', '--label', '--target', '--cheaper', '--repeat', '--base-cache'], BARE = ['--floor', '--json'];
+const VALUED = ['--attempt', '--label', '--target', '--cheaper', '--repeat', '--base-cache', '--may-change'], BARE = ['--floor', '--json'];
 const args = {};
 for (let i = 0, argv = process.argv.slice(2); i < argv.length; i++) {
   if (BARE.includes(argv[i])) args[argv[i]] = true;
@@ -66,6 +72,14 @@ for (let i = 0, argv = process.argv.slice(2); i < argv.length; i++) {
 const attempt = args['--attempt'];
 if (!attempt) die('--attempt "<command that changes the repo>" is required');
 const label = args['--label'] ?? attempt, target = args['--target'] ?? 'score', cheaper = args['--cheaper'], floor = args['--floor'] === true;
+// The same pattern rules as the gate's evaluatorPaths and mandates, so one pattern means one thing in both places.
+const globToRe = (glob) => {
+  const anchored = glob.startsWith('/'), g = anchored ? glob.slice(1) : glob;
+  const body = g.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*\*/g, '\x00').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]').replace(/\x00/g, '.*');
+  return new RegExp(`${anchored || glob.includes('/') ? '^' : '(^|/)'}${body}$`);
+};
+const may = args['--may-change'] === undefined ? null : args['--may-change'].split(',').map((s) => s.trim()).filter(Boolean).map(globToRe);
+if (may && !may.length) die('--may-change needs at least one path pattern: an empty list is not a list');
 const gateCommand = process.env.PROMPTWHEEL ? process.env.PROMPTWHEEL.split(' ') : [process.execPath, join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'promptwheel.mjs')];
 
 let root; try { root = git('rev-parse', '--show-toplevel'); } catch { die('not inside a git repository'); }
@@ -128,9 +142,10 @@ const k = Number(process.env.GIT_CONFIG_COUNT) || 0;
 Object.assign(process.env, { GIT_CONFIG_COUNT: String(k + 2), [`GIT_CONFIG_KEY_${k}`]: 'core.hooksPath', [`GIT_CONFIG_VALUE_${k}`]: '/dev/null', [`GIT_CONFIG_KEY_${k + 1}`]: 'core.fsmonitor', [`GIT_CONFIG_VALUE_${k + 1}`]: 'false' });
 
 const restored = new Set(), refsLost = [];   // which of the loop's own files the attempt touched, and what could not be put back
+let asks = 0;   // how often the gate was asked in this try: what the try cost
 const putBack = () => { git('reset', '-q', '--hard', base); git('clean', '-qfd'); };
 const note = (result, why, extra = {}) => {
-  const line = { n, at: new Date().toISOString(), label, base, result, why, ...extra, ...(restored.size ? { recordPutBack: true, restored: [...restored] } : {}), ...(refsLost.length ? { refsLost } : {}) };
+  const line = { n, at: new Date().toISOString(), label, base, result, why, ...extra, ...(asks ? { asks } : {}), ...(restored.size ? { recordPutBack: true, restored: [...restored] } : {}), ...(refsLost.length ? { refsLost } : {}) };
   appendFileSync(record, JSON.stringify(line) + '\n');
   return line;
 };
@@ -192,7 +207,16 @@ try {
   git('update-ref', `refs/improve/${n}`, candidate);
   git('reset', '-q');
 
+  // What may change. The names are read from the commit the gate would judge, a move counts at both ends, and a
+  // try that touched anything else is put back whole: half of a change is not a change anyone made.
+  if (may) {
+    const changed = execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', base, candidate], { encoding: 'utf8' }).split('\0').filter(Boolean);
+    const outside = changed.filter((f) => !may.some((re) => re.test(f)));
+    if (outside.length) { putBack(); finish('outside', `it changed what it may not: ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ` and ${outside.length - 3} more` : ''}`, 1, { candidate, files, outside }); }
+  }
+
   const ask = (...refs) => {
+    asks++;
     const run = spawnSync(gateCommand[0], [...gateCommand.slice(1), 'run', ...refs, '--json', ...(args['--repeat'] ? ['--repeat', args['--repeat']] : []), ...(args['--base-cache'] ? ['--base-cache', args['--base-cache']] : [])], { encoding: 'utf8' });
     try { return JSON.parse(run.stdout); } catch { throw new Error(`could not read the gate's report (exit ${run.status}): ${(run.stderr || '').trim().slice(0, 300)}`); }
   };
