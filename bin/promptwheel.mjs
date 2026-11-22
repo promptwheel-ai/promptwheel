@@ -1791,11 +1791,12 @@ function mdPathWayOut(r) {
   ];
 }
 // In the comment: "an earlier commit of this pull request (`abc1234`) added 3 tests. None of them is in it now: `a`, `b`, `c`."
+// With one: "... added 1 test. That test is not in it now: `a`." (the owner's yes to these words, 2026-11-22)
 // At a terminal the same, of "this change": a range of commits is not always a pull request.
 const takenOutNames = (t, q = '') => `${t.names.map((n) => q + n + q).join(', ')}${t.more ? ` and ${t.more} more` : ''}`;
 const takenOutSaid = (t, md) => md
-  ? `an earlier commit of this pull request (\`${t.at}\`) added ${t.added} test${t.added === 1 ? '' : 's'}. ${t.added === 1 ? 'It is not' : 'None of them is'} in it now: ${takenOutNames(t, '`')}.`
-  : `an earlier commit of this change (${t.at}) added ${t.added} test${t.added === 1 ? '' : 's'}, and ${t.added === 1 ? 'it is not' : 'none of them is'} in it now: ${takenOutNames(t)}`;
+  ? `an earlier commit of this pull request (\`${t.at}\`) added ${t.added} test${t.added === 1 ? '' : 's'}. ${t.added === 1 ? 'That test is not' : 'None of them is'} in it now: ${takenOutNames(t, '`')}.`
+  : `an earlier commit of this change (${t.at}) added ${t.added} test${t.added === 1 ? '' : 's'}, and ${t.added === 1 ? 'that test is not' : 'none of them is'} in it now: ${takenOutNames(t)}`;
 function renderMarkdown(r, o = {}) {
   const sIcon = { improved: '🟢', regressed: '🔴', unchanged: '⚪', inconclusive: '🟡', unmeasurable: '⚫' };
   const rows = r.metrics.map((m) => {

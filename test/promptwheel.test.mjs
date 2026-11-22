@@ -4007,7 +4007,8 @@ test('tests an earlier commit of the change added, all gone now: a note with the
   assert.match(human, /ℹ note: an earlier commit of this change \([0-9a-f]{7,}\) added 3 tests, and none of them is in it now: adds four, adds three, adds two/);
   // one test added and taken out reads in the singular
   const e = prRepo(); const eb = rev(e); put(e, 'test/one.test.js', "const { test } = require('node:test');\ntest('only one', () => {});\n"); commitAll(e, 'one test'); unlinkSync(join(e, 'test/one.test.js')); commitAll(e, 'and out');
-  assert.match(renderMarkdown(range(e, eb).rep), /added 1 test\. It is not in it now: `only one`\./);
+  assert.match(renderMarkdown(range(e, eb).rep), /added 1 test\. That test is not in it now: `only one`\./);
+  assert.match(pw(e, ['run', '--base', eb, '--head', 'HEAD', '--no-record']).out, /added 1 test, and that test is not in it now: only one/);
 });
 test('not taken for tests taken out: a rename, a part of them, a single commit, a change that only removes what the base held', () => {
   const renamed = prRepo(); let base = rev(renamed);

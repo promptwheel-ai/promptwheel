@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.17 (not released yet): every test a pull request added, gone at its end
+
+An agent writes tests early in a pull request. They fail, and a later commit deletes them. The pull request ends with as many tests as before, so every count says nothing changed. Now the comment on the pull request says so in a note: `an earlier commit of this pull request (abc1234) added 3 tests. None of them is in it now:`, with their names. With one test the second sentence reads `That test is not in it now:`. The terminal says the same of "this change".
+
+- **Each test is read by its name.** A small reader for each language (JavaScript and TypeScript, Python, Go with its table rows, Rust, Ruby, Java, Kotlin, C#, Swift, Elixir), no parser and no dependency. It was held against real test files by eye, sixty at a time, five times, and fixed after each of the first four. The report names what it found (`testsTakenOut`).
+- **It speaks only when the pull request as it stands adds no tests.** So a renamed test is not called gone: the number of tests decides, and the names only say which went.
+- **A note, never part of a verdict.** A pass that carries it is still a pass, and its title still says so. The comment is left, since there is something to say.
+- **Measured before it was written here,** on 994 pull requests: it speaks on 14 of 139 a person objected to, 6 of 270 matched ones nobody objected to, and none of 271 ordinary ones by an agent.
+- **It says nothing where it cannot read:** a commit that is not in the clone (a shallow clone, a pull request squashed into one commit), or a step that touches more than 2,000 files it reads. A test made from a table in JavaScript, Python or C# has one name, so it counts as one test, and a test written in a way the reader does not know is not read.
+
 ## 0.8.16 (2026-11-20): a report that arrived cut
 
 `run` printed its report and called `process.exit()` at once. Node writes to a pipe in the background, and an exit drops what the pipe has not taken yet. So a report larger than a pipe holds arrived cut, with the verdict's exit code: at 146,176 bytes where the reader was quick, at 65,536 where it was slow. Found by running the Action's own two commands on every commit of 994 pull requests. One of them changed 10,753 files, and its report came to 812,136 bytes.
