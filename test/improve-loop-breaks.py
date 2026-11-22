@@ -161,7 +161,7 @@ M = [  # (file, what the break does, text to find, text to put there, which occu
  # ---- the run's stop rule for "no room left" (the plan's "best")
  (R, "never stops for no room", "  if ((none = noRoom())) { ended = 'no room'; break; }\n", "", 1),
  (R, "reads exactly the band left as room", "(down ? now - p.best : p.best - now) <= band ?", "(down ? now - p.best : p.best - now) < band ?", 1),
- (R, "ignores the gate's band", " if (typeof g.noise === 'number' && g.noise >= 0) band = g.noise;", "", 1),
+ (R, "ignores the band the contract declares, for a line that holds none", " if (band === null && typeof g.noise === 'number' && g.noise >= 0) band = g.noise;", "", 1),
  (R, "reads a target that counts down as one that counts up", "down = g.direction === 'down';", "", 1),
  (R, "reads a kept try's score as it was before the keep", "now = last.result === 'kept' && typeof m.after === 'number' ? m.after : m.before;", "now = m.before;", 1),
  (R, "reads a put-back try's score as if the try were kept", "now = last.result === 'kept' && typeof m.after === 'number' ? m.after : m.before;", "now = typeof m.after === 'number' ? m.after : m.before;", 1),

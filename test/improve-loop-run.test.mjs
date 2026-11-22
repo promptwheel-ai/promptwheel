@@ -311,6 +311,16 @@ test('run: best: the band is the one the gate measured on the try, also where th
   const band = record(d)[0].metrics.find((m) => m.name === 'score').noise;
   assert.ok(typeof band === 'number' && band > 3, `the step wrote the gate's band into the record line (got ${band})`);
 });
+test('run: best: a record line written before the step wrote bands holds none, and the band the contract declares is used', () => {
+  const d = planned([WIN, WIN], { best: 105 }, { score: { noise: 5 } });
+  step(d, 'echo 101 > src/score.txt');   // inside the band: put back, and on record with the band
+  const f = join(d, '.git/improve/attempts.jsonl'), line = JSON.parse(readFileSync(f, 'utf8').trim());
+  assert.equal(line.metrics.find((m) => m.name === 'score').noise, 5, 'the step wrote the band');
+  line.metrics = line.metrics.map(({ noise, ...m }) => m); writeFileSync(f, JSON.stringify(line) + '\n');   // as an older step wrote it
+  const r = go(d);
+  assert.equal(r.code, 0, r.err); assert.equal(record(d).length, 1, 'no try of the run: no room'); assert.equal(runs(d)[1].ended, 'no room');
+  assert.match(r.out, /a gain has to be more than 5/);
+});
 test('run: best: a target that counts down has its best at the low end', () => {
   const d = planned(['echo 90 > src/cost.txt', 'echo 85 > src/cost.txt', 'echo 80 > src/cost.txt'], { target: 'cost', best: 85 }), r = go(d);
   assert.equal(r.code, 0, r.err); assert.deepEqual(results(d), ['kept', 'kept']); assert.equal(runs(d)[1].ended, 'no room'); assert.match(r.out, /cost stands at 85/);
