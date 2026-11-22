@@ -190,7 +190,7 @@ const restored = new Set(), refsLost = [];   // which of the loop's own files th
 let asks = 0;   // how often the gate was asked in this try: what the try cost
 const putBack = () => { git('reset', '-q', '--hard', base); git('clean', '-qfd'); };
 const note = (result, why, extra = {}) => {
-  const line = { n, at: new Date().toISOString(), label, base, result, why, ...extra, ...(asks ? { asks } : {}), ...(restored.size ? { recordPutBack: true, restored: [...restored] } : {}), ...(refsLost.length ? { refsLost } : {}) };
+  const line = { n, at: new Date().toISOString(), label, base, target, result, why, ...extra, ...(asks ? { asks } : {}), ...(restored.size ? { recordPutBack: true, restored: [...restored] } : {}), ...(refsLost.length ? { refsLost } : {}) };
   appendFileSync(record, JSON.stringify(line) + '\n');
   n++;
   return line;

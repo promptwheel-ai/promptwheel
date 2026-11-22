@@ -958,3 +958,7 @@ test('turns: an interrupt keeps a best turn that had passed its check', async ()
   assert.equal(code, 0, out); assert.equal(git(d, 'rev-parse', 'HEAD~1'), base); assert.equal(at(d, 'src/score.txt'), '110'); assert.ok(clean(d));
   assert.match(out, /stopped at turn 2/);
 });
+test('target: a target that counts down is kept when it falls, and the line says so', () => {
+  const d = toy(), r = step(d, 'echo 90 > src/cost.txt', '--target', 'cost');
+  assert.equal(r.code, 0, r.err); assert.match(r.out, / kept .*cost 100 to 90/); assert.equal(record(d)[0].target, 'cost');
+});

@@ -1,10 +1,15 @@
-# improve-loop: one step of a self-improving loop
+# improve-loop: the loop's one keeper
 
 Run an attempt. Ask the gate. Keep the change, or put it back.
 
 ```bash
-node examples/improve-loop/improve.mjs --attempt "<command that changes the repo>"
+promptwheel improve --attempt "<command that changes the repo>"
+node examples/improve-loop/improve.mjs --attempt "<command that changes the repo>"   # the same thing, run directly
 ```
+
+`promptwheel improve` runs this file, which ships in the package. It is the one keeper: on 2026-11-21 there
+were three (this step, a copy of it in the framework's treegate, and a command inside the engine), and the owner
+chose one, outside the engine. It asks the engine as a separate process.
 
 The attempt is any command that edits files: an agent, a script, a codemod. The step runs it, asks
 `promptwheel run --working --json` what moved, and reads the answer.
@@ -28,6 +33,9 @@ enough: the gate passes a change that does nothing.
 | `--label <name>` | a name for the attempt in the record. Default: the attempt command. |
 | `--repeat N` | handed to the gate: N readings a side. |
 | `--base-cache <dir>` | handed to the gate: measure the base once. The folder must sit outside the repo. |
+| `--may-change <patterns>` | the only paths an attempt may touch, with commas between: `src/**, prompts/*.md`. Anything else and the try is put back whole, before the gate is asked. |
+| `--turns N` | judge over a number of turns (below). |
+| `--patience P` | with `--turns`: end the run after P turns with no new best, once there is one. Default 3. |
 | `--json` | print the record line as JSON instead of the one-line summary. |
 
 A flag it does not know is an error. A mistyped `--floor` should not quietly turn the floor off.
@@ -37,7 +45,7 @@ A flag it does not know is an error. A mistyped `--floor` should not quietly tur
 | code | meaning |
 |---|---|
 | 0 | kept: one new commit |
-| 1 | put back: a guard got worse, or the change is under the floor |
+| 1 | put back: a guard got worse, the change is under the floor, it changed a file it may not, or it changed the contract |
 | 2 | put back: gamed. The win came from the test, the grader or the config |
 | 3 | put back: nothing improved, or the gate could not tell |
 | 64 | could not run. Nothing was kept |
@@ -56,6 +64,34 @@ With --floor:      kept, kept, worse, worse    score stops at 90
 
 With `--floor` the step asks the gate a second time, with the best commit so far as the base. The
 best commit is kept in `.git/improve/best.json`.
+
+## Over a number of turns
+
+One attempt judged alone is put back unless it improved by itself, so a change that needs a level step first can
+never be kept. With `--turns N`:
+
+- each turn goes on from where the last one left the tree;
+- after every turn the whole change so far is judged against the commit the run started from, so a test edited at
+  one turn makes no win at a later one;
+- the next turn is told the reading, in a file whose path is in `PW_FEEDBACK` (`PW_TURN` and `PW_TURNS` say where the
+  run is);
+- a turn that left the tree as the last one did is not judged again;
+- the best turn is kept, as one commit, after it is measured once more. If no turn won, the tree is put back.
+
+The run ends early when a turn that ended by itself changed nothing, when the target can go no further, or after
+`--patience` turns with no new best. Ctrl-C puts the tree back, and keeps a best turn that had passed its check.
+Every turn is a line in the record, and the run ends with a line of its own.
+
+## The contract is yours
+
+A change the gate would keep is put back when it touched `promptwheel.config.json`, a file inside the repo that it
+extends, or a file its `evaluatorPaths` name, as they stood when the step started (result `contract`, exit 1). A
+change the gate already sends back keeps the gate's result.
+
+## A run that is killed
+
+A run killed outright cannot put anything back. It leaves `.git/improve/running.json`, and the next run names the
+commit it started from, with the line that puts the tree back, before it does anything.
 
 ## The record
 
@@ -144,8 +180,11 @@ step reads that as the attempt's doing and puts it back. The line names the file
 The engine had this as `promptwheel improve --attempt` from 0.0.2. Version 0.8.0 removed it, with
 its four tests, as a command nothing relied on. On 2026-11-21 the owner asked for it back.
 
-It came back as an example, not a command, so the engine stays small. Its tests are in
-`test/improve-loop.test.mjs`, and they run with `npm test`. One test in the main suite fails, and
-says why, if this folder or those tests go missing.
+It came back as an example, not a command, so the engine stays small. The same day the engine grew a
+keeper of its own, and the framework's treegate made a copy of this one. The owner chose one keeper: this
+file. What the other two had and this one lacked (turns, the contract rule, the mark of a killed run, the
+list of what may change, a count of gate asks) is here now, and `promptwheel improve` runs it. Its tests are in
+`test/improve-loop.test.mjs`, and they run with `npm test`. One test in the main suite fails, and says why,
+if this folder or those tests go missing.
 
 Ask the owner before removing either.

@@ -181,70 +181,66 @@ Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommit
 
 ## The loop: keep a change only if it measured better
 
-`improve` runs any agent or script, checks what it changed, and keeps it only if a measure improved.
+`improve` runs any agent or script, checks what it changed, and keeps it only if the target measure improved.
 
 ```
-promptwheel improve --attempt "claude -p 'fix the failing test' --permission-mode acceptEdits < /dev/null"
+promptwheel improve --target tests_pass --attempt "sed -i 's/a - b/a + b/' src/add.js"
 
-#   ▲ tests_pass                0 →        1  (+1, improved) [guard✓, high]
-#   VERDICT: PASS
-#   ✓ kept, committed 508f6d9 (improved tests_pass)
+#  1  kept     sed -i 's/a - b/a + b/' src/add.js: tests_pass 0 to 1
 ```
 
-That line was run as written (Claude Code 2.1.318, a repo with one failing test and no config). In that mode the
-agent could edit files and could not run the tests, and it said so. The loop ran them.
+That was run as written, on a repo with one failing test and no config. Put your agent where the `sed` is.
 
 - **Kept means one commit. Anything else means the tree is put back as it was.** Exit `0` kept, `1` a guard got
-  worse, `2` the win came from a change to the tests, `3` nothing improved. So this stops by itself:
+  worse (or the floor held, or it changed a file it may not, or the contract), `2` the win came from a change to the
+  tests, `3` nothing improved, `64` it could not run. So this stops by itself:
   `while promptwheel improve --attempt "..."; do :; done`
-- **More tests is not a win.** A count of tests or assertions can go up with nothing earned from the source. Fewer of
-  what the contract counts (skips, suppressions) is a win. `--goal <measure>` says which measure an attempt is for,
-  and then only that one makes a win.
-- **A commit the agent makes is still checked.** Its commits are folded back and checked as one change.
+- **Only the target makes a win.** `--target <measure>` names it (`score` if you name none; `--goal` is another
+  name). More tests alone is no win unless tests are what you named. `--cheaper <measure>` also keeps a change that
+  holds the target and costs less.
+- **A commit the agent makes is still checked,** as one change with the rest.
 - **What is kept is exactly what was checked.** The commit is made from the tree that was judged. No git hook runs
   on it, and a file written after the check is not in it.
-- **What judges is put back.** An attempt that changes the contract, hides a file from git, or touches the loop's
-  record or the engine's own files is put back, whatever else it did.
+- **What judges is put back.** The loop's record, the engine and the loop's own files, a file hidden from git, and
+  git's own files (the repo's git config, its hooks, the refs, your global git config) are put back after each
+  attempt, before the change is judged. If your global config changed while an attempt ran, it is put back too, and
+  the line names the file. A change the check would keep is put back when it touched the contract.
+- **`--may-change "src/**"`** names the only paths an attempt may touch; **`--floor`** holds each kept change against
+  the best score so far; **`--base-cache <dir>`** keeps the base's numbers between tries.
 - **Start from a clean tree.** A thrown-away attempt is undone with `git reset` and `git clean`.
 
 **Over a number of turns.** One attempt judged alone is put back unless it improved by itself. Under a pass-or-fail
-measure (do the tests pass) that loses any fix bigger than one attempt: the first attempt shows nothing yet, it is put
-back, and the next starts from nothing. `--turns N` judges the whole run instead:
-
-- each turn goes on from where the last one left the tree;
-- after every turn the whole change so far is checked against the commit the run started from, so a test edited at
-  one turn makes no win at a later one;
-- the next turn is told the reading: its path is in `PW_FEEDBACK` (`PW_TURN` and `PW_TURNS` say where the run is);
-- the best turn is kept, as one commit, after it is measured once more. If no turn won, the tree is put back.
-
-A run ends early when a turn ends by itself having changed nothing, when nothing more can be gained, or after
+measure (do the tests pass) that loses any fix bigger than one attempt. `--turns N` judges the whole run instead:
+each turn goes on from where the last one left the tree; after every turn the whole change so far is checked against
+the commit the run started from, so a test edited at one turn makes no win at a later one; the next turn is told the
+reading (its path is in `PW_FEEDBACK`); the best turn is kept, as one commit, after it is measured once more. A run
+ends early when a turn ends by itself having changed nothing, when the target can go no further, or after
 `--patience` turns (3) with no new best once there is one. An interrupt puts the tree back, and keeps a best turn
-that had passed its check. Inside the loop the contract is yours: an attempt that changes `promptwheel.config.json`
-is put back, whatever else it did.
+that had passed its check.
 
-Git's own files (the repo's git config, its hooks, the refs, your global git config) are put back after each attempt,
-before the change is judged. If your global config changed while an attempt ran, it is put back too, and the line
-names the file. The engine's own git calls run no hook and no fsmonitor command; that needs git 2.31 or newer, and an
-older git ignores the setting and says nothing.
+`improve` runs the loop step that ships beside the engine, [`examples/improve-loop/improve.mjs`](examples/improve-loop/).
+It is the one keeper: there were three for a day (that step, a copy of it in another line of work, and a command
+inside the engine), and they are one now. It asks the engine as a separate process, so what is judged never runs
+inside what judges it. Its own page says every flag and every limit.
+
+The engine's own git calls run no hook and no fsmonitor command; that needs git 2.31 or newer, and an older git
+ignores the setting and says nothing.
 
 What the loop cannot hold: an installed dependency your measure runs, a safety rule deleted behind another one, a
-process the attempt leaves running (it can write into the copy the check measures in), anything outside the repo. The attempt runs as you. A container, or the check
-run again on a pull request, holds those ([docs/LEARNING.md](docs/LEARNING.md)).
+process the attempt leaves running (it can write into the copy the check measures in), anything outside the repo. The
+attempt runs as you. A container, or the check run again on a pull request, holds those ([docs/LEARNING.md](docs/LEARNING.md)).
 
 What this is not: a promise that more turns do better. In our own first runs with a real agent the count of work
 left fell in steps, not slopes: most turns that were cut short had saved nothing ([docs/LEARNING.md](docs/LEARNING.md)).
 
-Every checked run adds one short row to a record in the repo's git folder (never the working tree; `run --no-record`
-adds none). Three commands read it: `insights` (how each measure responds), `playbook` (what has paid here, and what
-was tried and thrown away, with the measured reason) and `suggest` (where to spend the next attempt: `--goal` takes its answer). `backfill`
-fills the record from past commits.
+Every try of the loop is one line in `.git/improve/attempts.jsonl`, and the change it made stays readable as
+`refs/improve/<n>`. Every check adds one short row to the engine's own record in the repo's git folder (never the
+working tree; `run --no-record` adds none). Three commands read them: `insights` (how each measure responds),
+`playbook` (what has paid here, and what the loop tried and threw away, in the loop's own words) and `suggest` (where
+to spend the next attempt). `backfill` fills the engine's record from past commits.
 
 We do not say the loop gets better with use. That has a test, and the test has not been passed:
 [docs/LEARNING.md](docs/LEARNING.md).
-
-A loop step you can read, copy and change is in [`examples/improve-loop/`](examples/improve-loop/). It is a small driver outside the engine, written by a
-second line of work, and it does two things the command does not do yet: it holds a change against the best score so far (`--floor`), and it keeps the
-base's measurement between tries (`--base-cache`). Both it and the command are held to one list of attacks.
 
 
 ## Trust model

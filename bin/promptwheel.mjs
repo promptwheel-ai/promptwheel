@@ -12,7 +12,7 @@
 // Zero deps, zero build. Node 18+.
 //   promptwheel run [--base R] [--head R] [--repeat N] [--json]
 
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync, execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdtempSync, symlinkSync, rmSync, mkdirSync, realpathSync, readdirSync, lstatSync, copyFileSync, openSync, closeSync, appendFileSync, renameSync, readlinkSync, chmodSync, statSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
@@ -1629,416 +1629,54 @@ function recordRun(repo, report, cfg, extra = {}) {
 // and more of it is the good direction. Tests and assertions are the two the presets hold.
 const freeCount = (m) => (m.tripwire === true || m.gamingCheck === false) && (m.direction || 'up') === 'up';
 
-// How a change stands against the commit a run started from, and what would make it a win.
-// More of a count that can go up for free (tests, assertions: the source-only re-run leaves it alone and its direction
-// is up) is not a win: an empty test raises it. FEWER of what the contract counts is one, also where the re-run leaves
-// the count alone: the first run with a real agent rewrote 89 of 91 em dashes and was thrown away by a rule that did
-// not ask which way the count runs. With --goal only the named measure makes a win, whatever it is.
-// `known` is the names of the measures the contract held when the run started. A gain on any other measure cannot
-// make a win: an attempt added a measure of its own, satisfied it with one line, and was kept (found by a second reader
-// of this code, then run). An attempt that changes the contract file is put back before this is asked; this rule is
-// for a contract that changes where git cannot see it (a file it extends, outside the repo).
-function standingOf(report, goal, known) {
-  const fresh = known ? report.metrics.filter((m) => m.status === 'improved' && !known.has(m.name)).map((m) => m.name) : [];
-  const improved = report.metrics.filter((m) => m.status === 'improved' && (!known || known.has(m.name)));
-  const wins = goal ? improved.filter((m) => goal.includes(m.name)) : improved.filter((m) => !freeCount(m));
-  const counts = goal ? [] : improved.filter(freeCount).map((m) => m.name);
-  const offGoal = goal ? improved.filter((m) => !goal.includes(m.name)).map((m) => m.name) : [];
-  const standing = report.verdict === 'fail' ? 'worse' : report.verdict === 'gamed' ? 'gamed' : report.verdict === 'inconclusive' ? 'unsure' : wins.length ? 'win' : 'level';
-  // the size of a win: how far the measures that make it moved, in their own units
-  const gain = standing === 'win' ? +wins.reduce((s, m) => s + Math.abs(typeof m.delta === 'number' ? m.delta : 0), 0).toFixed(6) : 0;
-  // nothing more can be gained when every measure that could make a win is a pass-or-fail one that passes
-  const can = report.metrics.filter((m) => (goal ? goal.includes(m.name) : !freeCount(m)) && m.status !== 'unmeasurable');
-  const topped = can.length > 0 && can.every((m) => m.direction === 'pass' && m.after === 1);
-  return { standing, wins: wins.map((m) => m.name), counts, offGoal, fresh, gain, topped };
-}
-// why a run that kept nothing kept nothing, as names a view can print
-function becauseOf(report, s) {
-  if (report.stub) return [report.stub];
-  if (s.standing === 'worse') return [...report.metrics.filter((m) => m.guard && !m.ok).map((m) => m.name), ...(report.mandates || []).map((v) => `mandate:${v.name}`)];
-  if (s.standing === 'gamed') return [...report.metrics.filter((m) => m.gamed || m.unprovable).map((m) => m.name), ...(report.gate && report.gate.weakened && !report.gate.allowed ? ['gate'] : [])];
-  if (s.standing === 'unsure') return report.metrics.filter((m) => m.inert || m.unprovable || m.status === 'inconclusive').map((m) => m.name);
-  return [...s.counts.map((n) => `count:${n}`), ...s.offGoal.map((n) => `off-goal:${n}`), ...(s.fresh || []).map((n) => `new-measure:${n}`)];
+// `promptwheel improve` runs the loop's one keeper: examples/improve-loop/improve.mjs, beside this engine and in the
+// same package. One keeper, by the owner's decision of 2026-11-21: the step outside the engine, which asks the engine
+// as a separate process, so what is judged never runs inside what judges it. There had been three (that step, a copy
+// of it in treegate, and a keeper inside this file); this command is now a door onto the one. The step's flags are
+// its own and it refuses one it does not know, its output and exit code are this command's, and `--goal <measure>`
+// is another name for its `--target`.
+function improve(argv) {
+  const step = join(dirname(fileURLToPath(import.meta.url)), '..', 'examples', 'improve-loop', 'improve.mjs');
+  if (!existsSync(step)) bad(`promptwheel improve: the loop step is not where it ships (${step})`);
+  const args = []; for (let i = 0; i < argv.length; i++) args.push(argv[i] === '--goal' ? '--target' : argv[i]);
+  // the person's environment, and no PROMPTWHEEL: the step asks the engine it ships with, this one
+  const env = personEnv(process.env); delete env.PROMPTWHEEL;
+  // Ctrl-C reaches the step and this door together. The step puts the attempt back; the door waits for it.
+  process.on('SIGINT', () => {});
+  const r = spawnSync(process.execPath, [step, ...args], { stdio: 'inherit', env });
+  if (r.error) bad(`promptwheel improve: could not start the loop step (${r.error.message})`);
+  process.exitCode = r.status ?? (r.signal ? 130 : 1);
 }
 
-// a report for a turn that could not be measured at all: the attempt left a contract nobody can read, or moved the
-// branch. It reads as worse than the start, and says which.
-function stubReport(repo, startSha, what, message) {
-  let head = 'HEAD'; try { head = workingSnapshot(repo); } catch { /* the tree as it is */ }
-  return { base: short(repo, startSha), head: short(repo, head === 'HEAD' ? startSha : head), repeat: 1, mode: 'working', verdict: 'fail', metrics: [], stub: what, why: oneLine(message, 300),
-    provenance: { tool: 'promptwheel', toolVersion: TOOL_VERSION, baseSha: startSha, headSha: head } };
-}
-
-// What the next turn is told: the last reading, in plain words. Its path is in PW_FEEDBACK; the attempt's own command
-// decides whether to read it. Nothing a person typed is in it.
-function feedbackText(turn, turns, last) {
-  const out = [`Turn ${turn} of ${turns}. What is measured is the whole change since this run started, against the commit it started from.`];
-  if (!last) out.push('Nothing is measured yet.');
-  else {
-    if (last.code !== 0 && last.same) out.push(`The command of turn ${last.t} ended with code ${last.code} and changed nothing on disk: it was stopped, or it failed, before anything was saved. Save each file as soon as it is done.`);
-    else if (last.code !== 0) out.push(`The command of turn ${last.t} ended with code ${last.code}: it was stopped, or it failed. What it had saved by then is in the tree.`);
-    out.push(`After turn ${last.t}:`);
-    for (const m of last.report.metrics) {
-      const word = m.status === 'improved' ? 'better' : m.status === 'regressed' ? 'worse' : m.status === 'unchanged' ? 'the same' : 'not measured';
-      out.push(`  ${m.name}: ${m.before ?? '?'} at the start, ${m.after ?? '?'} now (${word})`);
-    }
-    const worse = [...last.report.metrics.filter((m) => m.guard && !m.ok).map((m) => m.name), ...(last.report.mandates || []).map((v) => `a protected path (${v.name})`)];
-    if (last.report.stub === 'contract') out.push(`THE CONTRACT WAS CHANGED at turn ${last.t}: ${last.report.why}. Put it back as it was at the start. In the loop the contract is not the attempt's to change.`);
-    if (last.report.stub && last.report.stub !== 'contract') out.push(`WHAT JUDGES WAS TOUCHED at turn ${last.t}: ${last.report.why}. It was put back, and that turn does not count.`);
-    if (worse.length) out.push(`WORSE THAN AT THE START: ${worse.join(', ')}. The run is kept only if nothing is worse at its end.`);
-    if (last.s.standing === 'gamed') out.push('A measure went up by a change to the tests or the contract, not the source. That is not a win, at this turn or a later one.');
-    if (last.s.standing === 'win') out.push('As it stands this would be kept. A later turn may gain more. The best turn is the one that is kept.');
+// The loop's record: one line a try, written by the keeper in the repo's git folder (.git/improve/attempts.jsonl),
+// in its own words. The views read it for what was kept and what was thrown away; the gate's own record (a row for
+// every check, the step's asks among them) is what they count measures from. A line of a turn (result `turn`)
+// belongs to the run whose line comes after it.
+const KEEPER_THROWN = new Set(['worse', 'gamed', 'unsure', 'flat', 'nothing', 'rewrote', 'outside', 'contract']);
+function keeperRows(repo) {
+  let text = ''; try { text = readFileSync(join(git(['rev-parse', '--absolute-git-dir'], repo), 'improve', 'attempts.jsonl'), 'utf8'); } catch { return []; }
+  let cfg = {}; try { cfg = loadConfig(repo); } catch { /* the folders still read without one */ }
+  const rows = [];
+  for (const l of text.split('\n')) {
+    let x = null; try { x = JSON.parse(l); } catch { continue; }
+    if (!x || typeof x !== 'object' || Array.isArray(x) || typeof x.result !== 'string') continue;
+    const files = Array.isArray(x.files) ? x.files.filter((f) => typeof f === 'string') : [];
+    rows.push({ ts: typeof x.at === 'string' ? x.at : null, result: oneLine(x.result, 20), why: typeof x.why === 'string' ? oneLine(x.why, 300) : '',
+      ...(typeof x.label === 'string' && x.label ? { label: oneLine(x.label, 80) } : {}), ...(typeof x.target === 'string' ? { target: oneLine(x.target, 60) } : {}),
+      files: files.length, subsystems: subsystemsOf(files, cfg), metrics: Array.isArray(x.metrics) ? x.metrics.filter((m) => m && typeof m === 'object' && typeof m.name === 'string') : [],
+      ...(typeof x.episode === 'string' ? { episode: oneLine(x.episode, 40) } : {}), ...(typeof x.turn === 'number' ? { turn: x.turn, standing: typeof x.standing === 'string' ? x.standing : '' } : {}),
+      ...(typeof x.turns === 'number' ? { turns: x.turns, best: typeof x.best === 'number' ? x.best : 0 } : {}) });
   }
-  out.push('The tests and the contract that count are the ones from the start. A change to the tests or the contract cannot make a win.');
-  return out.join('\n') + '\n';
+  return rows;
 }
-
-// put the tree back where a run started. Only what the run made is removed: improve does not start on a tree that
-// holds work of the person's, tracked or not. With a branch name the repo is first brought back to that branch (an
-// attempt may have left it).
-function revert(repo, to, branch) {
-  if (branch !== undefined) {
-    const name = branch.replace(/^refs\/heads\//, '');
-    try { git(branch ? ['checkout', '-q', '-f', name] : ['checkout', '-q', '-f', '--detach', to], repo); } catch { /* the reset below still puts the files back */ }
-  }
-  git(['reset', '-q', '--hard', to], repo);
-  try { git(['clean', '-fdq'], repo); } catch { /* best effort */ }
-}
-// ---- What is judged cannot touch what judges it. --------------------------------------------------------------------
-// A session on another machine held its own loop step to 28 attacks (2026-11-21). Run against this command, six real
-// holes showed, and each was a place where the loop trusted something the attempt could write. So: the commit is made
-// from the tree that was judged and from nothing else; and the loop's own files (its record, this program, a file the
-// attempt hid from git) are put back before anything is judged, and the attempt that touched them is put back too.
-// What this cannot hold is said in docs/LEARNING.md: the attempt runs as the person, with no wall around it.
-
-// Files hidden from git (skip-worktree, assume-unchanged). `git status` does not show a change to one and `git reset
-// --hard` does not put one back, so an edit hidden this way stayed in the tree and every later try read differently.
-function hiddenFiles(repo) {
-  let out = ''; try { out = execFileSync('git', ['ls-files', '-v', '-z'], { cwd: repo, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }); } catch { return []; }
-  return out.split('\0').filter(Boolean).filter((l) => /^[a-zS] /.test(l)).map((l) => l.slice(2));
-}
-function showAgain(repo, files) {
-  // two calls: one call given both flags clears only one of them
-  for (let i = 0; i < files.length; i += 200) {
-    const part = files.slice(i, i + 200);
-    for (const flag of ['--no-skip-worktree', '--no-assume-unchanged']) { try { execFileSync('git', ['update-index', flag, '--', ...part], { cwd: repo, stdio: 'ignore' }); } catch { /* best effort */ } }
-  }
-}
-// the program that judges: this file, and what sits beside it in the package (the packs a contract's commands run)
-function ownFiles() {
-  const out = new Map();
-  const take = (p) => { try { const st = lstatSync(p); if (st.isDirectory()) { for (const f of readdirSync(p)) take(join(p, f)); } else if (st.isFile()) out.set(p, readFileSync(p)); } catch { /* not there */ } };
-  let self = fileURLToPath(import.meta.url); try { self = realpathSync(self); } catch { /* as given */ }
-  const root = join(dirname(self), '..');
-  take(self); take(join(root, 'packs')); take(join(root, 'package.json'));
-  return out;
-}
-function putBackOwn(own) {
-  const changed = [];
-  for (const [p, bytes] of own) {
-    let now = null; try { now = readFileSync(p); } catch { /* gone */ }
-    if (now && now.equals(bytes)) continue;
-    try { mkdirSync(dirname(p), { recursive: true }); writeFileSync(p, bytes); } catch { /* cannot be put back: said below all the same */ }
-    changed.push(p);
-  }
-  return changed;
-}
-const bytesOf = (f) => { try { return readFileSync(f); } catch { return null; } };
-
-// The mark of a running loop, in the git folder. A run that is killed outright cannot put the tree back, so the next
-// run says what happened and prints the line that does. It deletes nothing by itself: by then the tree may hold work
-// of the person's.
-const markFile = (repo) => join(dirname(recordFile(repo)), 'running.json');
-// Git's own files, which git does not track and an attempt can write: the repo's config (and the worktree's), its hooks
-// and info folders, and the person's global config, attributes file and ignore file. Read before each attempt and put back after it,
-// before anything is judged: a filter set there made the commit hold another number than the one measured, a hook and
-// an fsmonitor command ran inside the loop's own git calls (attacks 29, 30, 33 and 34 of another session's second list,
-// 2026-11-21). A file that is a link stays a link; a path that is not a plain file (the /dev/null of a test) is left alone.
-function gitOwnPaths(repo) {
-  const abs = (p) => resolve(repo, p);
-  const common = abs(git(['rev-parse', '--git-common-dir'], repo)), gitDir = abs(git(['rev-parse', '--git-dir'], repo));
-  const home = process.env.HOME || homedir(), xdg = process.env.XDG_CONFIG_HOME || join(home, '.config');
-  const globals = process.env.GIT_CONFIG_GLOBAL ? [process.env.GIT_CONFIG_GLOBAL] : [join(xdg, 'git', 'config'), join(home, '.gitconfig')];
-  const globalPath = (key, dflt) => { try { return execFileSync('git', ['config', '--global', '--path', '--get', key], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || dflt; } catch { return dflt; } };
-  // the global attributes file (a filter can be named there) and the global ignore file (a rule there hides a new file from the change)
-  return { common, files: [join(common, 'config'), join(gitDir, 'config.worktree'), globalPath('core.attributesFile', join(xdg, 'git', 'attributes')), globalPath('core.excludesFile', join(xdg, 'git', 'ignore'))], globals, dirs: [join(common, 'hooks'), join(common, 'info')] };
-}
-function readGitOwn(repo) {
-  const at = gitOwnPaths(repo), snap = new Map();
-  const one = (f) => {
-    let st; try { st = lstatSync(f); } catch { snap.set(f, { missing: true }); return; }
-    if (st.isSymbolicLink()) { let bytes = null; try { if (statSync(f).isFile()) bytes = readFileSync(f); } catch { /* a link to nothing */ } snap.set(f, { link: readlinkSync(f), bytes }); }
-    else if (st.isFile()) snap.set(f, { bytes: readFileSync(f), mode: st.mode & 0o7777 });
-    else snap.set(f, { skip: true });
-  };
-  const walk = (dir) => { let names = []; try { names = readdirSync(dir); } catch { return; } for (const n of names) { const f = join(dir, n); let st; try { st = lstatSync(f); } catch { continue; } if (st.isDirectory()) walk(f); else one(f); } };
-  for (const f of [...at.files, ...at.globals]) one(f);
-  for (const d of at.dirs) walk(d);
-  return { at, snap };
-}
-// puts back what changed, removes what was added, and says which: { repo: [names], global: [paths] }
-function putBackGitOwn({ at, snap }) {
-  const changed = new Set();
-  const same = (a, b) => (a == null && b == null) || (a != null && b != null && a.equals(b));
-  for (const [f, was] of snap) {
-    if (was.skip) continue;
-    let st = null; try { st = lstatSync(f); } catch { /* gone */ }
-    try {
-      if (was.missing) { if (st) { rmSync(f, { recursive: true, force: true }); changed.add(f); } continue; }
-      if (was.link) {
-        if (!st || !st.isSymbolicLink() || readlinkSync(f) !== was.link) { rmSync(f, { recursive: true, force: true }); mkdirSync(dirname(f), { recursive: true }); symlinkSync(was.link, f); changed.add(f); }
-        let now = null; try { now = readFileSync(f); } catch { /* a link to nothing */ }
-        if (was.bytes && !same(now, was.bytes)) { writeFileSync(f, was.bytes); changed.add(f); }
-        continue;
-      }
-      let now = null; try { if (st && st.isFile()) now = readFileSync(f); } catch { /* unreadable */ }
-      if (!st || !st.isFile() || !same(now, was.bytes)) { if (st && !st.isFile()) rmSync(f, { recursive: true, force: true }); mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, was.bytes); changed.add(f); }
-      if ((statSync(f).mode & 0o7777) !== was.mode) { chmodSync(f, was.mode); changed.add(f); }
-    } catch { /* best effort: what could not be put back is still named */ changed.add(f); }
-  }
-  // a file the attempt added in the hooks or info folder (a hook, an attributes file)
-  const walk = (dir) => { let names = []; try { names = readdirSync(dir); } catch { return; } for (const n of names) { const f = join(dir, n); let st; try { st = lstatSync(f); } catch { continue; } if (st.isDirectory()) walk(f); else if (!snap.has(f)) { rmSync(f, { force: true }); changed.add(f); } } };
-  for (const d of at.dirs) walk(d);
-  const all = [...changed], inRepo = (f) => f.startsWith(at.common + sep);
-  return { repo: all.filter(inRepo).map((f) => relative(dirname(at.common), f) || f), global: all.filter((f) => !inRepo(f)) };
-}
-// every ref but the branch the run is on: a tag or a branch an attempt makes is removed, one it moves or deletes is put
-// back. The branch the attempt left HEAD on is not touched here: an attempt that leaves the branch is not judged, and the
-// branch is brought back where the run started (as before), with what the attempt made on the other branch left there.
-const refsOf = (repo, branch) => new Map(git(['for-each-ref', '--format=%(refname) %(objectname) %(symref)'], repo).split('\n').filter(Boolean).map((l) => l.split(' ')).filter(([ref, , sym]) => ref !== branch && !sym).map(([ref, sha]) => [ref, sha]));
-function putBackRefs(repo, before, branch) {
-  let on = ''; try { on = git(['symbolic-ref', '-q', 'HEAD'], repo); } catch { /* detached */ }
-  const now = refsOf(repo, branch), changed = [];
-  if (on && on !== branch) { before = new Map(before); before.delete(on); now.delete(on); }
-  for (const [ref, sha] of before) if (now.get(ref) !== sha) { try { git(['update-ref', ref, sha], repo); changed.push(ref); } catch { /* the object is gone */ } }
-  for (const ref of now.keys()) if (!before.has(ref)) { try { git(['update-ref', '-d', ref], repo); changed.push(ref); } catch { /* best effort */ } }
-  return changed;
-}
-
-function checkMark(repo) {
-  let m; try { m = JSON.parse(readFileSync(markFile(repo), 'utf8')); } catch { return; }
-  let alive = false; try { if (m && m.pid && m.pid !== process.pid) { process.kill(m.pid, 0); alive = true; } } catch { /* gone */ }
-  if (alive) bad(`promptwheel improve: another improve is running in this repo (process ${m.pid})`);
-  if (git(['status', '--porcelain', '--untracked-files=all'], repo)) {
-    bad(`promptwheel improve: a run that started at ${String(m.start).slice(0, 12)} did not finish, and what it had changed is still in the tree. If none of it is yours, put the tree back with:\n  git reset --hard ${m.start} && git clean -fd\nThen run improve again.`);
-  }
-  try { rmSync(markFile(repo), { force: true }); } catch { /* best effort */ }
-}
-
-// keep-if-improved: run any agent or script, check what it changed, and keep the change ONLY if a measure improved.
-// The exit codes are the check's own, so `while promptwheel improve --attempt "..."; do :; done` stops at the first
-// run that keeps nothing: 0 kept (one commit) · 1 a guard got worse, a protected path was changed, the attempt moved
-// the branch, or touched what judges it (the contract, the record, this program, a file hidden from git) · 2 gamed · 3 nothing improved, or nothing could be measured ·
-// 130 interrupted with nothing to keep. In every case but the first the tree is put back as it was.
-//
-// --turns N judges over a number of turns. One attempt judged alone is put back unless it improved by itself, so a
-// change that needs a level step first can never be kept, and under an all-or-nothing measure (do the tests pass) a
-// fix that takes two attempts shows nothing after the first. With --turns each turn goes on from where the last one
-// left the tree, the WHOLE change so far is checked against the commit the run started from (so a test edited at one
-// turn makes no win at a later one), the reading is handed to the next turn, and the best turn is kept, as one
-// commit. The best so far lives in this process and nowhere an attempt can write.
-async function improve(argv) { ownGitOn(); try { return await improveInner(argv); } finally { ownGitOff(); } }
-async function improveInner(argv) {
-  const args = parseArgs(argv);
-  if (!args.attempt) bad('promptwheel improve: needs --attempt "<a command that changes the repo>"');
-  const repo = repoRoot(process.cwd());
-  let config;
-  if (!hasConfigFile(repo) && !args.noAuto) config = autoConfig(repo);
-  // --goal names the measure this run is for: then only that measure makes a win. Refused before the attempt runs.
-  const goal = args.goal ? String(args.goal).split(',').map((g) => g.trim()).filter(Boolean) : null;
-  if (goal) {
-    const have = new Set(((config ?? loadConfig(repo)).metrics || []).map((m) => m && m.name));
-    const missing = goal.filter((g) => !have.has(g));
-    if (missing.length) bad(`promptwheel improve: --goal names ${missing.join(', ')}, and the contract holds no measure of that name`);
-  }
-  const turns = args.turns ?? 1, patience = args.patience ?? STALL_W;
-  // The contract as it stands NOW, before any attempt, is the one that counts. Only its measures can make a win, and
-  // an attempt may not change it: not the file, not a file inside the repo that it extends, not a file it names as part
-  // of the gate (evaluatorPaths). In the loop the contract is the person's.
-  const startCfg = config ?? loadConfig(repo);
-  const known = new Set((startCfg.metrics || []).map((m) => m && m.name).filter((n) => typeof n === 'string'));
-  const extended = (() => { try { return [].concat(JSON.parse(readFileSync(join(repo, 'promptwheel.config.json'), 'utf8')).extends || []).filter((x) => typeof x === 'string').map((x) => relative(repo, resolve(repo, x))).filter((x) => x && !x.startsWith('..')); } catch { return []; } })();
-  const isGateFile = evaluatorMatcher(startCfg);
-  const isContract = (p) => p === 'promptwheel.config.json' || extended.includes(p) || isGateFile(p);
-  const here = () => {
-    let branch = ''; try { branch = git(['symbolic-ref', '-q', 'HEAD'], repo); } catch { /* no branch */ }
-    return { sha: git(['rev-parse', '--verify', 'HEAD'], repo), branch };
-  };
-  let start; try { start = here(); } catch { bad('promptwheel improve: no commits yet, make a first commit'); }
-  checkMark(repo);
-  const hiddenNow = hiddenFiles(repo);
-  if (hiddenNow.length) bad(`promptwheel improve: ${hiddenNow.length === 1 ? 'a file is' : `${hiddenNow.length} files are`} hidden from git (skip-worktree or assume-unchanged): ${hiddenNow.slice(0, 5).join(', ')}. The loop cannot see a change to a hidden file, and git cannot put one back. Show ${hiddenNow.length === 1 ? 'it' : 'them'} again first:\n  git update-index --no-skip-worktree -- <file>\n  git update-index --no-assume-unchanged -- <file>\n(A sparse checkout hides files this way too: the loop does not run in one.)`);
-  const own = ownFiles();
-  // --untracked-files=all is said out loud: a person's own git config can hide untracked files from a plain status
-  if (git(['status', '--porcelain', '--untracked-files=all'], repo)) bad('promptwheel improve: the working tree is not clean. Commit or stash first: a run that keeps nothing is undone with git reset and git clean, and that must not take your own work with it');
-
-  // An interrupt (Ctrl-C, or a stop from whatever runs the loop) must not leave a half-made change. A signal cannot be
-  // seen while a command is being waited for, so it is looked for after each one.
-  let stopped = null;
-  const onSignal = (sig) => { stopped = stopped || sig; };
-  process.on('SIGINT', onSignal); process.on('SIGTERM', onSignal);
-  const breath = () => new Promise((r) => setTimeout(r, 0));
-
-  const tree = (ref) => git(['rev-parse', `${ref}^{tree}`], repo);
-  const feedback = join(dirname(recordFile(repo)), 'feedback.txt');
-  const episode = turns > 1 ? `${start.sha.slice(0, 7)}-${Date.now().toString(36)}` : undefined;
-  const cfgNow = () => { try { return config ?? loadConfig(repo); } catch { return { metrics: [] }; } };   // a contract an attempt broke still gets its row
-  let best = null, last = null, sinceBest = 0, prevTree = tree(start.sha), turnsRun = 0, moved = false, why = '';
-  const restoredAll = new Set();   // git's own files or refs an attempt changed, put back (named in the run's row)
-  const path = [];
-  try {
-    mkdirSync(dirname(markFile(repo)), { recursive: true });
-    writeFileSync(markFile(repo), JSON.stringify({ start: start.sha, branch: start.branch, pid: process.pid, at: new Date().toISOString() }) + '\n');
-    for (let t = 1; t <= turns; t++) {
-      try { writeFileSync(feedback, feedbackText(t, turns, last)); } catch { /* the attempt runs without it */ }
-      const recFile = recordFile(repo), rec0 = bytesOf(recFile);
-      const gitOwn = readGitOwn(repo), refs0 = refsOf(repo, start.branch);
-      // the attempt's own output goes to stderr, so stdout carries the report and nothing else; it reads no input
-      console.error(turns > 1 ? `▶ turn ${t} of ${turns}: ${args.attempt}` : `▶ attempt: ${args.attempt}`);
-      let code = 0;   // how the attempt's own command ended: 0 is "it finished", anything else is "it was cut off, or it failed"
-      try { execSync(args.attempt, { cwd: repo, stdio: ['ignore', 2, 2], env: { ...personEnv(process.env), PW_TURN: String(t), PW_TURNS: String(turns), PW_FEEDBACK: feedback } }); }
-      catch (e) { code = e.status ?? 1; if (e.signal === 'SIGINT' || e.signal === 'SIGTERM' || e.status === 130) stopped = stopped || 'SIGINT'; else console.error(`  (the attempt ended with code ${code}; checking whatever it changed)`); }
-      // What judges is put back before anything is judged, and before an interrupt is acted on: a file the attempt hid
-      // from git, this program, the loop's record. The record may GROW during an attempt (a check the attempt ran itself
-      // adds a row): what counts is that the lines that were there are still there.
-      // git's own files and the refs, first: a hook, a filter, an fsmonitor command or a replace ref the attempt set is gone
-      // before the change is judged. The change itself is judged as usual: with these put back, what is kept is what is measured.
-      const put = putBackGitOwn(gitOwn), refsPut = putBackRefs(repo, refs0, start.branch), restoredNow = [];
-      for (const f of put.global) console.error(`  (your git settings (${f}) changed while the attempt ran: put back as they were before it)`);
-      if (put.repo.length || refsPut.length) { const names = [...put.repo, ...refsPut]; console.error(`  (the attempt changed git's own files, put back before the change was judged: ${names.slice(0, 4).join(', ')}${names.length > 4 ? ` and ${names.length - 4} more` : ''})`); }
-      if (put.repo.length) restoredNow.push('git settings'); if (put.global.length) restoredNow.push('global git settings'); if (refsPut.length) restoredNow.push('refs');
-      for (const x of restoredNow) restoredAll.add(x);
-      const touched = [];
-      const hid = hiddenFiles(repo); if (hid.length) { showAgain(repo, hid); touched.push(['hidden', `the attempt hid ${hid.slice(0, 3).join(', ')} from git`]); }
-      if (putBackOwn(own).length) touched.push(['program', 'the attempt changed the program that judges it']);
-      const rec1 = bytesOf(recFile);
-      if (rec0 && !(rec1 && rec1.length >= rec0.length && rec1.subarray(0, rec0.length).equals(rec0))) { try { mkdirSync(dirname(recFile), { recursive: true }); writeFileSync(recFile, rec0); } catch { /* best effort */ } touched.push(['record', "the attempt changed the loop's own record"]); }
-      await breath(); if (stopped) break;
-
-      const now = here();
-      let ahead = true; if (now.sha !== start.sha) { try { git(['merge-base', '--is-ancestor', start.sha, now.sha], repo); } catch { ahead = false; } }
-      // an attempt that leaves the branch, or moves it back, is not judged: the branch is put back where the run
-      // started. Left as the attempt put it, a win kept by an earlier run would be off the branch.
-      if (now.branch !== start.branch || !ahead) { moved = true; break; }
-      if (now.sha !== start.sha) {
-        // the attempt made commits of its own. They are folded back into the tree, so the whole change is ONE change,
-        // checked as one: a commit an agent makes is not a way past the check, and a reason in its message is not read.
-        const n = git(['rev-list', '--count', `${start.sha}..${now.sha}`], repo);
-        git(['reset', '-q', '--soft', start.sha], repo);
-        console.error(`  (the attempt made ${n} commit${n === '1' ? '' : 's'} of its own: checked as one change)`);
-      }
-
-      // an attempt can leave a contract nobody can read (or delete it). That is not a crash with the change left in
-      // the tree: it is a turn that stands worse than the start, and the next turn is told.
-      const snap0 = workingSnapshot(repo);
-      const hit = snap0 === 'HEAD' ? [] : gitNames(['diff', '--name-only', '--no-renames', start.sha, snap0], repo).filter(isContract);
-      let report;
-      if (touched.length) report = stubReport(repo, start.sha, touched[0][0], touched.map((x) => x[1]).join('; '));
-      else if (hit.length) report = stubReport(repo, start.sha, 'contract', `the attempt changed the contract (${hit.slice(0, 3).join(', ')})`);
-      else try { report = gate(repo, { working: true, repeat: args.repeat, detectGaming: args.detectGaming, config }); }
-      catch (e) { if (!e || e.name !== 'ConfigError') throw e; report = stubReport(repo, start.sha, 'contract', `the contract cannot be read (${e.message})`); }
-      await breath(); if (stopped) break;   // a check that was cut short measured nothing that can be trusted
-      turnsRun = t;
-      const snap = report.provenance.headSha === 'HEAD' ? start.sha : report.provenance.headSha;
-      const s = standingOf(report, goal, known);
-      const treeNow = tree(snap);
-      last = { t, report, s, snap, code, same: treeNow === prevTree };
-      path.push({ turn: t, standing: s.standing, gain: s.gain });
-      if (turns > 1) {
-        console.error(`  turn ${t}: ${s.standing === 'win' ? `ahead (${s.wins.join(', ')})` : s.standing === 'level' ? 'level with the start' : s.standing === 'worse' ? 'a guard is worse than at the start' : s.standing === 'gamed' ? 'gamed' : 'nothing could be told'}`);
-        if (!args.noRecord) recordRun(repo, report, cfgNow(), { label: args.label, goal, episode, turn: t, standing: s.standing, restored: restoredNow });
-      }
-      if (s.standing === 'win' && (!best || s.gain > best.s.gain)) { best = last; sinceBest = 0; } else if (best) sinceBest++;
-      if (turns === 1) break;
-      // A turn that changed nothing ends the run only when its command ended by itself: that is an agent saying it is
-      // done. One that was cut off by a limit, or failed, has said nothing of the kind (the first run with a real agent:
-      // every attempt was stopped at its time limit before it had written a thing, and each run ended after one turn).
-      if (last.same && code === 0) { why = 'a turn changed nothing'; break; }
-      prevTree = treeNow;
-      if (best && s.topped) { why = 'nothing more can be gained'; break; }
-      if (best && sinceBest >= patience) { why = `${patience} turn${patience === 1 ? '' : 's'} in a row with no new best`; break; }
-    }
-
-    // ---- settle: one commit for the best turn, or the tree as it was ----
-    let result, exit, note, because = [], commit, shown = last ? last.report : null;
-    // whatever an interrupted or stray attempt did to HEAD: it goes back to the start commit on the start branch.
-    // The files are dealt with below (the best turn's tree, or the start's).
-    let stray = false;
-    const end = here();
-    if (end.branch !== start.branch) { stray = true; try { git(start.branch ? ['checkout', '-q', '-f', start.branch.replace(/^refs\/heads\//, '')] : ['checkout', '-q', '-f', '--detach', start.sha], repo); } catch { /* revert below */ } }
-    if (git(['rev-parse', 'HEAD'], repo) !== start.sha) { stray = true; git(['reset', '-q', '--soft', start.sha], repo); }
-    if (moved) { shown = stubReport(repo, start.sha, 'branch', 'the attempt moved the branch'); best = null; result = 'refused'; exit = 1; because = ['branch']; note = '✗ the attempt moved the branch off the commit it started on, or left it for another: put back where it started'; }
-    // the second look: N turns are N tries at a measure that may be noisy, so the best point is measured once more
-    // and kept only if the win is still there. Not after an interrupt: that best passed a whole check at its turn.
-    if (best && turnsRun > 1 && !stopped) {
-      // it is the snapshot that was judged at its turn that is measured again, not the working tree as it is now
-      const again = gate(repo, { base: start.sha, head: best.snap, repeat: args.repeat, detectGaming: args.detectGaming, config });
-      const s2 = standingOf(again, goal, known);
-      if (s2.standing === 'win') best = { ...best, report: again, s: s2 };
-      else { because = best.s.wins.map((n) => `unconfirmed:${n}`); shown = again; note = `= turn ${best.t} had improved ${best.s.wins.join(', ')}, and the gain did not show again when it was measured once more: put back`; best = null; result = 'plateau'; exit = 3; }
-    }
-    if (best) {
-      shown = best.report;
-      const judged = tree(best.snap);
-      if (judged === tree(start.sha)) { best = null; result = 'plateau'; exit = 3; note = '= a measure moved, but the run changed no file that git tracks: nothing to keep'; }
-      else {
-        const what = `improved ${best.s.wins.join(', ')}${turnsRun > 1 ? `; turn ${best.t} of ${turnsRun}` : ''}`;
-        // Judge one thing, and keep that same thing. The commit is made from the tree that was judged: not from the
-        // working tree as it is a moment later (a process the attempt left behind may have written to it), and with no
-        // git hook run (a hook the attempt planted could add to the commit after the check had looked).
-        let sign = false; try { sign = git(['config', '--get', '--bool', 'commit.gpgsign'], repo) === 'true'; } catch { /* not set */ }
-        try {
-          const made = execFileSync('git', ['commit-tree', judged, '-p', start.sha, ...(sign ? ['-S'] : []), '-m', oneLine(`promptwheel improve: ${args.label ? oneLine(args.label, 80) : 'kept'} (${what})`, 300)], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-          git(start.branch ? ['update-ref', '-m', 'promptwheel improve: kept', start.branch, made, start.sha] : ['update-ref', '--no-deref', '-m', 'promptwheel improve: kept', 'HEAD', made, start.sha], repo);
-          git(['reset', '-q', '--hard', made], repo);
-          try { git(['clean', '-fdq'], repo); } catch { /* best effort */ }
-          commit = git(['rev-parse', '--short', made], repo);
-          result = 'kept'; exit = 0;
-          note = turnsRun > 1 ? `✓ kept the best of ${turnsRun} turns (turn ${best.t}), committed ${commit} (improved ${best.s.wins.join(', ')})` : `✓ kept, committed ${commit} (improved ${best.s.wins.join(', ')})`;
-        } catch (e) { best = null; result = 'refused'; exit = 1; because = ['commit']; note = `✗ the commit could not be made (${oneLine((e && (e.stderr || e.message)) || '', 160)}): put back`; }
-      }
-    }
-    if (!result) {
-      const s = last ? last.s : { standing: 'level', counts: [], offGoal: [], fresh: [] };
-      because = last ? becauseOf(last.report, s) : [];
-      if (!last) { result = 'plateau'; exit = 3; note = '= nothing was measured: put back'; }
-      else if (last.report.stub) { result = 'refused'; exit = 1; note = `✗ ${last.report.why}${last.report.stub === 'contract' ? ". In the loop the contract is the person's" : ''}: put back`; }
-      else if (s.standing === 'worse') { result = 'regression'; exit = 1; note = '✗ a guard got worse, or a protected path was changed: put back'; }
-      else if (s.standing === 'gamed') { result = 'gamed'; exit = 2; note = '🚩 gamed, a measure went up by a change to the tests or the contract and not the source: put back'; }
-      else if (s.standing === 'unsure') { result = 'inconclusive'; exit = 3; note = '≈ inconclusive, a guard could tell nothing (it failed or could not run both before and after, or its win could not be re-run from the source alone): put back'; }
-      else {
-        result = 'plateau'; exit = 3;
-        note = s.counts.length ? `= only ${s.counts.join(', ')} went up, and more of it alone is not a win: put back`
-          : s.offGoal.length ? `= ${s.offGoal.join(', ')} improved, but the goal was ${goal.join(', ')}: put back`
-          : s.fresh.length ? `= only ${s.fresh.map((n) => oneLine(n, 60)).join(', ')} improved, a measure that was not in the contract when the run started: put back` : '= nothing improved: put back';
-      }
-    }
-    if (result !== 'kept') revert(repo, start.sha, start.branch);
-    if (stopped) { note = `${note}\n  (interrupted${turns > 1 ? ` at turn ${Math.min(turnsRun + 1, turns)}` : ''}: ${result === 'kept' ? 'the best turn had passed its check and is kept' : 'nothing is left half-made'})`; if (result !== 'kept') exit = 130; }
-    else if (why && turns > 1) note = `${note}\n  (the run ended after turn ${turnsRun}: ${why})`;
-    if (!args.noRecord && shown) recordRun(repo, shown, cfgNow(), { label: args.label, result, because, commit, goal, episode, restored: [...restoredAll], ...(turns > 1 ? { turns: turnsRun, best: best ? best.t : 0 } : {}) });
-
-    // stdout carries the report (JSON, or the table); the decision line goes to stderr, so a loop's driver reads clean
-    // stdout. The code is set and the process ends by itself, so a large report is written whole (see run).
-    if (shown) {
-      if (args.json) console.log(JSON.stringify({ result, ...(because.length ? { because } : {}), ...(turns > 1 ? { turns: turnsRun, best: best ? best.t : 0, path } : {}), ...shown }, null, 2));
-      else if (!shown.stub) printHuman(shown);
-    }
-    console.error(`  ${note}`);
-    process.exitCode = exit;
-  } finally {
-    try { rmSync(markFile(repo), { force: true }); } catch { /* best effort */ }
-    try { rmSync(feedback, { force: true }); } catch { /* best effort */ }
-    process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal);
-  }
-}
+const keeperRuns = (rows) => rows.filter((r) => r.result !== 'turn');
 
 // how reliably each measure responds, straight from the record. No model.
 function insights(argv) {
   const args = parseArgs(argv);
   const repo = repoRoot(process.cwd());
-  const runs = runRows(readRecord(repo));
-  if (!runs.length) bad('promptwheel insights: no record yet. Run the check a few times first (promptwheel run, or promptwheel backfill for past commits)');
+  const runs = runRows(readRecord(repo)), keeper = keeperRows(repo);
+  if (!runs.length && !keeper.length) bad('promptwheel insights: no record yet. Run the check a few times first (promptwheel run, or promptwheel backfill for past commits)');
   const agg = {};
   for (const r of runs) for (const m of (Array.isArray(r.metrics) ? r.metrics : [])) {
     if (!m || typeof m.name !== 'string') continue;
@@ -2049,7 +1687,7 @@ function insights(argv) {
   }
   // "lever" = how often a run made this measure better
   const rows = Object.entries(agg).map(([name, a]) => ({ name, ...a, lever: a.runs ? a.improved / a.runs : 0 })).sort((x, y) => y.lever - x.lever);
-  const attempts = runs.filter((r) => typeof r.result === 'string');
+  const attempts = keeperRuns(keeper);   // the tries of the loop, from the keeper's own record
   const kept = attempts.filter((r) => r.result === 'kept').length;
   // runs judged over several turns: how many, how many kept, and at which turn the best sat (the depth)
   const over = attempts.filter((r) => typeof r.turns === 'number');
@@ -2126,8 +1764,8 @@ function contractNow(repo) {
 }
 
 function loadEntries(repo, cmd) {
-  const all = readRecord(repo), runs = runRows(all);
-  if (!runs.length) bad(`promptwheel ${cmd}: no record yet. Run the check a few times first (promptwheel run, or promptwheel backfill for past commits)`);
+  const all = readRecord(repo), runs = runRows(all), keeper = keeperRows(repo);
+  if (!runs.length && !keeper.length) bad(`promptwheel ${cmd}: no record yet. Run the check a few times first (promptwheel run, or promptwheel backfill for past commits)`);
   const keys = foldOutcomes(runs);
   const totalW = keys.filter((k) => k.key === k.metric).reduce((s, k) => s + k.w, 0);
   const now = contractNow(repo);
@@ -2138,56 +1776,38 @@ function loadEntries(repo, cmd) {
     ...(now && !now.names.has(k.metric) ? { retired: true } : {}), ...(now && now.free.has(k.metric) ? { guardOnly: true } : {}),
     ...(now && now.pass.has(k.metric) && lastAfter.get(k.metric) === 1 ? { passes: true } : {}) }))
     .sort((a, b) => b.lever - a.lever || b.w - a.w);
-  return { runs, entries, all };
+  return { runs, entries, all, keeper };
 }
 
 // what the loop tried and threw away, newest first, each with the measured reason. RRSI keeps a rejected edit in its
 // log as evidence against trying the same thing again. Whether this list changes what a later attempt does is NOT
 // measured: in a session a line that only states the fact did not carry it, and the reason did (docs/LEARNING.md).
-const THROWN = new Set(['regression', 'gamed', 'inconclusive', 'plateau', 'refused']);
 const strings = (a, n, len) => (Array.isArray(a) ? a : []).filter((x) => typeof x === 'string' && x).slice(0, n).map((x) => oneLine(x, len));
-function triedOf(runs) {
-  return runs.filter((r) => THROWN.has(r.result)).reverse().slice(0, 30).map((r) => ({
-    ts: typeof r.ts === 'string' ? r.ts : null, result: r.result,
-    ...(typeof r.label === 'string' && r.label ? { label: oneLine(r.label, 80) } : {}),
-    because: strings(r.because, 10, 60), subsystems: strings(r.subsystems, 3, 60), files: typeof r.files === 'number' ? r.files : 0,
+function triedOf(keeper) {
+  return keeperRuns(keeper).filter((r) => KEEPER_THROWN.has(r.result)).reverse().slice(0, 30).map((r) => ({
+    ts: r.ts, result: r.result, ...(r.label ? { label: r.label } : {}), why: r.why, subsystems: strings(r.subsystems, 3, 60), files: r.files,
   }));
 }
-function whyThrown(t) {
-  const tick = (a) => a.map((n) => `\`${n}\``).join(', ');
-  const guards = t.because.filter((n) => !n.startsWith('mandate:')), paths = t.because.filter((n) => n.startsWith('mandate:')).map((n) => n.slice(8));
-  if (t.result === 'regression') return [guards.length ? `${tick(guards)} got worse` : '', paths.length ? `a protected path was changed (${tick(paths)})` : ''].filter(Boolean).join('; ') || 'a guard got worse';
-  if (t.result === 'gamed') return guards.length ? `${tick(guards)} went up by a change to the tests or the contract, not the source` : 'the win came from a change to the tests or the contract, not the source';
-  if (t.result === 'inconclusive') return guards.length ? `${tick(guards)} could tell nothing (it failed or could not run both before and after, or its win could not be re-run from the source alone)` : 'nothing could be measured';
-  if (t.result === 'refused') return t.because.includes('branch') ? 'the attempt moved the branch off the commit it started on' : t.because.includes('contract') ? 'the attempt changed the contract'
-    : t.because.includes('hidden') ? 'the attempt hid a file from git' : t.because.includes('program') ? 'the attempt changed the program that judges it'
-    : t.because.includes('record') ? "the attempt changed the loop's own record" : 'the commit could not be made';
-  const unc = t.because.filter((n) => n.startsWith('unconfirmed:')).map((n) => n.slice(12));
-  if (unc.length) return `${tick(unc)} had improved, and the gain did not show again when it was measured once more`;
-  const cnt = t.because.filter((n) => n.startsWith('count:')).map((n) => n.slice(6)), off = t.because.filter((n) => n.startsWith('off-goal:')).map((n) => n.slice(9));
-  if (cnt.length) return `only ${tick(cnt)} went up, and more of it alone is not a win`;
-  if (off.length) return `${tick(off)} improved, and it was not the goal`;
-  const made = t.because.filter((n) => n.startsWith('new-measure:')).map((n) => n.slice(12));
-  if (made.length) return `only ${tick(made)} improved, a measure that was not in the contract when the run started`;
-  return 'nothing moved';
-}
+// the keeper's own words for why a try was thrown away; a line that has none still says what it was
+const whyThrown = (t) => t.why || `put back (${t.result})`;
 const whereThrown = (t) => (t.subsystems.length ? t.subsystems.join(', ') : t.files ? 'no source file' : 'nothing changed');
 
 // The path of each run that was judged over several turns: one measure, its value at the start and after every turn,
 // and where the best turn sat. The measure shown is the goal if the run had one, else the first one that improved in
 // the run, else the first whose value moved at any turn.
-function pathsOf(all) {
+function pathsOf(keeper) {
   const out = [];
-  for (const r of all.filter((x) => typeof x.result === 'string' && typeof x.turns === 'number' && typeof x.episode === 'string').reverse().slice(0, 30)) {
-    const steps = all.filter((x) => x.episode === r.episode && typeof x.turn === 'number').sort((a, b) => a.turn - b.turn);
-    const val = (row, name, key) => { const m = (Array.isArray(row.metrics) ? row.metrics : []).find((x) => x && x.name === name); return m ? m[key] ?? null : null; };
-    const names = [...new Set(steps.flatMap((x) => (Array.isArray(x.metrics) ? x.metrics : []).filter((m) => m && typeof m.name === 'string').map((m) => m.name)))];
-    const goal = Array.isArray(r.goal) && typeof r.goal[0] === 'string' ? r.goal[0] : null;
-    const improved = ((Array.isArray(r.metrics) ? r.metrics : []).find((m) => m && m.status === 'improved') || {}).name;
-    const movedAny = names.find((n) => steps.some((x) => val(x, n, 'after') !== val(x, n, 'before')));
-    const measure = [goal, improved, movedAny, names[0]].find((n) => typeof n === 'string' && names.includes(n)) || null;
-    out.push({ episode: r.episode, result: r.result, turns: r.turns, best: typeof r.best === 'number' ? r.best : 0, ...(typeof r.label === 'string' && r.label ? { label: oneLine(r.label, 80) } : {}),
-      measure: measure ? oneLine(measure, 60) : null, values: measure && steps.length ? [val(steps[0], measure, 'before'), ...steps.map((x) => val(x, measure, 'after'))].map((v) => (v === null ? '?' : v)) : [] });
+  for (const r of keeperRuns(keeper).filter((x) => typeof x.turns === 'number' && typeof x.episode === 'string').reverse().slice(0, 30)) {
+    const steps = keeper.filter((x) => x.episode === r.episode && typeof x.turn === 'number').sort((a, b) => a.turn - b.turn);
+    const val = (row, name, key) => { const m = row.metrics.find((x) => x.name === name); return m ? m[key] ?? null : null; };
+    const names = [...new Set(steps.flatMap((x) => x.metrics.map((m) => m.name)))];
+    const improved = (r.metrics.find((m) => m.status === 'improved') || {}).name;
+    const movedAny = names.find((nm) => steps.some((x) => val(x, nm, 'after') !== val(x, nm, 'before')));
+    const measure = [r.target, steps.length ? steps[0].target : null, improved, movedAny, names[0]].find((nm) => typeof nm === 'string' && names.includes(nm)) || null;
+    // a turn that was not judged (it changed nothing, or was outside the list) has no reading of its own
+    const firstRead = steps.find((x) => val(x, measure, 'before') !== null);
+    out.push({ episode: r.episode, result: r.result, turns: r.turns, best: r.best || 0, ...(r.label ? { label: r.label } : {}), measure: measure ? oneLine(measure, 60) : null,
+      values: measure && firstRead ? [val(firstRead, measure, 'before'), ...steps.map((x) => val(x, measure, 'after'))].map((v) => (v === null ? '?' : v)) : [] });
   }
   return out;
 }
@@ -2196,8 +1816,8 @@ function pathsOf(all) {
 function playbook(argv) {
   const args = parseArgs(argv);
   const repo = repoRoot(process.cwd());
-  const { runs, entries, all } = loadEntries(repo, 'playbook');
-  const tried = triedOf(runs), paths = pathsOf(all);
+  const { runs, entries, keeper } = loadEntries(repo, 'playbook');
+  const tried = triedOf(keeper), paths = pathsOf(keeper);
   if (args.json) { console.log(JSON.stringify({ runs: runs.length, halfLife: HALF_LIFE, minMoved: MIN_MOVED, entries, tried, ...(paths.length ? { paths } : {}) }, null, 2)); return; }
   const suff = entries.filter((e) => e.sufficient);
   const pct = (x) => `${Math.round(x * 100)}%`;
@@ -2229,10 +1849,10 @@ function playbook(argv) {
 function suggest(argv) {
   const args = parseArgs(argv);
   const repo = repoRoot(process.cwd());
-  const { runs, entries } = loadEntries(repo, 'suggest');
+  const { runs, entries, keeper } = loadEntries(repo, 'suggest');
   const arms = entries.filter((e) => (e.key === e.metric || e.key.includes(' @ ')) && !e.retired && !e.guardOnly && !e.passes).sort((a, b) => b.ucb - a.ucb);
   const retired = new Set(entries.filter((e) => e.retired).map((e) => e.metric)).size;
-  const attempts = runs.filter((r) => typeof r.result === 'string');
+  const attempts = keeperRuns(keeper);   // the tries of the loop, from the keeper's own record
   const stalled = attempts.length >= STALL_W && attempts.slice(-STALL_W).every((r) => r.result !== 'kept');
   const leastTried = stalled && arms.length ? [...arms].sort((a, b) => a.w - b.w)[0].key : null;
   if (args.json) { console.log(JSON.stringify({ runs: runs.length, thin: runs.length < 10, stalled, ...(leastTried ? { leastTried } : {}), retired, arms: arms.slice(0, 10) }, null, 2)); return; }
@@ -3006,12 +2626,11 @@ export function conformsToContract(report) {
 // ignored: a typo in a CI step must not turn `--no-detect-gaming` into the default gate or `--allow`
 // into nothing, and INTEGRATE.md promises a bad flag exits 64. A flag that takes a value consumes
 // the next argument; anything not starting with `-` is positional. --no-record checks without adding a row
-// to the record (Sawbuck and some CI steps pass it). `improve` takes no --allow: a person lets a change through,
-// not a loop.
+// to the record (Sawbuck and some CI steps pass it). `improve` is not in the table: it is the loop step's, which
+// refuses a flag it does not know, and takes no --allow (a person lets a change through, not a loop).
 const GATE_FLAGS = ['--base', '--head', '--repeat', '--working', '--no-record', '--no-auto', '--allow', '--detect-gaming', '--no-detect-gaming', '--json', '--markdown', '--label', '--base-cache'];
 const COMMAND_FLAGS = {
   run: GATE_FLAGS, init: ['--preset', '--list', '--force', '--no-agent-block'], lock: [], calibrate: ['--runs', '--repeat', '--metric', '--json'],
-  improve: ['--attempt', '--label', '--goal', '--turns', '--patience', '--repeat', '--no-record', '--no-auto', '--detect-gaming', '--no-detect-gaming', '--json'],
   insights: ['--json'], playbook: ['--json'], suggest: ['--json'],
   backfill: ['-n', '--limit', '--since', '--repeat', '--no-auto', '--detect-gaming', '--no-detect-gaming'],
 };
@@ -3138,9 +2757,10 @@ function dispatch() {
       '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',
       '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
-      '  promptwheel improve --attempt "<cmd>" [--goal <measure>] [--label "<name>"] [--json]   the loop: run any agent or script, check what it changed, and keep it (one commit) only if a measure improved;',
+      '  promptwheel improve --attempt "<cmd>" [--target <measure>] [--label "<name>"] [--json]   the loop: run any agent or script, check what it changed, and keep it (one commit) only if the target improved;',
       '                                               if not, the tree is put back. Exit 0 kept · 1 a guard got worse · 2 gamed · 3 nothing improved. The tree must be clean first.',
-      '                                               More tests alone is not a win. --goal: only that measure makes a win.',
+      '                                               It runs the loop step that ships beside the engine (examples/improve-loop/improve.mjs), the one keeper. --goal is another name for --target.',
+      '                                               Also --cheaper, --floor, --repeat, --base-cache, --may-change "<patterns>": see that file, or node examples/improve-loop/improve.mjs.',
       '  promptwheel improve --attempt "<cmd>" --turns N [--patience P]   judge over a number of turns: each turn goes on from the last, the whole change so far is checked against the start,',
       '                                               the reading is handed to the next turn (PW_FEEDBACK, PW_TURN, PW_TURNS), and the best turn is kept as one commit.',
       '  promptwheel insights [--json]                how each measure has responded, from the record of checked runs (kept in the git folder, never in the tree; run --no-record adds no row)',
