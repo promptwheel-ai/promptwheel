@@ -175,6 +175,15 @@ M = [  # (file, what the break does, text to find, text to put there, which occu
  (R, "does not say why it stopped for no room", " 'no room': `Stopped: ${none}.`,", "", 1),
  (P, "does not say a run stopped for no room", " 'no room': 'stopped early: no room was left for a gain that could be kept',", "", 1),
  (P, "says the last held-out number was not measured after a run that stopped for no room", "['tries', 'flat', 'no room'].includes(r.ended)", "['tries', 'flat'].includes(r.ended)", 1),
+ # ---- since the move (2026-11-22): the band in the record, the room to read, the shipped engine
+ (S, "leaves the gate's band out of the record line", "...(typeof noise === 'number' ? { noise } : {}), ", "", 1),
+ (R, "reads the band from the contract only, never from the record", "let band = typeof m.noise === 'number' && m.noise >= 0 ? m.noise : null,", "let band = null,", 1),
+ (S, "reads git with Node's own 1 MB", "stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: READ_MAX }).trim();", "stdio: ['ignore', 'pipe', 'pipe'] }).trim();", 1),
+ (S, "lists the changed files with Node's own 1 MB", "'-z', base, candidate], { encoding: 'utf8', maxBuffer: READ_MAX })", "'-z', base, candidate], { encoding: 'utf8' })", 1),
+ (S, "reads the gate's report with Node's own 1 MB", "{ encoding: 'utf8', maxBuffer: READ_MAX });\n  if (run.error", "{ encoding: 'utf8' });\n  if (run.error", 1),
+ (S, "takes no room from IMPROVE_READ_MAX", "Number(process.env.IMPROVE_READ_MAX) > 0 ? Number(process.env.IMPROVE_READ_MAX) : 256 * 1024 * 1024", "256 * 1024 * 1024", 1),
+ (S, "says could not run, with no line, for a change too wide to read", "if (e && e.code === 'ENOBUFS') {", "if (false) {", 1),
+ (S, "keeps a change too wide to read off the record", "    finish('nothing', `the change is too wide to read:", "    putBack(); die(`the change is too wide to read:", 1),
 ]
 src = {f: (HERE / f).read_text() for f in (S, W, R, P)}
 for f, what, find, put, nth in M:   # every break must fit the file as it stands, or nothing is run
