@@ -1804,10 +1804,13 @@ function pathsOf(keeper) {
     const improved = (r.metrics.find((m) => m.status === 'improved') || {}).name;
     const movedAny = names.find((nm) => steps.some((x) => val(x, nm, 'after') !== val(x, nm, 'before')));
     const measure = [r.target, steps.length ? steps[0].target : null, improved, movedAny, names[0]].find((nm) => typeof nm === 'string' && names.includes(nm)) || null;
-    // a turn that was not judged (it changed nothing, or was outside the list) has no reading of its own
+    // A turn that left the tree as the last one did carries the last reading: it is the same tree. One that was not
+    // judged for another reason (outside the list of what may change) has no reading of its own.
     const firstRead = steps.find((x) => val(x, measure, 'before') !== null);
+    let prev = firstRead ? val(firstRead, measure, 'before') : null;
+    const after = steps.map((x) => { const v = x.standing === 'same' ? prev : val(x, measure, 'after'); prev = v; return v; });
     out.push({ episode: r.episode, result: r.result, turns: r.turns, best: r.best || 0, ...(r.label ? { label: r.label } : {}), measure: measure ? oneLine(measure, 60) : null,
-      values: measure && firstRead ? [val(firstRead, measure, 'before'), ...steps.map((x) => val(x, measure, 'after'))].map((v) => (v === null ? '?' : v)) : [] });
+      values: measure && firstRead ? [val(firstRead, measure, 'before'), ...after].map((v) => (v === null ? '?' : v)) : [] });
   }
   return out;
 }

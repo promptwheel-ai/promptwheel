@@ -4299,6 +4299,15 @@ test('improve asks the engine it ships with, whatever PROMPTWHEEL says, and hand
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(readFileSync(seen, 'utf8').trim(), 'mine', 'the attempt has your variable, no PROMPTWHEEL, and none of the engine\'s own git settings');
 });
+test('the views over a run of several turns: the playbook prints its path from the loop\'s record, a turn that changed nothing carries the last reading, and insights counts the run', () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
+  const attempt = `case "$PW_TURN" in 1) echo helper > helper.txt;; 2) sed -i '1s| // TODO||' app.js;; esac`;
+  const r = pw2(d, ['improve', '--target', 'todos', '--label', 'two steps', '--turns', '4', '--attempt', attempt]);
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.match(pw(d, ['playbook']).out, /- \*\*two steps\*\*: kept at turn 2 of 3: `todos` 2 → 2 → 1 → 1/);
+  const i = JSON.parse(pw(d, ['insights', '--json']).out);
+  assert.equal(i.attempts, 1); assert.equal(i.kept, 1); assert.deepEqual(i.overTurns, { runs: 1, kept: 1, bestTurns: [2] });
+});
 test('the compounding test: its own self-test passes (scripted attempts, no agent)', () => {
   const r = spawnSync(process.execPath, [join(dirname(ENGINE), '..', 'bench', 'compounding-ab.mjs'), '--self-test'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, /self-test passed/);
