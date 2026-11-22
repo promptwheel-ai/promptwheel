@@ -47,7 +47,7 @@ A flag it does not know is an error. A mistyped `--floor` should not quietly tur
 | 0 | kept: one new commit |
 | 1 | put back: a guard got worse, the change is under the floor, it changed a file it may not, or it changed the contract |
 | 2 | put back: gamed. The win came from the test, the grader or the config |
-| 3 | put back: nothing improved, or the gate could not tell |
+| 3 | put back: nothing improved, the gate could not tell, or the change was too wide to read |
 | 64 | could not run, or the attempt could not. Nothing was kept |
 
 **An attempt that could not run is not a try.** If your attempt command ends with 64, or the shell could not
@@ -55,6 +55,11 @@ run or find it (126, 127) and no file changed, the step puts back whatever is th
 record and exits 64. So a broken command stops a `while` loop and does not fill the record with "nothing".
 An attempt that fails any other way and changed no file is a try, on record as `nothing`. A wrapper script
 around an agent should end with 64 when the agent could not start at all: no sign-in, a usage limit, no network.
+
+**A change too wide to read is a try.** The step reads up to 256 MB at once from git and from the gate
+(`IMPROVE_READ_MAX` sets it, in bytes). Node's own limit of 1 MB was too little for a change of some 10,000 files,
+and such a try used to end with 64 and no line. A change wider than the step's room is put back and on record as
+`nothing`, with the reason, and the step exits 3.
 
 ## Why `--floor`
 
@@ -89,6 +94,71 @@ The run ends early when a turn that ended by itself changed nothing, when the ta
 A turn whose attempt could not run ends the run too, as a run ends: a best turn is kept once it wins again when
 measured once more. At the first turn nothing was tried, and no line is written.
 Every turn is a line in the record, and the run ends with a line of its own.
+
+## Behind the wall
+
+```
+node improve.mjs --attempt 'node wall.mjs --with node_modules --minutes 10 -- "sh my-agent.sh"'
+```
+
+The attempt runs in a new folder. That folder holds your tracked files and a git repo of its own. Your `.git` is
+not there. When the attempt ends:
+
+- what it changed, added or deleted comes back as plain changes for the step to judge;
+- files that git ignores do not come back;
+- every process it left running in its group is ended.
+
+`--with` copies a folder git does not track, so the attempt has its own copy to use: an installed dependency it
+edits is only its copy. `--minutes` ends an attempt that runs too long (35,000 at most: the timer cannot count
+further). `--no-record` keeps the loop's record from the attempt.
+
+The wall is a copy. It is not a sandbox: see "What it is not".
+
+## A run under a plan
+
+Write the plan, commit it, then start the run.
+
+```json
+{
+  "attempt": "sh tools/propose.sh",
+  "tries": 20,
+  "mayChange": ["src/**"],
+  "target": "score",
+  "stopAfterFlat": 5,
+  "best": 70,
+  "wall": { "with": ["node_modules"], "minutes": 10 },
+  "heldOut": "sh /elsewhere/heldout.sh"
+}
+```
+
+```
+git add improve.plan.json && git commit -m "the plan"
+promptwheel improve --plan improve.plan.json
+promptwheel improve --report
+```
+
+- The plan is read once, from the commit you were on. A try cannot change the rules of its own run.
+- A plan must say what may change. The list may not let a try edit the plan.
+- The wall, the floor and the base cache are on unless the plan turns them off.
+- `heldOut` is a command that prints one number. It runs at the start and at the end only. No try is shown it, and
+  it never decides a keep. If the end number is lost, the next start measures it.
+- `best` is the best value the target can read, like 70 for 70 tasks. A gain is kept only when it is more than the
+  gate's band for the target, so when what is left up to the best value is no more than the band, no try can be
+  kept, and the run stops and says "no room left". The band is the one the gate held the try to (the contract's,
+  else the spread it measured over its repeats), as the step writes it into the record. `best` cannot be used with
+  `cheaper`.
+- `arms` are named variants of one plan. One arm runs in one clone.
+- Stop a run with Ctrl-C. The try in hand is put back. Start it again and it goes on from there.
+- A run does not use turns yet.
+
+Each try is one call of the step, so every rule above holds for it. The run keeps an account of its own beside the
+step's record, in `.git/improve/runs.jsonl`.
+
+## The report
+
+`promptwheel improve --report` lists every try with its result, the kept rate, where the target started and where it
+is now, the held-out number at both ends, and how often the gate was asked. Then it checks that the step's record,
+the kept changes and the run's own account agree. If a line was deleted, it says "whole: no" and exits 1.
 
 ## The contract is yours
 
@@ -165,12 +235,19 @@ step reads that as the attempt's doing and puts it back. The line names the file
   it leaves running can edit the copy the gate measures in, which sits in the temp folder, and a
   change that moved no number is then kept as a win. To hold those, run the attempt where it cannot
   write them and cannot leave a process behind: a container, or another user.
+  The wall holds some of this: behind it, an installed dependency is only the attempt's copy, and a
+  process left in its group is ended. It is a copy, still not a sandbox. An attempt can find your real
+  repo by its full path and write files there that git ignores, and it can start a process that leaves
+  its group. Both got through the wall when tried. A container handed the copy and nothing else stopped
+  every attempt on the list:
+  `node wall.mjs -- 'docker run --rm --network none -u $(id -u):$(id -g) -v "$PWD":"$PWD" -w "$PWD" node:22-bookworm sh my-agent.sh'`.
+  And reading is not stopped: a held-out set is held out only where the attempt cannot reach it.
 - **Not a judge of what a rule would still prevent.** `--cheaper` keeps a change that holds the score
   and lowers a cost. A safety rule that a second rule still covers can be deleted that way, and no
   score shows it. Freeze what protects with a mandate in the contract, and the gate sends such a
   change back.
-- **Not part of the engine, and not in the npm package.** PromptWheel is the check. This is one loop
-  built on the check, in about 200 lines. Copy it and change it.
+- **Not part of the engine.** PromptWheel is the check. The step, the wall, the run and the report are
+  one loop built on the check, and they ship in its package, beside it. Copy them and change them.
 - **Not proven on real work yet.** It has been run on small scripted scorers. Those test the
   mechanics. They do not show that a loop makes anything better over time.
 
@@ -202,4 +279,9 @@ hangs on the engine for its gate, and the keeper and the gate could drift apart.
 this file from where it sits, beside the engine they use as their gate (`bin/promptwheel.mjs` and
 `examples/improve-loop/improve.mjs` in one package). So do not move or rename it without telling them first.
 
-Ask the owner before removing either.
+**The wall, the run and the report moved in on 2026-11-22.** (The owner's word: "yes make it promptwheel's
+loop".) The framework session had built them around this step in a folder of its own. They now sit beside it, and
+the piece has no name of its own. Their tests are `test/improve-loop-step.test.mjs`, `-wall` and `-run`, and the
+code broken on purpose one small way at a time, to see that a test notices, is `test/improve-loop-breaks.py`.
+
+Ask the owner before removing any of it.
