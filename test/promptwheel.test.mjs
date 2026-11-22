@@ -4305,6 +4305,7 @@ test('the views over a run of several turns: the playbook prints its path from t
   const r = pw2(d, ['improve', '--target', 'todos', '--label', 'two steps', '--turns', '4', '--attempt', attempt]);
   assert.equal(r.code, 0, r.out + r.err);
   assert.match(pw(d, ['playbook']).out, /- \*\*two steps\*\*: kept at turn 2 of 3: `todos` 2 → 2 → 1 → 1/);
+  assert.doesNotMatch(pw(d, ['playbook']).out, /## Tried and thrown away/, 'a kept run is not listed as thrown away');
   const i = JSON.parse(pw(d, ['insights', '--json']).out);
   assert.equal(i.attempts, 1); assert.equal(i.kept, 1); assert.deepEqual(i.overTurns, { runs: 1, kept: 1, bestTurns: [2] });
 });

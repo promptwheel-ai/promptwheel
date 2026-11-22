@@ -970,3 +970,20 @@ test('help: --help prints the step\'s own header, runs nothing, and exits 0; pro
   const door = spawnSync(process.execPath, [join(ROOT, 'bin', 'promptwheel.mjs'), 'improve', '--help'], { cwd: d, encoding: 'utf8', env: ENV });
   assert.equal(door.status, 0, door.stderr); assert.match(door.stdout, /^The loop's one keeper/);
 });
+// Four gaps the break drill found in the tests above (proof-bench/wheel/raw/teeth-keeper-1.txt), each a test now.
+test('contract: a file its evaluatorPaths name counts too, where the gate itself lets the win through (a target the source-only re-run skips)', () => {
+  const over = { score: { gamingCheck: false }, top: { evaluatorPaths: ['evals/limits.json'] }, files: { 'evals/limits.json': '{}\n' } };
+  const r = step(toy(over), `${GOOD}; echo '{ "max": 9 }' > evals/limits.json`);
+  assert.equal(r.code, 1, r.err); assert.match(r.out, /contract .*evals\/limits\.json/);
+  assert.equal(step(toy(over), GOOD).code, 0, 'the same win without the edit is kept');
+});
+test('turns: a target that can go no further ends the run at that turn', () => {
+  const d = toy();
+  const r = step(d, byTurn('echo 0 > src/cost.txt', 'echo 120 > src/score.txt'), '--target', 'cost', '--turns', '3');
+  assert.equal(r.code, 0, r.err); assert.match(r.out, /the target can go no further/);
+  assert.equal(at(d, 'src/cost.txt'), '0'); assert.equal(at(d, 'src/score.txt'), '100', 'turn 2 never ran'); assert.equal(record(d).at(-1).turns, 1);
+});
+test('turns: a run with no win reads as its last judged turn, not as a turn that changed nothing after it', () => {
+  const d = toy(), r = step(d, byTurn('echo helper > src/helper.txt'), '--turns', '3');
+  assert.equal(r.code, 3, r.err); assert.match(r.out, / flat .*score did not improve/); assert.equal(record(d).at(-1).result, 'flat');
+});
