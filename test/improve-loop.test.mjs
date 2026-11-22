@@ -962,3 +962,11 @@ test('target: a target that counts down is kept when it falls, and the line says
   const d = toy(), r = step(d, 'echo 90 > src/cost.txt', '--target', 'cost');
   assert.equal(r.code, 0, r.err); assert.match(r.out, / kept .*cost 100 to 90/); assert.equal(record(d)[0].target, 'cost');
 });
+test('help: --help prints the step\'s own header, runs nothing, and exits 0; promptwheel improve --help does the same', () => {
+  const d = toy();
+  const r = step(d, GOOD, '--help');
+  assert.equal(r.code, 0, r.err); assert.match(r.out, /^The loop's one keeper/); assert.match(r.out, /--turns N judges over a number of turns/);
+  assert.equal(read(d, 'src/score.txt'), '100', 'the attempt never ran'); assert.ok(!existsSync(join(d, '.git', 'improve')));
+  const door = spawnSync(process.execPath, [join(ROOT, 'bin', 'promptwheel.mjs'), 'improve', '--help'], { cwd: d, encoding: 'utf8', env: ENV });
+  assert.equal(door.status, 0, door.stderr); assert.match(door.stdout, /^The loop's one keeper/);
+});

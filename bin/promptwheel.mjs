@@ -2730,7 +2730,8 @@ async function lock() {
 function dispatch() {
   const [first, ...rest] = process.argv.slice(2);
   if (first === '--version' || first === '-v') { console.log(TOOL_VERSION ?? 'unknown'); process.exit(0); }
-  const cmd = (rest.includes('--help') || rest.includes('-h')) ? 'help' : first;   // `promptwheel run --help` is a help request, not a gate run
+  // `promptwheel run --help` is a help request, not a gate run. `improve --help` goes to the loop step, whose page is fuller
+  const cmd = (first !== 'improve' && (rest.includes('--help') || rest.includes('-h'))) ? 'help' : first;
   if (cmd in COMMAND_FLAGS) checkFlags(cmd, rest);
   if (cmd === 'run') run(rest);
   else if (cmd === 'pr-allow') return prAllow(rest);

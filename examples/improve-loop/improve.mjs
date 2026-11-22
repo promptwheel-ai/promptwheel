@@ -81,6 +81,12 @@ const die = (message) => { unmark(); console.error(`improve: ${message}`); proce
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const holds = (...args) => { try { git(...args); return true; } catch { return false; } };
 
+// --help prints the header of this file, which is the whole of its documentation, and runs nothing.
+if (process.argv.slice(2).some((x) => x === '--help' || x === '-h')) {
+  const lines = readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1);
+  console.log(lines.slice(0, lines.findIndex((l) => !l.startsWith('//'))).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
+  process.exit(0);
+}
 // A flag this does not know is an error, not a flag to drop: a mistyped --floor would turn the floor off.
 const VALUED = ['--attempt', '--label', '--target', '--cheaper', '--repeat', '--base-cache', '--may-change', '--turns', '--patience'], BARE = ['--floor', '--json'];
 const args = {};
