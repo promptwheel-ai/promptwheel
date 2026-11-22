@@ -193,8 +193,13 @@ That was run as written, on a repo with one failing test and no config. Put your
 
 - **Kept means one commit. Anything else means the tree is put back as it was.** Exit `0` kept, `1` a guard got
   worse (or the floor held, or it changed a file it may not, or the contract), `2` the win came from a change to the
-  tests, `3` nothing improved, `64` it could not run. So this stops by itself:
+  tests, `3` nothing improved, `64` it could not run, or the attempt could not. So this stops by itself:
   `while promptwheel improve --attempt "..."; do :; done`
+- **An attempt that could not run is not a try.** If your attempt command ends with 64, or the shell could not find
+  or run it and no file changed, nothing is judged and nothing is written, and `improve` exits 64: the loop stops,
+  and no try is used up. A wrapper script around an agent should end with 64 when the agent could not start at all:
+  no sign-in, a usage limit, no network. Over several turns, a later turn that could not run ends the run, and a
+  best turn that had passed is kept.
 - **Only the target makes a win.** `--target <measure>` names it (`--goal` is another name). If you name none, it
   is the measure called `score`, or else the contract's only measure, or else its only measure that is not a
   tripwire. On the contract `init` writes, and with no config, that is the test run. If that still leaves a choice,
@@ -226,7 +231,7 @@ inside the engine), and they are one now. It asks the engine as a separate proce
 inside what judges it. Its own page says every flag and every limit.
 
 The engine's own git calls run no hook and no fsmonitor command; that needs git 2.31 or newer, and an older git
-ignores the setting and says nothing.
+ignores the setting and says nothing. The loop's step refuses to run on an older git.
 
 What the loop cannot hold: an installed dependency your measure runs, a safety rule deleted behind another one, a
 process the attempt leaves running (it can write into the copy the check measures in), anything outside the repo. The

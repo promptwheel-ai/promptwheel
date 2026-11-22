@@ -69,10 +69,18 @@
 // dependency the scorer runs, a database, a process the attempt leaves running. To hold those, run the attempt
 // where it cannot write them.
 //
+// An attempt that could not run is not a try. If the attempt command ends with 64 (how the programs here say "could
+// not run"), or the shell could not run or find it (126, 127) and no file changed, the step puts back whatever is
+// there, writes no line and exits 64. So a broken command stops a loop and cannot use up its tries. An attempt that
+// fails any other way and changed nothing is a try, on record as "nothing". Over several turns the rule reads for the
+// turn (its own change): at a later turn the run ends there, a best turn that had passed is kept, and with none the
+// run is put back and exits 64. (From treegate's step, 2026-11-21, found in the first real run of a loop on it.)
+//
 // stdout is one line (or with --json, the record line). What the attempt prints goes to stderr.
 // Exit codes, so `while node improve.mjs --attempt ...; do :; done` stops by itself:
 //   0 kept · 1 put back, a guard got worse, the floor held, it changed what it may not, or it changed the contract ·
-//   2 put back, gamed · 3 put back, nothing improved or nothing could be measured · 64 could not run.
+//   2 put back, gamed · 3 put back, nothing improved or nothing could be measured · 64 could not run, or the attempt
+//   could not.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -102,6 +110,11 @@ for (let i = 0, argv = process.argv.slice(2); i < argv.length; i++) {
 }
 const attempt = args['--attempt'];
 if (!attempt) die('--attempt "<command that changes the repo>" is required');
+// Hooks are held off for the step's own git calls through GIT_CONFIG_COUNT. Git reads that from 2.31 on. An older git
+// ignores it and says nothing, so the step does not run on one, and a version it cannot read is not guessed at.
+{ let said = ''; try { said = execFileSync('git', ['--version'], { encoding: 'utf8' }).trim(); } catch { /* said below */ }
+  const v = /^git version (\d+)\.(\d+)/.exec(said);
+  if (!v || Number(v[1]) < 2 || (Number(v[1]) === 2 && Number(v[2]) < 31)) die(`git 2.31 or newer is needed, and this is "${said || 'no git at all'}": an older git does not hold hooks off for the step's own calls`); }
 const label = args['--label'] ?? attempt, target = args['--target'] ?? 'score', cheaper = args['--cheaper'], floor = args['--floor'] === true;
 const whole = (flag, dflt) => { if (args[flag] === undefined) return dflt; const v = Number(args[flag]); if (!Number.isInteger(v) || v < 1) die(`${flag} needs a whole number of 1 or more`); return v; };
 const turns = whole('--turns', 1), patience = whole('--patience', 3);
@@ -317,6 +330,12 @@ const judge = ({ files, candidate }) => {
   const topped = (t.direction === 'pass' && t.after === 1) || (t.direction === 'down' && t.after === 0);
   return { standing: 'win', why, extra: seen, report, t, gain: gainOf(t) + gainOf(c) * 1e-9, topped };
 };
+// An attempt that could not run is not a try. 64 is how the programs here say "could not run", and 126 and 127 are
+// the shell saying the command could not be run or was not found. Nothing is judged and no line is written, so a
+// broken attempt command stops a loop and does not use up its tries. A command that changed files and then ended
+// 126 or 127 did run in part, and that change is judged like any other.
+const couldNotRun = (tried, changedSomething) => tried.status === 64 || (!changedSomething && (tried.status === 126 || tried.status === 127));
+const notRun = (tried) => `the attempt could not run (exit ${tried.status}). Nothing was tried and nothing is on record: fix the attempt command, then run this again`;
 const exitOf = { gamed: 2, worse: 1, unsure: 3, flat: 3, outside: 1, contract: 1, nothing: 3 };
 
 // The floor, then the keep. The change also has to hold against the best commit so far: a second ask of the gate,
@@ -369,7 +388,9 @@ try {
     const left = leftBranch(); if (left) die(left);
     if (tried.signal) { putBack(); const why = `the attempt was stopped (${tried.signal}), so it is put back`; note('stopped', why); die(why); }
     const refused = foldOrRefuse(); if (refused) die(refused);
-    if (!git('status', '--porcelain')) finish('nothing', 'the attempt changed no file', 3);
+    const changedSomething = git('status', '--porcelain') !== '';
+    if (couldNotRun(tried, changedSomething)) { putBack(); die(notRun(tried)); }
+    if (!changedSomething) finish('nothing', 'the attempt changed no file', 3);
     const made = candidateOf(`attempt ${n}: ${label.replace(/\s+/g, ' ')}`);
     const j = judge(made);
     if (j.standing !== 'win') { putBack(); finish(j.standing, j.why, exitOf[j.standing], j.extra); }
@@ -379,7 +400,7 @@ try {
   // ---- a run over several turns: each turn goes on from the last, and the whole change is judged against the start ----
   const episode = `${base.slice(0, 7)}-${Date.now().toString(36)}`;
   const baseTree = git('rev-parse', `${base}^{tree}`);
-  let lead = null, last = null, judged = null, sinceBest = 0, prevTree = baseTree, turnsRun = 0, ended = '';
+  let lead = null, last = null, judged = null, sinceBest = 0, prevTree = baseTree, turnsRun = 0, ended = '', couldNot = '';
   for (let t = 1; t <= turns; t++) {
     try { writeFileSync(feedbackFile, feedbackText(t, last)); } catch { /* the attempt runs without it */ }
     console.error(`▶ turn ${t} of ${turns}: ${label}`);
@@ -393,11 +414,18 @@ try {
     };
     if (tried.signal || interrupted) stop(tried.signal || 'SIGINT');
     const refused = foldOrRefuse(); if (refused) die(refused);
-    turnsRun = t;
-    const code = tried.status ?? 1;
     // the whole change so far, as a tree. A turn that left it as the last turn did is not judged again: the gate is
     // not asked twice about one tree.
     git('add', '-A'); const treeNow = git('write-tree'); git('reset', '-q');
+    // An attempt that could not run is not a try (couldNotRun, above). Over turns, what it changed is the turn's own
+    // change. At the first turn it is no try at all; at a later turn the run ends here, and what the turns before it
+    // did is kept or put back below.
+    if (couldNotRun(tried, treeNow !== prevTree)) {
+      if (t === 1) { putBack(); die(notRun(tried)); }
+      couldNot = `turn ${t}'s attempt could not run (exit ${tried.status})`; ended = couldNot; break;
+    }
+    turnsRun = t;
+    const code = tried.status ?? 1;
     let j, made = null;
     if (treeNow === baseTree) j = { standing: 'nothing', why: 'the change so far is no change at all' };
     else if (treeNow === prevTree) j = { standing: 'same', why: 'the turn changed nothing' };
@@ -429,6 +457,8 @@ try {
   }
   if (lead) keep(lead.made, lead.j.t, `${lead.j.why}${turnsRun > 1 ? ` (turn ${lead.t} of ${turnsRun})` : ''}${after}`, { ...lead.j.extra, ...runExtra });
   putBack();
+  // a run that ended on an attempt that could not run, with no best turn: put back, and the code for "could not run"
+  if (couldNot) { const why = `${couldNot}, and no turn before it had won, so the run is put back. Fix the attempt command, then run this again`; note('stopped', why, runExtra); die(why); }
   const s = judged ? judged.standing : 'nothing';   // the run reads as the last turn that was judged
   finish(s, `${judged ? judged.why : 'nothing was measured'}${after}`, exitOf[s] ?? 3, runExtra);
 } catch (e) {

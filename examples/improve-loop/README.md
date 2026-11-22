@@ -48,7 +48,18 @@ A flag it does not know is an error. A mistyped `--floor` should not quietly tur
 | 1 | put back: a guard got worse, the change is under the floor, it changed a file it may not, or it changed the contract |
 | 2 | put back: gamed. The win came from the test, the grader or the config |
 | 3 | put back: nothing improved, or the gate could not tell |
-| 64 | could not run. Nothing was kept |
+| 64 | could not run, or the attempt could not. Nothing was kept |
+
+**An attempt that could not run is not a try.** If your attempt command ends with 64, or the shell could not
+run or find it (126, 127) and no file changed, the step puts back whatever is there, writes no line to the
+record and exits 64. So a broken command stops a `while` loop and does not fill the record with "nothing".
+An attempt that fails any other way and changed no file is a try, on record as `nothing`. A wrapper script
+around an agent should end with 64 when the agent could not start at all: no sign-in, a usage limit, no network.
+Over several turns the rule reads for each turn's own change: at a later turn the run ends there, a best turn
+that had passed is kept, and with none the run is put back and exits 64.
+
+It needs git 2.31 or newer, and refuses to run on an older one. An older git ignores the setting that holds
+hooks off for the step's own git calls, and says nothing.
 
 ## Why `--floor`
 

@@ -1064,3 +1064,85 @@ test('turns: on a target that counts down, the best turn is the one that went lo
   const d = toy(), r = step(d, byTurn('echo 90 > src/cost.txt', 'echo 80 > src/cost.txt'), '--target', 'cost', '--turns', '3');
   assert.equal(r.code, 0, r.err); assert.equal(at(d, 'src/cost.txt'), '80'); assert.equal(record(d).at(-1).best, 2);
 });
+
+// ------------------------------------------------------------------ an attempt that could not run is not a try
+// Found in the first real run of a loop on this step (2026-11-21): an attempt script crashed before its agent
+// started, the step wrote "nothing" for each try, and a plan of tries was used up in two seconds. 64 is how the
+// programs here say "could not run". 126 and 127 are the shell saying the command could not be run or was not found.
+test('loop: an attempt that says it could not run (exit 64) is not a try: exit 64, no line on record, nothing judged', () => {
+  const d = toy(), base = head(d), r = step(d, 'exit 64');
+  assert.equal(r.code, 64, r.err); assert.match(r.err, /could not run/); assert.equal(r.out, '');
+  assert.deepEqual(record(d), []); assert.equal(asks(d), 0); assert.equal(head(d), base); assert.ok(clean(d));
+});
+test('loop: a command the shell cannot find (127) or cannot run (126) is not a try either', () => {
+  const missing = toy(); assert.equal(step(missing, 'no-such-command-anywhere').code, 64); assert.deepEqual(record(missing), []);
+  const d = toy(); put(d, 'tools/agent.sh', '#!/bin/sh\necho 110 > src/score.txt\n'); git(d, 'add', '-A'); git(d, 'commit', '-qm', 'a script that is not marked as a program');
+  const r = step(d, './tools/agent.sh');
+  assert.equal(r.code, 64, r.err); assert.match(r.err, /exit 126/); assert.deepEqual(record(d), []); assert.ok(clean(d));
+});
+test('loop: an attempt that fails in any other way and changed no file is still a try, on record as nothing (exit 3)', () => {
+  const d = toy(), r = step(d, 'exit 7');
+  assert.equal(r.code, 3, r.err); assert.deepEqual(record(d).map((l) => l.result), ['nothing']);
+});
+test('loop: exit 64 after files were changed puts them back, and nothing is judged or kept', () => {
+  const d = toy(), base = head(d), r = step(d, 'echo 110 > src/score.txt; echo junk > new.txt; exit 64');
+  assert.equal(r.code, 64, r.err); assert.equal(head(d), base); assert.equal(state(d), '100 100'); assert.equal(existsSync(join(d, 'new.txt')), false); assert.ok(clean(d));
+  assert.deepEqual(record(d), []); assert.equal(asks(d), 0, 'the gate is not asked');
+});
+test('loop: a command that changed files and then ended 127 ran in part, so its change is judged like any other', () => {
+  const d = toy(), r = step(d, 'echo 110 > src/score.txt; no-such-command-anywhere');
+  assert.equal(r.code, 0, r.err); assert.deepEqual(record(d).map((l) => l.result), ['kept']);
+});
+test('loop: an attempt that could not run uses up no number: the try after it is try 1', () => {
+  const d = toy(); assert.equal(step(d, 'exit 64').code, 64); const r = step(d, 'echo 110 > src/score.txt');
+  assert.equal(r.code, 0, r.err); assert.deepEqual(record(d).map((l) => [l.n, l.result]), [[1, 'kept']]);
+});
+
+// ------------------------------------------------------------------ a git too old to hold the hooks off
+// The step turns hooks off for its own git calls through GIT_CONFIG_COUNT. A git older than 2.31 ignores that and
+// says nothing, so the step must not run on one.
+const oldGit = (version) => {   // a folder to put first in PATH: a git that says it is this version, and is the real git for the rest
+  const bin = join(HOME, `oldgit-${version}`); mkdirSync(bin, { recursive: true });
+  const real = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(bin, 'git'), `#!/bin/sh\n[ "$1" = --version ] && { echo "git version ${version}"; exit 0; }\nexec ${real} "$@"\n`); chmodSync(join(bin, 'git'), 0o755);
+  return { PATH: `${bin}:${process.env.PATH}` };
+};
+test('loop: it refuses to run on a git older than 2.31 (exit 64), and the attempt does not run', () => {
+  const d = toy(), r = run(d, ['--attempt', 'echo 110 > src/score.txt'], oldGit('2.30.9'));
+  assert.equal(r.code, 64, r.err); assert.match(r.err, /2\.31/); assert.equal(state(d), '100 100'); assert.deepEqual(record(d), []);
+});
+test('loop: git 2.31 itself, and a newer git with a longer version string, are taken', () => {
+  for (const version of ['2.31.0', '2.43.0.windows.1', '3.0.0']) {
+    const d = toy(), r = run(d, ['--attempt', 'echo 110 > src/score.txt'], oldGit(version));
+    assert.equal(r.code, 0, `${version}: ${r.err}`);
+  }
+});
+test('loop: a git version it cannot read is refused too: it does not guess', () => {
+  const d = toy(), r = run(d, ['--attempt', 'echo 110 > src/score.txt'], oldGit('unknown'));
+  assert.equal(r.code, 64, r.err); assert.deepEqual(record(d), []);
+});
+
+// ------------------------------------------------------------------ an attempt that could not run, over turns
+// (one keeper, 2026-11-21: the rule above, read for a run of several turns. "No file changed" is the turn's own
+// change: the tree as the last turn left it.)
+test('turns: at the first turn, an attempt that could not run is no try at all, over turns too', () => {
+  const d = toy(), base = head(d), r = step(d, 'exit 64', '--turns', '3');
+  assert.equal(r.code, 64, r.err); assert.match(r.err, /could not run/); assert.deepEqual(record(d), []); assert.equal(asks(d), 0); assert.equal(head(d), base); assert.ok(clean(d));
+});
+test('turns: an attempt that could not run at a later turn ends the run there, and a best turn that had passed is kept', () => {
+  const d = toy(), r = step(d, byTurn('echo 110 > src/score.txt', 'echo 120 > src/score.txt; exit 64', 'echo 130 > src/score.txt'), '--turns', '3');
+  assert.equal(r.code, 0, r.err); assert.equal(state(d), '110 100', 'turn 1 is kept, and what turn 2 did before it said it could not run is not'); assert.ok(clean(d));
+  const lines = record(d); assert.deepEqual(lines.map((l) => l.result), ['turn', 'kept'], 'turn 2 is no turn on record');
+  assert.equal(lines.at(-1).best, 1); assert.equal(lines.at(-1).turns, 1); assert.match(lines.at(-1).why, /turn 2's attempt could not run \(exit 64\)/);
+});
+test('turns: with no best turn, an attempt that could not run at a later turn puts the run back, and a stopped line closes it (exit 64)', () => {
+  const d = toy(), base = head(d), r = step(d, byTurn('echo 90 > src/score.txt', 'exit 64'), '--turns', '3');
+  assert.equal(r.code, 64, r.err); assert.match(r.err, /could not run/); assert.equal(head(d), base); assert.equal(state(d), '100 100'); assert.ok(clean(d));
+  assert.deepEqual(record(d).map((l) => l.result), ['turn', 'stopped']);
+});
+test('turns: a later turn the shell could not find, that changed nothing, ends the run; one that changed files and then ended 127 is judged', () => {
+  const d = toy(), r = step(d, byTurn('echo 110 > src/score.txt', 'no-such-command-anywhere'), '--turns', '3');
+  assert.equal(r.code, 0, r.err); assert.equal(state(d), '110 100'); assert.deepEqual(record(d).map((l) => l.result), ['turn', 'kept']);
+  const e = toy(), k = step(e, byTurn('echo 90 > src/score.txt', 'echo 120 > src/score.txt; no-such-command-anywhere'), '--turns', '2');
+  assert.equal(k.code, 0, k.err); assert.equal(state(e), '120 100'); assert.deepEqual(record(e).map((l) => l.result), ['turn', 'turn', 'kept']);
+});
