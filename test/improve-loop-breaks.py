@@ -20,7 +20,7 @@ M = [  # (file, what the break does, text to find, text to put there, which occu
  (S, "judges a try that is outside the list", "if (outside.length) return { standing: 'outside',", "if (false) return { standing: 'outside',", 1),
  (S, "does not put back a try that was not kept, one outside the list among them", "if (j.standing !== 'win') { putBack(); finish(", "if (j.standing !== 'win') { finish(", 1),
  (S, "counts a moved file at its new place only", "['diff', '--name-only', '--no-renames', '-z', base, candidate]", "['diff', '--name-only', '-M', '-z', base, candidate]", 1),
- (S, "reads file names the way git quotes them", "'--no-renames', '-z', base, candidate], { encoding: 'utf8' }).split('\\0')", "'--no-renames', base, candidate], { encoding: 'utf8' }).split('\\n')", 1),
+ (S, "reads file names the way git quotes them", "'--no-renames', '-z', base, candidate], { encoding: 'utf8', maxBuffer: READ_MAX }).split('\\0')", "'--no-renames', base, candidate], { encoding: 'utf8', maxBuffer: READ_MAX }).split('\\n')", 1),
  (S, "matches a bare name at the top of the repo only", "'^' : '(^|/)'}${body}$`);\n};\nconst may", "'^' : '^'}${body}$`);\n};\nconst may", 1),
  (S, "lets * reach into a folder", ".replace(/\\*/g, '[^/]*').replace(/\\?/g, '[^/]').replace(/\\x00/g, '.*');\n  return new RegExp(`${anchored || glob.includes('/') ? '^' : '(^|/)'}${body}$`);\n};\nconst may", ".replace(/\\*/g, '.*').replace(/\\?/g, '[^/]').replace(/\\x00/g, '.*');\n  return new RegExp(`${anchored || glob.includes('/') ? '^' : '(^|/)'}${body}$`);\n};\nconst may", 1),
  (S, "matches half a name", "${body}$`);\n};\nconst may", "${body}`);\n};\nconst may", 1),
