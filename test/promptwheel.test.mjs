@@ -4866,6 +4866,16 @@ test('improve: your global git config is put back if it changed while the attemp
   r = pwEnv(d, ['improve', '--json', '--attempt', 'git config --global core.fsmonitor /bin/true; echo 110 > src/score.txt'], env);
   assert.equal(r.code, 0, r.out + r.err);
   assert.ok(lstatSync(join(h, '.gitconfig')).isSymbolicLink(), 'still a link'); assert.equal(readFileSync(join(dot, 'gitconfig'), 'utf8'), '[alias]\n\tst = status\n');
+  // git writes through a link, so the line above holds either way: here the attempt replaces the link with a plain file
+  d = scoreRepo();
+  r = pwEnv(d, ['improve', '--json', '--attempt', `rm "$HOME/.gitconfig"; printf '[core]\\n\\tfsmonitor = /bin/true\\n' > "$HOME/.gitconfig"; echo 120 > src/score.txt`], env);
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.ok(lstatSync(join(h, '.gitconfig')).isSymbolicLink(), 'a link again'); assert.equal(readFileSync(join(dot, 'gitconfig'), 'utf8'), '[alias]\n\tst = status\n', 'and the file it points to is as it was');
+  // a rule in the global ignore file would hide a new file from the change: the rule is put back, and the file is judged with the rest
+  d = scoreRepo(); mkdirSync(join(h, '.config', 'git'), { recursive: true });
+  r = pwEnv(d, ['improve', '--json', '--attempt', 'echo src/extra.txt >> "$HOME/.config/git/ignore"; echo 1 > src/extra.txt; echo 130 > src/score.txt'], env);
+  assert.equal(r.code, 0, r.out + r.err); assert.equal(existsSync(join(h, '.config', 'git', 'ignore')), false, 'the ignore file it made is gone');
+  assert.ok(gitOut(d, ['ls-tree', '--name-only', '-r', 'HEAD']).split('\n').includes('src/extra.txt'), 'the new file is part of the change that was kept');
   // a global config that is not a file (the suite's own /dev/null) is left alone
   d = scoreRepo(); r = pwEnv(d, ['improve', '--json', '--attempt', 'echo 110 > src/score.txt'], { ...env, GIT_CONFIG_GLOBAL: '/dev/null' });
   assert.equal(r.code, 0, r.out + r.err);

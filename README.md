@@ -224,7 +224,8 @@ is put back, whatever else it did.
 
 Git's own files (the repo's git config, its hooks, the refs, your global git config) are put back after each attempt,
 before the change is judged. If your global config changed while an attempt ran, it is put back too, and the line
-names the file.
+names the file. The engine's own git calls run no hook and no fsmonitor command; that needs git 2.31 or newer, and an
+older git ignores the setting and says nothing.
 
 What the loop cannot hold: an installed dependency your measure runs, a safety rule deleted behind another one, a
 process the attempt leaves running (it can write into the copy the check measures in), anything outside the repo. The attempt runs as you. A container, or the check

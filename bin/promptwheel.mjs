@@ -1750,7 +1750,7 @@ const bytesOf = (f) => { try { return readFileSync(f); } catch { return null; } 
 // of the person's.
 const markFile = (repo) => join(dirname(recordFile(repo)), 'running.json');
 // Git's own files, which git does not track and an attempt can write: the repo's config (and the worktree's), its hooks
-// and info folders, and the person's global config and attributes file. Read before each attempt and put back after it,
+// and info folders, and the person's global config, attributes file and ignore file. Read before each attempt and put back after it,
 // before anything is judged: a filter set there made the commit hold another number than the one measured, a hook and
 // an fsmonitor command ran inside the loop's own git calls (attacks 29, 30, 33 and 34 of another session's second list,
 // 2026-11-21). A file that is a link stays a link; a path that is not a plain file (the /dev/null of a test) is left alone.
@@ -1759,8 +1759,9 @@ function gitOwnPaths(repo) {
   const common = abs(git(['rev-parse', '--git-common-dir'], repo)), gitDir = abs(git(['rev-parse', '--git-dir'], repo));
   const home = process.env.HOME || homedir(), xdg = process.env.XDG_CONFIG_HOME || join(home, '.config');
   const globals = process.env.GIT_CONFIG_GLOBAL ? [process.env.GIT_CONFIG_GLOBAL] : [join(xdg, 'git', 'config'), join(home, '.gitconfig')];
-  let attrs = ''; try { attrs = execFileSync('git', ['config', '--global', '--path', '--get', 'core.attributesFile'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* not set */ }
-  return { common, files: [join(common, 'config'), join(gitDir, 'config.worktree'), attrs || join(xdg, 'git', 'attributes')], globals, dirs: [join(common, 'hooks'), join(common, 'info')] };
+  const globalPath = (key, dflt) => { try { return execFileSync('git', ['config', '--global', '--path', '--get', key], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() || dflt; } catch { return dflt; } };
+  // the global attributes file (a filter can be named there) and the global ignore file (a rule there hides a new file from the change)
+  return { common, files: [join(common, 'config'), join(gitDir, 'config.worktree'), globalPath('core.attributesFile', join(xdg, 'git', 'attributes')), globalPath('core.excludesFile', join(xdg, 'git', 'ignore'))], globals, dirs: [join(common, 'hooks'), join(common, 'info')] };
 }
 function readGitOwn(repo) {
   const at = gitOwnPaths(repo), snap = new Map();

@@ -92,6 +92,9 @@ change is judged. After the attempt, the step's git calls and the gate's run no 
 whatever folder the hooks are in. A branch the attempt made and left the repo on is not removed:
 the step stops, and the branch is there for you to look at.
 
+This needs git 2.31 or newer. An older git ignores the setting that turns hooks off for the
+step's own git calls, and says nothing.
+
 One thing to know: if you change your own global git config while an attempt is running, the
 step reads that as the attempt's doing and puts it back. The line names the file.
 
