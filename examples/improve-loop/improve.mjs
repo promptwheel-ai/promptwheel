@@ -318,7 +318,9 @@ const judge = ({ files, candidate }) => {
   const metric = (name, r = report) => r.metrics.find((m) => m.name === name);
   const t = metric(target), c = cheaper ? metric(cheaper) : null;
   for (const [name, found] of [[target, t], [cheaper, cheaper ? c : true]]) if (!found) throw new Error(`the gate has no metric named "${name}"`);
-  const metrics = report.metrics.map(({ name, before, after, status, ok, gamed, paid, overBudget }) => ({ name, before, after, status, ok, ...(gamed ? { gamed } : {}), ...(paid ? { paid } : {}), ...(overBudget ? { overBudget } : {}) }));
+  // `noise` is the band the gate held this try to (the one the contract declares, else the spread it measured): a run
+  // reads it here to know when no gain could be kept any more
+  const metrics = report.metrics.map(({ name, before, after, status, ok, noise, gamed, paid, overBudget }) => ({ name, before, after, status, ok, ...(typeof noise === 'number' ? { noise } : {}), ...(gamed ? { gamed } : {}), ...(paid ? { paid } : {}), ...(overBudget ? { overBudget } : {}) }));
   const seen = { candidate, files, verdict: report.verdict, metrics };
   // The verdict word is `fail` when a gamed win sits beside a guard that got worse, so read the marks too.
   const gamed = report.metrics.filter((m) => m.gamed === true);

@@ -28,9 +28,11 @@
 //
 // "best" and the band. A gain is kept only when it is more than the band the gate has for the target (its "noise"),
 // and the most a try can gain is what is left up to the best value. When that is no more than the band, no try can
-// be kept, and the run stops and says so. The band and the direction are the gate's own: they are read from
-// promptwheel.config.json as HEAD holds it. With no band there, the run stops only at the best value itself. The
-// rule reads the gate's last reading of the commit the next try would start from. Where there is none yet, as
+// be kept, and the run stops and says so. The band is the gate's own, as the step wrote it into the record line of
+// that reading: the band the contract declares, else the spread the gate measured over its repeats. A line written
+// before the step wrote bands has none, and then the band the contract declares at HEAD is used, as before. The
+// direction is read from promptwheel.config.json as HEAD holds it. With no band, the run stops only at the best
+// value itself. The rule reads the gate's last reading of the commit the next try would start from. Where there is none yet, as
 // before a plan's first try, nothing is known and the try runs. "best" cannot be used with "cheaper": at the best
 // value a change can still be kept for costing less.
 //
@@ -127,8 +129,9 @@ const noRoom = () => {
   const last = record().filter(read1).pop();
   if (!last || (last.result === 'kept' ? last.commit : last.base) !== here) return null;
   const m = read1(last), now = last.result === 'kept' && typeof m.after === 'number' ? m.after : m.before;
-  let band = 0, down = false;   // the gate's own, as HEAD holds them
-  try { const g = JSON.parse(git('cat-file', 'blob', git('rev-parse', '--verify', 'HEAD:promptwheel.config.json'))).metrics.find((x) => x.name === p.target); down = g.direction === 'down'; if (typeof g.noise === 'number' && g.noise >= 0) band = g.noise; } catch { /* no band can be read: the run stops only at the best value itself */ }
+  let band = typeof m.noise === 'number' && m.noise >= 0 ? m.noise : null, down = false;   // the band the gate held that reading to
+  try { const g = JSON.parse(git('cat-file', 'blob', git('rev-parse', '--verify', 'HEAD:promptwheel.config.json'))).metrics.find((x) => x.name === p.target); down = g.direction === 'down'; if (band === null && typeof g.noise === 'number' && g.noise >= 0) band = g.noise; } catch { /* nothing more can be read: the run stops only at the best value itself */ }
+  if (band === null) band = 0;
   return (down ? now - p.best : p.best - now) <= band ? `no room left. ${p.target} stands at ${now}, the best it can read is ${p.best}, and a gain has to be more than ${band} to be kept` : null;
 };
 // A run that ended by its plan and lost its last held-out number (it was stopped while that was measured, or the

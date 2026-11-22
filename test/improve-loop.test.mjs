@@ -299,7 +299,8 @@ test('loop: every attempt, kept or not, is on record with what the gate saw', ()
   assert.deepEqual(rec.map((x) => [x.n, x.label, x.result]), [[1, 'a', 'kept'], [2, 'b', 'worse'], [3, 'c', 'gamed'], [4, 'd', 'nothing']]);
   assert.equal(rec[0].commit, head(d)); assert.equal(rec[1].base, rec[0].commit, 'the second attempt started from the kept commit');
   assert.deepEqual(rec[1].files, ['src/score.txt']); assert.equal(rec[1].verdict, 'fail');
-  assert.deepEqual(rec[1].metrics.find((m) => m.name === 'score'), { name: 'score', before: 110, after: 90, status: 'regressed', ok: false });
+  // noise: the band the gate held the try to. One read and no band in the contract: 0
+  assert.deepEqual(rec[1].metrics.find((m) => m.name === 'score'), { name: 'score', before: 110, after: 90, status: 'regressed', ok: false, noise: 0 });
   assert.equal(rec[2].metrics.find((m) => m.name === 'score').gamed, true);
   assert.ok(rec.every((x) => !Number.isNaN(Date.parse(x.at))));
 });

@@ -285,6 +285,17 @@ test('run: best: exactly the band left is no room, and one more than the band is
   const some = planned(['echo 101 > src/score.txt', 'echo 106 > src/score.txt'], { best: 106 }, { score: { noise: 5 } }); go(some);
   assert.equal(record(some).length, 2); assert.deepEqual(results(some).slice(-1), ['kept']);
 });
+test('run: best: the band is the one the gate measured on the try, also where the contract declares none', () => {
+  // The score reads 0, 2 and -2 off its value in turn. Over three repeats the gate sees a spread of 4 and calls a gain
+  // of 1 inside it, so with 3 left up to the best value no try can be kept. The contract declares no band.
+  const counter = join(TMP_ROOT, `jitter-${++made}`);
+  const jitter = `n=$(cat ${counter} 2>/dev/null || echo 0); echo $((n + 1)) > ${counter}; set -- 0 2 -2; shift $((n % 3)); echo $(( $(cat src/score.txt) + $(cat evals/bonus.txt) + $1 ))`;
+  const d = planned(['echo 101 > src/score.txt', WIN, WIN], { best: 103, repeat: 3 }, { scorer: jitter }), r = go(d);
+  assert.equal(r.code, 0, r.err); assert.equal(record(d).length, 1, 'one try, then no room'); assert.notEqual(results(d)[0], 'kept');
+  assert.equal(runs(d)[1].ended, 'no room'); assert.match(r.out, /a gain has to be more than [4-9]/);
+  const band = record(d)[0].metrics.find((m) => m.name === 'score').noise;
+  assert.ok(typeof band === 'number' && band > 3, `the step wrote the gate's band into the record line (got ${band})`);
+});
 test('run: best: a target that counts down has its best at the low end', () => {
   const d = planned(['echo 90 > src/cost.txt', 'echo 85 > src/cost.txt', 'echo 80 > src/cost.txt'], { target: 'cost', best: 85 }), r = go(d);
   assert.equal(r.code, 0, r.err); assert.deepEqual(results(d), ['kept', 'kept']); assert.equal(runs(d)[1].ended, 'no room'); assert.match(r.out, /cost stands at 85/);
