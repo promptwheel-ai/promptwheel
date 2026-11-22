@@ -90,7 +90,12 @@ import { fileURLToPath } from 'node:url';
 let marked = null;   // the mark of this run, removed on every way out
 const unmark = () => { if (marked) { try { rmSync(marked, { force: true }); } catch { /* best effort */ } marked = null; } };
 const die = (message) => { unmark(); console.error(`improve: ${message}`); process.exit(64); };
-const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+// The most one read from git or the gate may hold. Node's own cap is 1 MB, and git's list of a change of some 20,000
+// files is more than that, and so is the gate's report on it: the step ended with ENOBUFS and the try was on no
+// record. A change wider than this room is put back and written down as one that could not be measured (exit 3),
+// never left off the record. IMPROVE_READ_MAX sets the room, in bytes.
+const READ_MAX = Number(process.env.IMPROVE_READ_MAX) > 0 ? Number(process.env.IMPROVE_READ_MAX) : 256 * 1024 * 1024;
+const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: READ_MAX }).trim();
 const holds = (...args) => { try { git(...args); return true; } catch { return false; } };
 
 // --help prints the header of this file, which is the whole of its documentation, and runs nothing.
@@ -300,11 +305,12 @@ const candidateOf = (subject) => {
 
 const ask = (...refs) => {
   asks++;
-  const run = spawnSync(gateCommand[0], [...gateCommand.slice(1), 'run', ...refs, '--json', ...(args['--repeat'] ? ['--repeat', args['--repeat']] : []), ...(args['--base-cache'] ? ['--base-cache', args['--base-cache']] : [])], { encoding: 'utf8' });
+  const run = spawnSync(gateCommand[0], [...gateCommand.slice(1), 'run', ...refs, '--json', ...(args['--repeat'] ? ['--repeat', args['--repeat']] : []), ...(args['--base-cache'] ? ['--base-cache', args['--base-cache']] : [])], { encoding: 'utf8', maxBuffer: READ_MAX });
+  if (run.error && run.error.code === 'ENOBUFS') throw Object.assign(new Error("the gate's report is more than the step reads at once"), { code: 'ENOBUFS' });
   try { return JSON.parse(run.stdout); } catch { throw new Error(`could not read the gate's report (exit ${run.status}): ${(run.stderr || '').trim().slice(0, 300)}`); }
 };
 const moved = (m) => (m.after == null ? `${m.name} could not be read${m.before == null ? '' : ' after the change'}` : `${m.name} ${m.before} to ${m.after}`);
-const changedSince = (candidate) => execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', base, candidate], { encoding: 'utf8' }).split('\0').filter(Boolean);
+const changedSince = (candidate) => execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', base, candidate], { encoding: 'utf8', maxBuffer: READ_MAX }).split('\0').filter(Boolean);
 
 // How a candidate stands against the commit the step started on: what the gate says, read with the step's rules.
 const judge = ({ files, candidate }) => {
@@ -467,6 +473,12 @@ try {
   const s = judged ? judged.standing : 'nothing';   // the run reads as the last turn that was judged
   finish(s, `${judged ? judged.why : 'nothing was measured'}${after}`, exitOf[s] ?? 3, runExtra);
 } catch (e) {
+  // a change wider than the step reads at once (READ_MAX): put back, and on record as one that could not be measured
+  if (e && e.code === 'ENOBUFS') {
+    try { putBack(); } catch { /* the line below still says what happened */ }
+    const room = READ_MAX >= 1048576 ? `${Math.round(READ_MAX / 1048576)} MB` : `${READ_MAX} bytes`;
+    finish('nothing', `the change is too wide to read: more than ${room} came from git or the gate at once, so it was not measured and is put back`, 3);
+  }
   // anything this did not plan for: put the attempt back and say so, with the code for "could not run"
   try { putBack(); } catch { /* the message below is what matters */ }
   die(String(e.message || e).split('\n').filter((l) => l.trim()).slice(0, 3).join(' '));

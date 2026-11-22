@@ -334,3 +334,20 @@ test('step: a change so wide that the gate\'s report is longer than a pipe holds
   assert.equal(r.code, 0, r.out + r.err); assert.notEqual(head(d), before); assert.ok(clean(d));
   assert.equal(record(d).length, 1); assert.equal(record(d)[0].result, 'kept');
 });
+
+// Node holds 1 MB from one read of a program it runs. Git's list of a change of some 20,000 files is more than that,
+// and so is the gate's report on it: the step ended with ENOBUFS, put the change back, wrote no line, and said "could
+// not run", so the try was on no record (the framework session's runs, 2026-11-22). The step now reads with room.
+const LONG = 'a-test-file-with-a-name-long-enough-that-ten-thousand-of-them-hold-more-than-one-megabyte';
+test('step: a change whose file list and gate report are each more than 1 MB is judged like any other, and kept when it is a gain', () => {
+  const d = toy(), before = head(d);
+  const r = step(d, `mkdir -p test && i=0 && while [ $i -lt 10000 ]; do echo "// $i" > test/case-$i-${LONG}.test.mjs; i=$((i+1)); done && echo 101 > src/score.txt`);
+  assert.equal(r.code, 0, r.out + r.err); assert.notEqual(head(d), before); assert.ok(clean(d));
+  assert.equal(record(d).length, 1); assert.equal(record(d)[0].result, 'kept');
+});
+test('step: a change too wide for the step to read is put back and on record as one that could not be measured, never left off', () => {
+  const d = toy(), before = head(d);
+  const r = run(STEP, d, ['--attempt', `i=0 && while [ $i -lt 100 ]; do echo "// $i" > src/case-$i-${LONG}.txt; i=$((i+1)); done && echo 101 > src/score.txt`], { IMPROVE_READ_MAX: '2000' });
+  assert.equal(r.code, 3, r.out + r.err); assert.equal(head(d), before); assert.ok(clean(d), 'the change is put back');
+  assert.equal(record(d).length, 1, 'the try is on record'); assert.equal(record(d)[0].result, 'nothing'); assert.match(record(d)[0].why, /too wide to read/);
+});
