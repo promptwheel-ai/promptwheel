@@ -902,6 +902,8 @@ test('turns: a change that needs a level step first is kept: each turn goes on f
   const lines = record(d);
   assert.deepEqual(lines.map((l) => [l.result, l.turn ?? null, l.standing ?? null]), [['turn', 1, 'flat'], ['turn', 2, 'win'], ['turn', 3, 'same'], ['kept', null, null]]);
   assert.equal(lines[3].best, 2); assert.equal(lines[3].turns, 3); assert.equal(new Set(lines.map((l) => l.episode)).size, 1, 'one run, one episode');
+  for (const l of lines.filter((x) => x.result === 'turn' && x.candidate)) assert.equal(git(d, 'rev-parse', `refs/improve/${l.n}`), l.candidate, `turn ${l.turn} is kept as refs/improve/${l.n}`);
+  assert.equal(lines.some((l) => l.restored), false, 'the step\'s own refs are not taken for something the attempt touched');
 });
 test('turns: the best turn is kept, not the last, after it is measured once more', () => {
   const d = toy();
@@ -966,6 +968,7 @@ test('help: --help prints the step\'s own header, runs nothing, and exits 0; pro
   const d = toy();
   const r = step(d, GOOD, '--help');
   assert.equal(r.code, 0, r.err); assert.match(r.out, /^The loop's one keeper/); assert.match(r.out, /--turns N judges over a number of turns/);
+  assert.doesNotMatch(r.out, /^import |process\.argv/m, 'the header only, not the code under it');
   assert.equal(read(d, 'src/score.txt'), '100', 'the attempt never ran'); assert.ok(!existsSync(join(d, '.git', 'improve')));
   const door = spawnSync(process.execPath, [join(ROOT, 'bin', 'promptwheel.mjs'), 'improve', '--help'], { cwd: d, encoding: 'utf8', env: ENV });
   assert.equal(door.status, 0, door.stderr); assert.match(door.stdout, /^The loop's one keeper/);
@@ -986,4 +989,78 @@ test('turns: a target that can go no further ends the run at that turn', () => {
 test('turns: a run with no win reads as its last judged turn, not as a turn that changed nothing after it', () => {
   const d = toy(), r = step(d, byTurn('echo helper > src/helper.txt'), '--turns', '3');
   assert.equal(r.code, 3, r.err); assert.match(r.out, / flat .*score did not improve/); assert.equal(record(d).at(-1).result, 'flat');
+});
+// The second reader's twenty breaks of the same code (proof-bench/wheel/teeth-keeper-extra.json): none was caught at
+// first. Each test below makes its break fail.
+test('turns: patience is 3 when none is given', () => {
+  const d = toy();
+  const r = step(d, byTurn(GOOD, 'echo a > src/a.txt', 'echo b > src/a.txt', 'echo c > src/a.txt', 'echo 130 > src/score.txt'), '--turns', '6');
+  assert.equal(r.code, 0, r.err); assert.match(r.out, /3 turns in a row with no new best/); assert.equal(record(d).at(-1).turns, 4); assert.equal(at(d, 'src/score.txt'), '110');
+});
+test('turns: every run has an episode of its own, two runs from one commit included', () => {
+  const d = toy();
+  step(d, byTurn('echo h > src/h.txt'), '--turns', '2'); step(d, byTurn('echo h > src/h.txt'), '--turns', '2');
+  const runs = record(d).filter((l) => l.result !== 'turn'); assert.equal(runs.length, 2); assert.notEqual(runs[0].episode, runs[1].episode);
+});
+test('turns: a run that changed nothing at all exits 3, so a while loop stops', () => {
+  const r = step(toy(), 'true', '--turns', '2'); assert.equal(r.code, 3, r.err); assert.match(r.out, / nothing /);
+});
+test('turns: a run of two turns is measured once more before it is kept', () => {
+  const d = toy(), r = step(d, byTurn(GOOD), '--turns', '2');
+  assert.equal(r.code, 0, r.err); assert.equal(record(d).at(-1).asks, 2, 'the winning turn, then the second look');
+});
+test('turns: a best turn whose win does not show again is put back, exit 3', () => {
+  const count = join(TMP_ROOT, `flaky-${Date.now()}`);   // the first two readings are true, every later one says 100
+  const d = toy({ score: { cmd: `n=$(cat ${count} 2>/dev/null || echo 0); echo $((n+1)) > ${count}; if [ "$n" -lt 2 ]; then cat src/score.txt; else echo 100; fi` } }), base = head(d);
+  const r = step(d, byTurn(GOOD), '--turns', '2');
+  assert.equal(r.code, 3, r.err); assert.match(r.out, / flat .*did not show again when it was measured once more/); assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100');
+});
+test('turns: Ctrl-C ends the run even when the attempt catches it and ends by itself', async () => {
+  const d = toy(), base = head(d);
+  const child = spawn(process.execPath, [RIG, '--turns', '5', '--attempt', byTurn(GOOD, `trap 'exit 0' INT; touch ${d}.t2; sleep 30 & wait`, 'echo 999 > src/score.txt')], { cwd: d, env: ENV, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  let out = ''; child.stdout.on('data', (x) => { out += x; });
+  for (let i = 0; i < 400 && !existsSync(`${d}.t2`); i++) await new Promise((res) => setTimeout(res, 50));
+  process.kill(-child.pid, 'SIGINT');
+  const code = await new Promise((res) => child.on('exit', (c) => res(c)));
+  assert.equal(code, 0, out); assert.match(out, /stopped at turn 2/); assert.equal(at(d, 'src/score.txt'), '110', 'turn 3 never ran'); assert.equal(git(d, 'rev-parse', 'HEAD~1'), base);
+});
+test('turns: a run stopped before any turn won puts the tree back', async () => {
+  const d = toy(), base = head(d);
+  const child = spawn(process.execPath, [RIG, '--turns', '3', '--attempt', `echo x > src/new.txt; touch ${d}.t1; sleep 30`], { cwd: d, env: ENV, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  let err = ''; child.stderr.on('data', (x) => { err += x; });
+  for (let i = 0; i < 400 && !existsSync(`${d}.t1`); i++) await new Promise((res) => setTimeout(res, 50));
+  process.kill(-child.pid, 'SIGINT');
+  const code = await new Promise((res) => child.on('exit', (c) => res(c)));
+  assert.equal(code, 64, err); assert.match(err, /stopped .*at turn 1/); assert.equal(head(d), base); assert.ok(!existsSync(join(d, 'src', 'new.txt'))); assert.ok(clean(d));
+});
+test('turns: the next turn is told a measure that got worse is worse', () => {
+  const d = toy(), seen = join(TMP_ROOT, `fb-${Date.now()}-worse`); mkdirSync(seen);
+  step(d, `cp "$PW_FEEDBACK" ${seen}/turn-$PW_TURN.txt; ${byTurn('echo 120 > src/cost.txt', 'echo 100 > src/cost.txt')}`, '--turns', '2');
+  const two = readFileSync(join(seen, 'turn-2.txt'), 'utf8');
+  assert.match(two, /cost: 100 at the start, 120 now \(worse\)/); assert.match(two, /WORSE THAN AT THE START: cost 100 to 120/);
+});
+test('contract: a repo with no config has no contract file to guard, and a win there is kept', () => {
+  const d = mkdtempSync(join(TMP_ROOT, 'zc-'));
+  git(d, 'init', '-q', '-b', 'main', '.'); git(d, 'config', 'user.email', 't@example.com'); git(d, 'config', 'user.name', 't');
+  put(d, 'package.json', '{"name":"zc","scripts":{"test":"node --test"}}\n'); put(d, 'src/add.js', 'exports.add=(a,b)=>a-b\n');
+  put(d, 'test/add.test.js', "const t=require('node:test'),a=require('node:assert');t.test('add',()=>a.equal(require('../src/add.js').add(2,2),4))\n");
+  git(d, 'add', '-A'); git(d, 'commit', '-q', '-m', 'base');
+  const r = step(d, "sed -i 's/a-b/a+b/' src/add.js", '--target', 'tests_pass');
+  assert.equal(r.code, 0, r.err + r.out); assert.match(r.out, / kept .*tests_pass 0 to 1/);
+});
+test('mark: a second run while the first is going is refused, by the first run\'s own mark', async () => {
+  const d = toy();
+  const child = spawn(process.execPath, [RIG, '--attempt', `touch ${d}.going; sleep 30`], { cwd: d, env: ENV, stdio: 'ignore', detached: true });
+  for (let i = 0; i < 400 && !existsSync(`${d}.going`); i++) await new Promise((res) => setTimeout(res, 50));
+  const r = step(d, GOOD);
+  process.kill(-child.pid, 'SIGINT'); await new Promise((res) => child.on('exit', res));
+  assert.equal(r.code, 64); assert.match(r.err, new RegExp(`another run of the loop is going in this repo \\(process ${child.pid}\\)`));
+});
+test('mark: a run that could not run to its end leaves no mark behind', () => {
+  const d = toy(), r = step(d, GOOD, '--target', 'nope');
+  assert.equal(r.code, 64); assert.match(r.err, /no metric named "nope"/); assert.ok(!existsSync(join(d, '.git', 'improve', 'running.json')));
+});
+test('turns: on a target that counts down, the best turn is the one that went lowest', () => {
+  const d = toy(), r = step(d, byTurn('echo 90 > src/cost.txt', 'echo 80 > src/cost.txt'), '--target', 'cost', '--turns', '3');
+  assert.equal(r.code, 0, r.err); assert.equal(at(d, 'src/cost.txt'), '80'); assert.equal(record(d).at(-1).best, 2);
 });

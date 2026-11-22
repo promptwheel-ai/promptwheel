@@ -4309,6 +4309,40 @@ test('the views over a run of several turns: the playbook prints its path from t
   const i = JSON.parse(pw(d, ['insights', '--json']).out);
   assert.equal(i.attempts, 1); assert.equal(i.kept, 1); assert.deepEqual(i.overTurns, { runs: 1, kept: 1, bestTurns: [2] });
 });
+// The second reader's breaks of the door and the views (proof-bench/wheel/teeth-keeper-extra.json): none caught at
+// first. Each test below makes its break fail.
+test('improve: Ctrl-C reaches the door and the loop step together, and the door waits for the step to put the tree back', async () => {
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base'); const base = rev(d);
+  const mark = join(mkdtempSync(join(tmpdir(), 'pw-door-sig-')), 'going');
+  const child = spawn(process.execPath, [ENGINE, 'improve', '--target', 'todos', '--attempt', `echo x > new.txt; touch ${mark}; sleep 30`], { cwd: d, stdio: 'ignore', detached: true });
+  for (let i = 0; i < 400 && !existsSync(mark); i++) await new Promise((res) => setTimeout(res, 50));
+  process.kill(-child.pid, 'SIGINT');
+  const code = await new Promise((res) => child.on('exit', (c) => res(c)));
+  assert.equal(code, 64, 'the step\'s own code: it was stopped, and put the tree back'); assert.equal(rev(d), base);
+  assert.equal(existsSync(join(d, 'new.txt')), false, 'the tree is back when the door returns'); assert.equal(gitOut(d, ['status', '--porcelain']), '');
+});
+const SCORE_EV = { name: 'score', cmd: 'echo $(( $(cat score.txt) + $(cat evals/bonus.txt) ))', extract: 'number', direction: 'up', guard: true };
+const scoreToy = () => { const d = tmpRepo([SCORE_EV]); writeFileSync(join(d, 'promptwheel.config.json'), JSON.stringify({ linkNodeModules: false, evaluatorPaths: ['evals/bonus.txt'], metrics: [SCORE_EV] })); mkdirSync(join(d, 'evals')); writeFileSync(join(d, 'score.txt'), '100\n'); writeFileSync(join(d, 'evals/bonus.txt'), '0\n'); commitAll(d, 'base'); return d; };
+test('the views: a gamed try is listed as thrown away, in the loop step\'s words; the stall reads the last three tries; insights reads the loop\'s record alone', () => {
+  const d = scoreToy();
+  assert.equal(pw2(d, ['improve', '--label', 'bump the grader', '--attempt', 'echo 5 > evals/bonus.txt']).code, 2);
+  assert.match(pw(d, ['playbook']).out, /- \*\*bump the grader\*\*: score moved by changing what it is measured with/);
+  for (let i = 0; i < 2; i++) pw2(d, ['improve', '--attempt', 'true']);
+  assert.equal(JSON.parse(pw(d, ['suggest', '--json']).out).stalled, true, 'three tries, nothing kept');
+  assert.equal(pw2(d, ['improve', '--attempt', 'echo 110 > score.txt']).code, 0);
+  assert.equal(JSON.parse(pw(d, ['suggest', '--json']).out).stalled, false, 'the last three tries hold a kept one');
+  rmSync(recordPath(d), { force: true });   // only the loop's own record is left
+  const r = pw(d, ['insights', '--json']); assert.equal(r.code, 0, r.out); assert.equal(JSON.parse(r.out).attempts, 4);
+});
+test('the views: a run\'s path starts at its first reading when its first turn was not measured, and follows the run\'s target', () => {
+  const COST = { name: 'cost', cmd: 'cat cost.txt', extract: 'number', direction: 'down', guard: true };
+  const d = tmpRepo([SCORE_EV, COST]); mkdirSync(join(d, 'evals')); writeFileSync(join(d, 'score.txt'), '100\n'); writeFileSync(join(d, 'cost.txt'), '100\n'); writeFileSync(join(d, 'evals/bonus.txt'), '0\n'); writeFileSync(join(d, 'notes.md'), 'n\n'); commitAll(d, 'base');
+  // turn 1 touches a file outside the list (not measured), turn 2 raises the score (not the target), turn 3 lowers the cost
+  const attempt = `case "$PW_TURN" in 1) echo more >> notes.md;; 2) git checkout -q -- notes.md; echo 110 > score.txt;; 3) echo 90 > cost.txt;; esac`;
+  const r = pw2(d, ['improve', '--target', 'cost', '--may-change', 'score.txt, cost.txt', '--label', 'three turns', '--turns', '4', '--attempt', attempt]);
+  assert.equal(r.code, 0, r.out + r.err);
+  assert.match(pw(d, ['playbook']).out, /- \*\*three turns\*\*: kept at turn 3 of 4: `cost` 100 → \? → 100 → 90 → 90/);
+});
 test('the compounding test: its own self-test passes (scripted attempts, no agent)', () => {
   const r = spawnSync(process.execPath, [join(dirname(ENGINE), '..', 'bench', 'compounding-ab.mjs'), '--self-test'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, /self-test passed/);

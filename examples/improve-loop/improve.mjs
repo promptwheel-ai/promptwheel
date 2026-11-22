@@ -183,8 +183,11 @@ mkdirSync(recordDir, { recursive: true });
 writeFileSync(markFile, JSON.stringify({ start: base, branch: on, pid: process.pid, at: new Date().toISOString() }) + '\n'); marked = markFile;
 
 // Ctrl-C reaches this step and the attempt together. Stay alive through it, so a half-made change is put back.
+// A signal is only seen once the step lets the event loop turn, so over several turns it breathes after each
+// blocking step: an attempt that catches Ctrl-C and ends by itself has still stopped the run.
 let interrupted = false;
 process.on('SIGINT', () => { interrupted = true; });
+const breath = () => new Promise((r) => setTimeout(r, 0));
 
 // From here on, no git call of this step or of the gate runs a hook or an fsmonitor command, whatever the repo's
 // config says and whatever folder the hooks are in. A repo that keeps its hooks in a tracked folder has them edited
@@ -377,12 +380,14 @@ try {
     try { writeFileSync(feedbackFile, feedbackText(t, last)); } catch { /* the attempt runs without it */ }
     console.error(`▶ turn ${t} of ${turns}: ${label}`);
     const tried = tryOnce({ PW_TURN: String(t), PW_TURNS: String(turns), PW_FEEDBACK: feedbackFile });
+    await breath();
     const left = leftBranch(); if (left) die(left);
-    if (tried.signal || interrupted) {
-      // stopped: a best turn that had passed its whole check is kept; anything else is put back
+    // stopped: a best turn that had passed its whole check is kept; anything else is put back
+    const stop = (how) => {
       if (lead) { console.error(`  (stopped at turn ${t}: turn ${lead.t} had passed its check and is kept)`); keep(lead.made, lead.j.t, `${lead.j.why} (turn ${lead.t} of ${turnsRun}; stopped at turn ${t})`, { ...lead.j.extra, episode, turns: turnsRun, best: lead.t }); }
-      putBack(); const why = `the attempt was stopped (${tried.signal || 'SIGINT'}) at turn ${t}, so it is put back`; note('stopped', why, { episode, turns: turnsRun, best: 0 }); die(why);
-    }
+      putBack(); const why = `the attempt was stopped (${how}) at turn ${t}, so it is put back`; note('stopped', why, { episode, turns: turnsRun, best: 0 }); die(why);
+    };
+    if (tried.signal || interrupted) stop(tried.signal || 'SIGINT');
     const refused = foldOrRefuse(); if (refused) die(refused);
     turnsRun = t;
     const code = tried.status ?? 1;
@@ -392,7 +397,11 @@ try {
     let j, made = null;
     if (treeNow === baseTree) j = { standing: 'nothing', why: 'the change so far is no change at all' };
     else if (treeNow === prevTree) j = { standing: 'same', why: 'the turn changed nothing' };
-    else { made = candidateOf(`attempt ${n}: ${label.replace(/\s+/g, ' ')} (turn ${t} of ${turns})`); j = judge(made); }
+    else {
+      made = candidateOf(`attempt ${n}: ${label.replace(/\s+/g, ' ')} (turn ${t} of ${turns})`);
+      // a check cut short by Ctrl-C measured nothing that can be trusted: that is a stop, not an error
+      try { j = judge(made); } catch (e) { await breath(); if (interrupted) stop('SIGINT'); throw e; }
+    }
     last = { t, code, same: treeNow === prevTree, standing: j.standing, why: j.why, report: j.report || null };
     if (j.standing !== 'same') judged = last;
     note('turn', j.why, { ...(j.extra || {}), episode, turn: t, turns, standing: j.standing });
