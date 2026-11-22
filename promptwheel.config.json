@@ -3,7 +3,7 @@
   "metrics": [
     {
       "name": "tests_passing",
-      "cmd": "node --test --test-reporter=tap 2>&1 | grep -cE \"^ok \"",
+      "cmd": "node --test --test-reporter=tap 2>&1 | grep -E \"^ok \" | grep -vcE \"# (SKIP|TODO)\"",
       "extract": "number",
       "direction": "up",
       "guard": true,
@@ -94,6 +94,15 @@
       "guard": true,
       "gamingCheck": false,
       "allowable": "flag"
+    },
+    {
+      "name": "assertions",
+      "cmd": "grep -rIoE \"\\\\b(assert(\\\\.[A-Za-z]+)?|expect)[ ]?\\\\(\" --include=\"*.mjs\" --include=\"*.js\" test 2>/dev/null | wc -l | tr -d \" \"",
+      "extract": "number",
+      "direction": "up",
+      "guard": true,
+      "gamingCheck": false,
+      "allowable": "flag"
     }
   ],
   "mandates": [
@@ -159,6 +168,14 @@
         ".sawbuck/**"
       ],
       "reason": "the hooks that enforce the contract are wired by a person, not detached by the agent"
+    },
+    {
+      "name": "contract-frozen",
+      "paths": [
+        "promptwheel.config.json"
+      ],
+      "allowable": "flag",
+      "reason": "the contract that judges every change changes with a reason from a person (--allow), never as the quiet first step of another change"
     }
   ],
   "evaluatorPaths": [
