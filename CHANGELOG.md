@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.8.17 (not released yet): every test a pull request added, gone at its end
+## 0.8.17 (2026-11-22): every test a pull request added, gone at its end
 
 An agent writes tests early in a pull request. They fail, and a later commit deletes them. The pull request ends with as many tests as before, so every count says nothing changed. Now the comment on the pull request says so in a note: `an earlier commit of this pull request (abc1234) added 3 tests. None of them is in it now:`, with their names. With one test the second sentence reads `That test is not in it now:`. The terminal says the same of "this change".
 
