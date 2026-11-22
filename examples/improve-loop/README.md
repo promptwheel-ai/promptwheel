@@ -195,4 +195,11 @@ list of what may change, a count of gate asks) is here now, and `promptwheel imp
 `test/improve-loop.test.mjs`, and they run with `npm test`. One test in the main suite fails, and says why,
 if this folder or those tests go missing.
 
+**Its home is this package, and its path is kept.** (The owner's decision, 2026-11-22.) It ships with the gate
+whose report it reads, it is tested with that gate, and `promptwheel improve` runs it with nothing else
+installed. It does not move into treegate: the engine's own command would then hang on treegate while treegate
+hangs on the engine for its gate, and the keeper and the gate could drift apart. Tools built on the keeper run
+this file from where it sits, beside the engine they use as their gate (`bin/promptwheel.mjs` and
+`examples/improve-loop/improve.mjs` in one package). So do not move or rename it without telling them first.
+
 Ask the owner before removing either.

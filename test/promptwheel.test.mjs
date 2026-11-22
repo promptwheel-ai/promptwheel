@@ -4474,7 +4474,7 @@ test('the wheel is here on purpose: its commands and its tests', () => {
   assert.ok(mine.length >= 15, `only ${mine.length} of the record's and the views' tests are left. ${why}`); assert.equal(skipped.length, 0, `a test of the loop is skipped. ${why}`);
   // one keeper: `improve` is a door onto the loop step that ships beside the engine (its own tests are in test/improve-loop.test.mjs)
   const step = join(dirname(ENGINE), '..', 'examples', 'improve-loop', 'improve.mjs');
-  assert.ok(existsSync(step), `the loop step is gone. ${why}`);
+  assert.ok(existsSync(step), `the loop step is gone, or moved: its home is this package and its path stays, because tools built on it run it from beside the engine (2026-11-22). ${why}`);
   assert.ok(JSON.parse(readFileSync(join(dirname(ENGINE), '..', 'package.json'), 'utf8')).files.includes('examples/improve-loop/improve.mjs'), `the loop step is not in the package, so improve has nothing to run. ${why}`);
   assert.match(readFileSync(ENGINE, 'utf8'), /function improve\(argv\) \{\n  const step = join\(dirname\(fileURLToPath\(import\.meta\.url\)\), '\.\.', 'examples', 'improve-loop', 'improve\.mjs'\);/, `improve is no longer the door onto the loop step: one keeper, by the owner's decision of 2026-11-21. ${why}`);
   assert.match(readFileSync(join(dirname(ENGINE), '..', 'CLAUDE.md'), 'utf8'), /The wheel turns/, `CLAUDE.md no longer says the loop is kept on purpose. ${why}`);
