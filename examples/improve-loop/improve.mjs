@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-// One step of an improve loop: run an attempt, ask the gate, keep the change or put it back.
+// The loop's one keeper: run an attempt, ask the gate, keep the change or put it back.
 //
 // The engine had this as `promptwheel improve --attempt` from 0.0.2. Version 0.8.0 removed it as a command nothing
-// relied on. On 2026-11-21 the owner asked for it back. It lives here, outside the engine and outside the npm
-// package: the engine stays the check, and this is one loop built on the check. It shells `promptwheel run --json`
-// and reads the report. test/improve-loop.test.mjs holds it to what this header says.
+// relied on. On 2026-11-21 the owner asked for it back, and the same day, with three copies of it about (this file,
+// the copy in treegate, and a command inside the engine), he chose one keeper. This is it. It lives outside the
+// engine and asks the engine as a separate process: the engine stays the check, and this is the loop built on the
+// check. It shells `promptwheel run --json` and reads the report. `promptwheel improve` runs this file, so it ships
+// with the package. test/improve-loop.test.mjs holds it to what this header says.
 //
 //   node improve.mjs --attempt "<command that changes the repo>" [--label <name>] [--target score]
-//                    [--cheaper cost] [--floor] [--repeat N] [--base-cache <dir>] [--may-change <patterns>] [--json]
+//                    [--cheaper cost] [--floor] [--repeat N] [--base-cache <dir>] [--may-change <patterns>]
+//                    [--turns N] [--patience P] [--json]
 //
 // A change is kept only when the gate passes AND the target metric improved. With --cheaper <metric>, a change is
 // also kept when the target held (or moved inside its noise band) and that metric fell. A pass with nothing
@@ -24,6 +27,18 @@
 // a bare name matches at any depth, a pattern with a slash starts at the top of the repo, * stops at a slash and
 // ** crosses it. The names come from the commit that would be judged, so nothing gets round the list.
 // (From treegate's step, the other session's copy of this file, 2026-11-21: one step again.)
+//
+// The contract is the person's. A change the gate would keep is put back when it touched promptwheel.config.json,
+// a file inside the repo that it extends, or a file its evaluatorPaths name, as they stand at the commit the step
+// starts on (result `contract`, exit 1). A change the gate already sends back keeps the gate's result.
+//
+// --turns N judges over a number of turns. One attempt judged alone is put back unless it improved by itself, so a
+// change that needs a level step first could never be kept. With --turns each turn goes on from where the last one
+// left the tree, the WHOLE change so far is judged against the commit the run started from (so a test edited at one
+// turn makes no win at a later one), the reading is handed to the next turn in a file (PW_FEEDBACK, with PW_TURN and
+// PW_TURNS), and the best turn is kept as one commit, after it is measured once more. The run ends early when a turn
+// that ended by itself changed nothing, when the target can go no further, or after --patience turns (3) with no new
+// best once there is one. Every turn is a line in the record, and the run ends with a line of its own.
 //
 // Every attempt, kept or not, is one line in .git/improve/attempts.jsonl, and the change itself stays reachable as
 // refs/improve/<n>. The attempt command gets the path of that record in IMPROVE_RECORD (and the target's name in
@@ -42,26 +57,32 @@
 // ref or an fsmonitor command that an attempt sets is gone before the change is judged. After the attempt, the
 // step's git calls and the gate's run no hook at all, whatever folder the hooks are in.
 //
-// This is not a sandbox. The attempt runs as you, with your shell. Stop it with Ctrl-C and the attempt is put back.
-// What git does not track is out of sight: an installed dependency the scorer runs, a database, a process the
-// attempt leaves running. To hold those, run the attempt where it cannot write them.
+// A run that is killed outright cannot put anything back. It leaves .git/improve/running.json, and the next run
+// names the commit it started from before it does anything.
+//
+// This is not a sandbox. The attempt runs as you, with your shell. Stop it with Ctrl-C and the attempt is put back
+// (after several turns, a best turn that had passed is kept). What git does not track is out of sight: an installed
+// dependency the scorer runs, a database, a process the attempt leaves running. To hold those, run the attempt
+// where it cannot write them.
 //
 // stdout is one line (or with --json, the record line). What the attempt prints goes to stderr.
 // Exit codes, so `while node improve.mjs --attempt ...; do :; done` stops by itself:
-//   0 kept · 1 put back, a guard got worse, the floor held, or it changed what it may not · 2 put back, gamed ·
-//   3 put back, nothing improved or nothing could be measured · 64 could not run.
+//   0 kept · 1 put back, a guard got worse, the floor held, it changed what it may not, or it changed the contract ·
+//   2 put back, gamed · 3 put back, nothing improved or nothing could be measured · 64 could not run.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const die = (message) => { console.error(`improve: ${message}`); process.exit(64); };
+let marked = null;   // the mark of this run, removed on every way out
+const unmark = () => { if (marked) { try { rmSync(marked, { force: true }); } catch { /* best effort */ } marked = null; } };
+const die = (message) => { unmark(); console.error(`improve: ${message}`); process.exit(64); };
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const holds = (...args) => { try { git(...args); return true; } catch { return false; } };
 
 // A flag this does not know is an error, not a flag to drop: a mistyped --floor would turn the floor off.
-const VALUED = ['--attempt', '--label', '--target', '--cheaper', '--repeat', '--base-cache', '--may-change'], BARE = ['--floor', '--json'];
+const VALUED = ['--attempt', '--label', '--target', '--cheaper', '--repeat', '--base-cache', '--may-change', '--turns', '--patience'], BARE = ['--floor', '--json'];
 const args = {};
 for (let i = 0, argv = process.argv.slice(2); i < argv.length; i++) {
   if (BARE.includes(argv[i])) args[argv[i]] = true;
@@ -72,6 +93,8 @@ for (let i = 0, argv = process.argv.slice(2); i < argv.length; i++) {
 const attempt = args['--attempt'];
 if (!attempt) die('--attempt "<command that changes the repo>" is required');
 const label = args['--label'] ?? attempt, target = args['--target'] ?? 'score', cheaper = args['--cheaper'], floor = args['--floor'] === true;
+const whole = (flag, dflt) => { if (args[flag] === undefined) return dflt; const v = Number(args[flag]); if (!Number.isInteger(v) || v < 1) die(`${flag} needs a whole number of 1 or more`); return v; };
+const turns = whole('--turns', 1), patience = whole('--patience', 3);
 // The same pattern rules as the gate's evaluatorPaths and mandates, so one pattern means one thing in both places.
 const globToRe = (glob) => {
   const anchored = glob.startsWith('/'), g = anchored ? glob.slice(1) : glob;
@@ -81,10 +104,22 @@ const globToRe = (glob) => {
 const may = args['--may-change'] === undefined ? null : args['--may-change'].split(',').map((s) => s.trim()).filter(Boolean).map(globToRe);
 if (may && !may.length) die('--may-change needs at least one path pattern: an empty list is not a list');
 const gateCommand = process.env.PROMPTWHEEL ? process.env.PROMPTWHEEL.split(' ') : [process.execPath, join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'promptwheel.mjs')];
+const attemptEnv = { ...process.env };   // the attempt runs with your environment, as it was before this step set anything
 
 let root; try { root = git('rev-parse', '--show-toplevel'); } catch { die('not inside a git repository'); }
 process.chdir(root);
 let base; try { base = git('rev-parse', '--verify', 'HEAD'); } catch { die('this repository has no commit yet: the loop needs one to put a change back to'); }
+const recordDir = join(git('rev-parse', '--absolute-git-dir'), 'improve');
+const record = join(recordDir, 'attempts.jsonl'), bestFile = join(recordDir, 'best.json'), markFile = join(recordDir, 'running.json'), feedbackFile = join(recordDir, 'feedback.txt');
+// A run that was killed outright left its mark, and maybe its change in the tree. Say so before anything else.
+if (existsSync(markFile)) {
+  let m = null; try { m = JSON.parse(readFileSync(markFile, 'utf8')); } catch { /* a mark that cannot be read is still a mark */ }
+  let alive = false; try { if (m && m.pid && m.pid !== process.pid) { process.kill(m.pid, 0); alive = true; } } catch { /* gone */ }
+  if (alive) die(`another run of the loop is going in this repo (process ${m.pid})`);
+  const from = m && typeof m.start === 'string' ? m.start : null;
+  if (git('status', '--porcelain', '--untracked-files=all')) die(`a run that started at ${from ? from.slice(0, 12) : 'a commit this cannot read'} did not finish, and what it had changed is still in the tree. If none of it is yours, put the tree back with:\n  git reset --hard ${from || 'HEAD'} && git clean -fd\nThen run the loop again`);
+  rmSync(markFile, { force: true });
+}
 if (git('status', '--porcelain')) die('the working tree is not clean: commit or stash first, so there is something to put back to');
 // A file can be hidden from git (skip-worktree, assume-unchanged). git status then calls the tree clean when it is not.
 const hidden = () => git('ls-files', '-v', '-z').split('\0').filter((l) => l && !l.startsWith('H ')).map((l) => l.slice(2));
@@ -93,12 +128,18 @@ const edited = hiddenAtStart.filter((f) => existsSync(f) && git('hash-object', '
 if (edited.length) die(`the working tree is not clean: these files are edited and hidden from git: ${edited.join(', ')}. Show them again first: git update-index --no-skip-worktree <file> (or --no-assume-unchanged)`);
 const branch = () => { try { return git('symbolic-ref', '-q', 'HEAD'); } catch { return null; } };   // null on a detached HEAD
 const on = branch();
+// The contract, as it stands at the commit the step starts on: the config file, a file inside the repo it extends,
+// and the files its evaluatorPaths name. In the loop the contract is the person's, not the attempt's.
+const contract = (() => {
+  let cfg = null; try { cfg = JSON.parse(git('show', `${base}:promptwheel.config.json`)); } catch { return () => false; }
+  const ext = [].concat((cfg && cfg.extends) || []).filter((x) => typeof x === 'string').map((x) => relative(root, resolve(root, x))).filter((x) => x && !x.startsWith('..') && !isAbsolute(x));
+  const evals = (cfg && Array.isArray(cfg.evaluatorPaths) ? cfg.evaluatorPaths : []).filter((x) => typeof x === 'string' && x.trim()).map(globToRe);
+  return (f) => f === 'promptwheel.config.json' || ext.includes(f) || evals.some((re) => re.test(f));
+})();
 
 // What the loop knows, and what it judges with, is read before the attempt runs and written back after it if the
 // attempt touched it. The attempt is handed the record to read, a floor the attempt can lower is no floor, and a
 // gate, a step or a kept base number the attempt can rewrite judges nothing.
-const recordDir = join(git('rev-parse', '--absolute-git-dir'), 'improve');
-const record = join(recordDir, 'attempts.jsonl'), bestFile = join(recordDir, 'best.json');
 const isFile = (file) => { try { return statSync(file).isFile(); } catch { return false; } };
 const bytes = (file) => (isFile(file) ? readFileSync(file) : null);
 const gateFile = gateCommand.slice(1).filter((a) => /\.[cm]?js$/.test(a)).map((a) => resolve(a)).find(isFile);
@@ -117,29 +158,33 @@ const settings = [...new Set([
 const gitDirs = [[join(common, 'hooks'), 'git hooks'], [join(common, 'info'), 'git settings']];
 const inGitDirs = () => gitDirs.flatMap(([dir, what]) => (existsSync(dir) ? readdirSync(dir, { recursive: true }).map((f) => [join(dir, f), what]).filter(([f]) => isFile(f)) : []));
 const linkOf = (file) => { try { return readlinkSync(file); } catch { return null; } };   // where a link points, or null for a plain file
-const own = [[record, 'record'], [bestFile, 'floor'], [fileURLToPath(import.meta.url), 'step'], ...(gateFile ? [[gateFile, 'gate']] : []), ...cached().map((f) => [f, 'base cache']),
+// read again before every attempt: over several turns the record grows, and the gate fills the base cache
+const snapshot = () => [[record, 'record'], [bestFile, 'floor'], [fileURLToPath(import.meta.url), 'step'], ...(gateFile ? [[gateFile, 'gate']] : []), ...cached().map((f) => [f, 'base cache']),
   ...settings.map((f) => [f, f.startsWith(`${common}/`) ? 'git settings' : `your git settings (${f})`]), ...inGitDirs()]
   .map(([file, what]) => ({ file, what, was: bytes(file), mode: isFile(file) ? statSync(file).mode : null, link: linkOf(file) }));
+let own = snapshot();
 const text = (what) => { const { was } = own.find((x) => x.what === what); return was == null ? null : was.toString('utf8'); };
 const refs = () => Object.fromEntries(git('for-each-ref', '--format=%(refname) %(objectname)').split('\n').filter(Boolean).map((l) => l.split(' ')).filter(([ref]) => ref !== on));   // every ref but the branch this is on
-const refsAtStart = refs();
-const n = (text('record') || '').split('\n').filter(Boolean).length + 1;
+let refsAtStart = refs();
+let n = (text('record') || '').split('\n').filter(Boolean).length + 1;
 let best = null;   // the best commit so far and what it scored; nothing until a change is kept under --floor
 if (floor && text('floor') != null) {
   try { best = JSON.parse(text('floor')); } catch { /* said below */ }
   if (!best || typeof best.commit !== 'string' || typeof best.score !== 'number') die(`the floor file cannot be read (${bestFile}). Delete it to start the floor again from this commit`);
   if (!holds('cat-file', '-e', `${best.commit}^{commit}`)) die(`the best commit ${best.commit.slice(0, 12)} is gone from this clone. Delete ${bestFile} to start the floor again from this commit`);
 }
+mkdirSync(recordDir, { recursive: true });
+writeFileSync(markFile, JSON.stringify({ start: base, branch: on, pid: process.pid, at: new Date().toISOString() }) + '\n'); marked = markFile;
 
 // Ctrl-C reaches this step and the attempt together. Stay alive through it, so a half-made change is put back.
-process.on('SIGINT', () => {});
-const tried = spawnSync(attempt, { shell: true, stdio: ['inherit', 2, 2], env: { ...process.env, IMPROVE_RECORD: record, IMPROVE_TARGET: target } });
+let interrupted = false;
+process.on('SIGINT', () => { interrupted = true; });
 
 // From here on, no git call of this step or of the gate runs a hook or an fsmonitor command, whatever the repo's
 // config says and whatever folder the hooks are in. A repo that keeps its hooks in a tracked folder has them edited
-// like any other file. These settings outrank every config file.
+// like any other file. These settings outrank every config file. The attempt itself gets the environment it had.
 const k = Number(process.env.GIT_CONFIG_COUNT) || 0;
-Object.assign(process.env, { GIT_CONFIG_COUNT: String(k + 2), [`GIT_CONFIG_KEY_${k}`]: 'core.hooksPath', [`GIT_CONFIG_VALUE_${k}`]: '/dev/null', [`GIT_CONFIG_KEY_${k + 1}`]: 'core.fsmonitor', [`GIT_CONFIG_VALUE_${k + 1}`]: 'false' });
+const quiet = { GIT_CONFIG_COUNT: String(k + 2), [`GIT_CONFIG_KEY_${k}`]: 'core.hooksPath', [`GIT_CONFIG_VALUE_${k}`]: '/dev/null', [`GIT_CONFIG_KEY_${k + 1}`]: 'core.fsmonitor', [`GIT_CONFIG_VALUE_${k + 1}`]: 'false' };
 
 const restored = new Set(), refsLost = [];   // which of the loop's own files the attempt touched, and what could not be put back
 let asks = 0;   // how often the gate was asked in this try: what the try cost
@@ -147,16 +192,22 @@ const putBack = () => { git('reset', '-q', '--hard', base); git('clean', '-qfd')
 const note = (result, why, extra = {}) => {
   const line = { n, at: new Date().toISOString(), label, base, result, why, ...extra, ...(asks ? { asks } : {}), ...(restored.size ? { recordPutBack: true, restored: [...restored] } : {}), ...(refsLost.length ? { refsLost } : {}) };
   appendFileSync(record, JSON.stringify(line) + '\n');
+  n++;
   return line;
 };
 const finish = (result, why, exit, extra) => {
   const line = note(result, why, extra);
   const touched = restored.size ? ` (the attempt touched the loop's own files, which were put back: ${[...restored].join(', ')})` : '';
-  console.log(args['--json'] ? JSON.stringify(line) : `${String(n).padStart(2)}  ${result.padEnd(8)} ${label}: ${why}${touched}`);
+  unmark();
+  console.log(args['--json'] ? JSON.stringify(line) : `${String(line.n).padStart(2)}  ${result.padEnd(8)} ${label}: ${why}${touched}`);
   process.exit(exit);
 };
 
-try {
+// Runs the attempt once, then puts back whatever it did to what judges it. Returns how the attempt's command ended.
+const tryOnce = (env) => {
+  own = snapshot(); refsAtStart = refs();
+  const tried = spawnSync(attempt, { shell: true, stdio: ['inherit', 2, 2], env: { ...attemptEnv, IMPROVE_RECORD: record, IMPROVE_TARGET: target, ...env } });
+  Object.assign(process.env, quiet);
   // The loop's own files, as they were. Anything the attempt added to the base cache goes too: a number planted
   // there before the base is first measured would be read as the base.
   for (const { file, what, was, mode, link } of own) {
@@ -181,80 +232,186 @@ try {
   // a file the attempt hid from git is shown again, so its change is judged and put back like any other
   const hid = hidden().filter((f) => !hiddenAtStart.includes(f));
   for (const show of hid.length ? ['--no-skip-worktree', '--no-assume-unchanged'] : []) git('update-index', show, '--', ...hid);   // one flag a call: git clears only one when both are given
+  return tried;
+};
 
-  // Where the attempt left the branch. A proposer that commits by itself must not skip the gate, and one that
-  // throws commits away must not take a kept change with it.
-  if (branch() !== on) {
-    const why = `the attempt left the repo on another branch or commit (it started on ${on || 'a detached HEAD'} at ${base.slice(0, 12)}). Nothing was judged or kept: put it back by hand`;
-    note('rewrote', why); die(why);
-  }
-  if (tried.signal) { putBack(); const why = `the attempt was stopped (${tried.signal}), so it is put back`; note('stopped', why); die(why); }
+// Where the attempt left the branch. A proposer that commits by itself must not skip the gate, and one that throws
+// commits away must not take a kept change with it. Each returns the reason it refused (and has recorded), or null.
+const leftBranch = () => {
+  if (branch() === on) return null;
+  const why = `the attempt left the repo on another branch or commit (it started on ${on || 'a detached HEAD'} at ${base.slice(0, 12)}). Nothing was judged or kept: put it back by hand`;
+  note('rewrote', why); return why;
+};
+const foldOrRefuse = () => {
   const now = git('rev-parse', 'HEAD');
   if (now !== base && holds('merge-base', '--is-ancestor', base, now)) git('reset', '-q', base);   // its commits become a working change, judged like any other
   else if (now !== base) {
     git('update-ref', `refs/improve/${n}`, now); putBack();
     const why = `the attempt moved the branch off the commit it started on. It is put back, and where the attempt left it is under refs/improve/${n}`;
-    note('rewrote', why, { candidate: now }); die(why);
+    note('rewrote', why, { candidate: now }); return why;
   }
-  if (!git('status', '--porcelain')) finish('nothing', 'the attempt changed no file', 3);
+  return null;
+};
 
-  // Keep the attempt reachable whatever happens to it: a commit that no branch points at. This commit is what the
-  // gate judges. Its message is one line, so nothing in a label can read as a reason written in a commit.
+// The change so far, against the commit the step started on, made into a commit that no branch points at. This
+// commit is what the gate judges. Its message is one line, so nothing in a label can read as a reason in a commit.
+const candidateOf = (subject) => {
   git('add', '-A');
   const files = git('diff', '--cached', '--name-only').split('\n').filter(Boolean);
   const tree = git('write-tree');
-  const candidate = git('commit-tree', tree, '-p', base, '-m', `attempt ${n}: ${label.replace(/\s+/g, ' ')}`);
+  const candidate = git('commit-tree', tree, '-p', base, '-m', subject);
   git('update-ref', `refs/improve/${n}`, candidate);
   git('reset', '-q');
+  return { files, tree, candidate };
+};
 
+const ask = (...refs) => {
+  asks++;
+  const run = spawnSync(gateCommand[0], [...gateCommand.slice(1), 'run', ...refs, '--json', ...(args['--repeat'] ? ['--repeat', args['--repeat']] : []), ...(args['--base-cache'] ? ['--base-cache', args['--base-cache']] : [])], { encoding: 'utf8' });
+  try { return JSON.parse(run.stdout); } catch { throw new Error(`could not read the gate's report (exit ${run.status}): ${(run.stderr || '').trim().slice(0, 300)}`); }
+};
+const moved = (m) => (m.after == null ? `${m.name} could not be read${m.before == null ? '' : ' after the change'}` : `${m.name} ${m.before} to ${m.after}`);
+const changedSince = (candidate) => execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', base, candidate], { encoding: 'utf8' }).split('\0').filter(Boolean);
+
+// How a candidate stands against the commit the step started on: what the gate says, read with the step's rules.
+const judge = ({ files, candidate }) => {
   // What may change. The names are read from the commit the gate would judge, a move counts at both ends, and a
   // try that touched anything else is put back whole: half of a change is not a change anyone made.
   if (may) {
-    const changed = execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', base, candidate], { encoding: 'utf8' }).split('\0').filter(Boolean);
-    const outside = changed.filter((f) => !may.some((re) => re.test(f)));
-    if (outside.length) { putBack(); finish('outside', `it changed what it may not: ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ` and ${outside.length - 3} more` : ''}`, 1, { candidate, files, outside }); }
+    const outside = changedSince(candidate).filter((f) => !may.some((re) => re.test(f)));
+    if (outside.length) return { standing: 'outside', why: `it changed what it may not: ${outside.slice(0, 3).join(', ')}${outside.length > 3 ? ` and ${outside.length - 3} more` : ''}`, extra: { candidate, files, outside } };
   }
-
-  const ask = (...refs) => {
-    asks++;
-    const run = spawnSync(gateCommand[0], [...gateCommand.slice(1), 'run', ...refs, '--json', ...(args['--repeat'] ? ['--repeat', args['--repeat']] : []), ...(args['--base-cache'] ? ['--base-cache', args['--base-cache']] : [])], { encoding: 'utf8' });
-    try { return JSON.parse(run.stdout); } catch { throw new Error(`could not read the gate's report (exit ${run.status}): ${(run.stderr || '').trim().slice(0, 300)}`); }
-  };
   const report = ask('--base', base, '--head', candidate);
   const metric = (name, r = report) => r.metrics.find((m) => m.name === name);
   const t = metric(target), c = cheaper ? metric(cheaper) : null;
   for (const [name, found] of [[target, t], [cheaper, cheaper ? c : true]]) if (!found) throw new Error(`the gate has no metric named "${name}"`);
   const metrics = report.metrics.map(({ name, before, after, status, ok, gamed, paid, overBudget }) => ({ name, before, after, status, ok, ...(gamed ? { gamed } : {}), ...(paid ? { paid } : {}), ...(overBudget ? { overBudget } : {}) }));
   const seen = { candidate, files, verdict: report.verdict, metrics };
-  const moved = (m) => (m.after == null ? `${m.name} could not be read${m.before == null ? '' : ' after the change'}` : `${m.name} ${m.before} to ${m.after}`);
-
   // The verdict word is `fail` when a gamed win sits beside a guard that got worse, so read the marks too.
   const gamed = report.metrics.filter((m) => m.gamed === true);
-  if (report.verdict === 'gamed' || gamed.length) { putBack(); finish('gamed', `${gamed.map((m) => m.name).join(', ') || 'a metric'} moved by changing what it is measured with`, 2, seen); }
-  if (report.verdict === 'fail') { putBack(); finish('worse', report.metrics.filter((m) => m.guard && !m.ok).map(moved).join(', ') || 'a protected path or the gate itself changed', 1, seen); }
-  if (report.verdict !== 'pass') { putBack(); finish('unsure', 'the gate could not measure it', 3, seen); }
-
+  if (report.verdict === 'gamed' || gamed.length) return { standing: 'gamed', why: `${gamed.map((m) => m.name).join(', ') || 'a metric'} moved by changing what it is measured with`, extra: seen, report };
+  if (report.verdict === 'fail') return { standing: 'worse', why: report.metrics.filter((m) => m.guard && !m.ok).map(moved).join(', ') || 'a protected path or the gate itself changed', extra: seen, report };
+  if (report.verdict !== 'pass') return { standing: 'unsure', why: 'the gate could not measure it', extra: seen, report };
   const held = t.status === 'unchanged' || t.status === 'inconclusive';   // the same, or a move inside the noise band
   const why = t.status === 'improved' ? moved(t) + (c && c.paid ? `, ${moved(c)} paid for` : '')
     : (c && held && c.status === 'improved') ? `${target} ${t.status === 'unchanged' ? `held at ${t.after}` : `${t.before} to ${t.after}, inside its band`}, ${moved(c)}` : null;
-  if (!why) { putBack(); finish('flat', `${target} did not improve (${t.status})`, 3, seen); }
+  if (!why) return { standing: 'flat', why: `${target} did not improve (${t.status})`, extra: seen, report };
+  // the contract is the person's: a change the gate would keep is put back when it touched it
+  const touched = changedSince(candidate).filter(contract);
+  if (touched.length) return { standing: 'contract', why: `it changed the contract (${touched.slice(0, 3).join(', ')}): in the loop the contract is the person's`, extra: seen, report };
+  // how far ahead: the target's gain first, a saving under --cheaper only breaks a tie
+  const gainOf = (m) => (m && m.status === 'improved' && typeof m.before === 'number' && typeof m.after === 'number' ? Math.abs(m.after - m.before) : 0);
+  const topped = (t.direction === 'pass' && t.after === 1) || (t.direction === 'down' && t.after === 0);
+  return { standing: 'win', why, extra: seen, report, t, gain: gainOf(t) + gainOf(c) * 1e-9, topped };
+};
+const exitOf = { gamed: 2, worse: 1, unsure: 3, flat: 3, outside: 1, contract: 1, nothing: 3 };
 
-  // The floor: the change also has to hold against the best commit so far. A second ask of the gate, with that
-  // commit as the base. The parent is the best until something is kept that scores under it.
+// The floor, then the keep. The change also has to hold against the best commit so far: a second ask of the gate,
+// with that commit as the base. The parent is the best until something is kept that scores under it. What is kept
+// is the tree the gate judged, as a commit made here: no hook runs, and the working tree is not read again. A file
+// edited since the gate looked is not in it, and goes with the reset.
+const keep = ({ tree, candidate }, t, why, extra) => {
   const better = (a, b) => (t.direction === 'down' ? a < b : a > b);
   const top = best || { commit: base, score: t.before };
   if (floor && top.commit !== base) {
-    const b = metric(target, ask('--base', top.commit, '--head', candidate));
-    if (!b || b.after == null) { putBack(); finish('unsure', `the gate could not measure ${target} against its best`, 3, seen); }
-    if (b.status === 'regressed') { putBack(); finish('worse', `${target} was ${b.before} at its best and is ${b.after} now: under the floor`, 1, { ...seen, floor: { best: top.commit, before: b.before, after: b.after } }); }
+    const b = ask('--base', top.commit, '--head', candidate).metrics.find((m) => m.name === target);
+    if (!b || b.after == null) { putBack(); finish('unsure', `the gate could not measure ${target} against its best`, 3, extra); }
+    if (b.status === 'regressed') { putBack(); finish('worse', `${target} was ${b.before} at its best and is ${b.after} now: under the floor`, 1, { ...extra, floor: { best: top.commit, before: b.before, after: b.after } }); }
   }
-
-  // What is kept is the tree the gate judged, as a commit made here: no hook runs, and the working tree is not read
-  // again. A file edited since the gate looked is not in it, and goes with the reset.
   const commit = git('commit-tree', tree, '-p', base, '-m', `improve: ${label}\n\n${why}`);
   git('reset', '-q', '--hard', commit); git('clean', '-qfd');
   if (floor) writeFileSync(bestFile, JSON.stringify(better(t.after, top.score) ? { commit, score: t.after } : top) + '\n');
-  finish('kept', why, 0, { ...seen, commit });
+  finish('kept', why, 0, { ...extra, commit });
+};
+
+// What the next turn is told: how the whole change so far stands against the start, measure by measure.
+const feedbackText = (turn, last) => {
+  const out = [`Turn ${turn} of ${turns}. What is measured is the whole change since this run started, against the commit it started from.`];
+  if (!last) out.push('Nothing is measured yet.');
+  else {
+    if (last.code !== 0 && last.same) out.push(`The command of turn ${last.t} ended with code ${last.code} and changed nothing on disk: it was stopped, or it failed, before anything was saved. Save each file as soon as it is done.`);
+    else if (last.code !== 0) out.push(`The command of turn ${last.t} ended with code ${last.code}: it was stopped, or it failed. What it had saved by then is in the tree.`);
+    if (last.report) {
+      out.push(`After turn ${last.t}:`);
+      for (const m of last.report.metrics) {
+        const word = m.status === 'improved' ? 'better' : m.status === 'regressed' ? 'worse' : m.status === 'unchanged' ? 'the same' : 'not measured';
+        out.push(`  ${m.name}: ${m.before ?? '?'} at the start, ${m.after ?? '?'} now (${word})`);
+      }
+    }
+    if (last.standing === 'contract') out.push(`THE CONTRACT WAS CHANGED at turn ${last.t}: ${last.why}. Put it back as it was at the start. In the loop the contract is not the attempt's to change.`);
+    if (last.standing === 'outside') out.push(`OUTSIDE WHAT MAY CHANGE at turn ${last.t}: ${last.why}. Put those files back as they were at the start.`);
+    if (last.standing === 'worse') out.push(`WORSE THAN AT THE START: ${last.why}. The run is kept only if nothing is worse at its end.`);
+    if (last.standing === 'gamed') out.push('A measure went up by a change to the tests or the contract, not the source. That is not a win, at this turn or a later one.');
+    if (last.standing === 'win') out.push('As it stands this would be kept. A later turn may gain more. The best turn is the one that is kept.');
+  }
+  out.push('The tests and the contract that count are the ones from the start. A change to the tests or the contract cannot make a win.');
+  return out.join('\n') + '\n';
+};
+
+try {
+  if (turns === 1) {
+    // ---- one try: the attempt, judged alone ----
+    try { writeFileSync(feedbackFile, feedbackText(1, null)); } catch { /* the attempt runs without it */ }
+    const tried = tryOnce({ PW_TURN: '1', PW_TURNS: '1', PW_FEEDBACK: feedbackFile });
+    const left = leftBranch(); if (left) die(left);
+    if (tried.signal) { putBack(); const why = `the attempt was stopped (${tried.signal}), so it is put back`; note('stopped', why); die(why); }
+    const refused = foldOrRefuse(); if (refused) die(refused);
+    if (!git('status', '--porcelain')) finish('nothing', 'the attempt changed no file', 3);
+    const made = candidateOf(`attempt ${n}: ${label.replace(/\s+/g, ' ')}`);
+    const j = judge(made);
+    if (j.standing !== 'win') { putBack(); finish(j.standing, j.why, exitOf[j.standing], j.extra); }
+    keep(made, j.t, j.why, j.extra);
+  }
+
+  // ---- a run over several turns: each turn goes on from the last, and the whole change is judged against the start ----
+  const episode = `${base.slice(0, 7)}-${Date.now().toString(36)}`;
+  const baseTree = git('rev-parse', `${base}^{tree}`);
+  let lead = null, last = null, judged = null, sinceBest = 0, prevTree = baseTree, turnsRun = 0, ended = '';
+  for (let t = 1; t <= turns; t++) {
+    try { writeFileSync(feedbackFile, feedbackText(t, last)); } catch { /* the attempt runs without it */ }
+    console.error(`▶ turn ${t} of ${turns}: ${label}`);
+    const tried = tryOnce({ PW_TURN: String(t), PW_TURNS: String(turns), PW_FEEDBACK: feedbackFile });
+    const left = leftBranch(); if (left) die(left);
+    if (tried.signal || interrupted) {
+      // stopped: a best turn that had passed its whole check is kept; anything else is put back
+      if (lead) { console.error(`  (stopped at turn ${t}: turn ${lead.t} had passed its check and is kept)`); keep(lead.made, lead.j.t, `${lead.j.why} (turn ${lead.t} of ${turnsRun}; stopped at turn ${t})`, { ...lead.j.extra, episode, turns: turnsRun, best: lead.t }); }
+      putBack(); const why = `the attempt was stopped (${tried.signal || 'SIGINT'}) at turn ${t}, so it is put back`; note('stopped', why, { episode, turns: turnsRun, best: 0 }); die(why);
+    }
+    const refused = foldOrRefuse(); if (refused) die(refused);
+    turnsRun = t;
+    const code = tried.status ?? 1;
+    // the whole change so far, as a tree. A turn that left it as the last turn did is not judged again: the gate is
+    // not asked twice about one tree.
+    git('add', '-A'); const treeNow = git('write-tree'); git('reset', '-q');
+    let j, made = null;
+    if (treeNow === baseTree) j = { standing: 'nothing', why: 'the change so far is no change at all' };
+    else if (treeNow === prevTree) j = { standing: 'same', why: 'the turn changed nothing' };
+    else { made = candidateOf(`attempt ${n}: ${label.replace(/\s+/g, ' ')} (turn ${t} of ${turns})`); j = judge(made); }
+    last = { t, code, same: treeNow === prevTree, standing: j.standing, why: j.why, report: j.report || null };
+    if (j.standing !== 'same') judged = last;
+    note('turn', j.why, { ...(j.extra || {}), episode, turn: t, turns, standing: j.standing });
+    console.error(`  turn ${t}: ${j.standing === 'win' ? `ahead (${j.why})` : `${j.standing} (${j.why})`}`);
+    if (j.standing === 'win' && (!lead || j.gain > lead.j.gain)) { lead = { t, made, j }; sinceBest = 0; } else if (lead) sinceBest++;
+    // A turn that changed nothing ends the run only when its command ended by itself: an agent saying it is done.
+    // One that was cut off by a limit, or failed, has said nothing of the kind.
+    if (last.same && code === 0) { ended = 'a turn changed nothing'; break; }
+    prevTree = treeNow;
+    if (lead && j.standing === 'win' && j.topped) { ended = 'the target can go no further'; break; }
+    if (lead && sinceBest >= patience) { ended = `${patience} turn${patience === 1 ? '' : 's'} in a row with no new best`; break; }
+  }
+  const after = ended ? ` (the run ended after turn ${turnsRun}: ${ended})` : '';
+  const runExtra = { episode, turns: turnsRun, best: lead ? lead.t : 0 };
+  if (lead && turnsRun > 1) {
+    // The second look: N turns are N tries at a measure that may be noisy, so the best turn is measured once more
+    // and kept only if it still wins. It is the commit that was judged at its turn that is measured again.
+    const again = judge(lead.made);
+    if (again.standing !== 'win') { putBack(); finish('flat', `turn ${lead.t} had won (${lead.j.why}), and the win did not show again when it was measured once more${after}`, 3, { ...again.extra, ...runExtra, best: 0 }); }
+    lead.j = again;
+  }
+  if (lead) keep(lead.made, lead.j.t, `${lead.j.why}${turnsRun > 1 ? ` (turn ${lead.t} of ${turnsRun})` : ''}${after}`, { ...lead.j.extra, ...runExtra });
+  putBack();
+  const s = judged ? judged.standing : 'nothing';   // the run reads as the last turn that was judged
+  finish(s, `${judged ? judged.why : 'nothing was measured'}${after}`, exitOf[s] ?? 3, runExtra);
 } catch (e) {
   // anything this did not plan for: put the attempt back and say so, with the code for "could not run"
   try { putBack(); } catch { /* the message below is what matters */ }

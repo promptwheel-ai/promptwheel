@@ -849,3 +849,112 @@ test('asks: a try the gate was never asked about has no count', () => {
   const d = toy(); step(d, `${GOOD}; echo more >> README.md`, '--may-change', 'src/**');
   assert.equal(record(d)[0].asks, undefined);
 });
+
+// ------------------------------------------------------------------ one keeper: what moved in from the engine's own command
+// On 2026-11-21 the owner chose one keeper: this step. The engine had grown a command of its own the same day
+// (`promptwheel improve`, with --turns, the contract rule and a mark for a run that dies). Those parts are here now,
+// and `promptwheel improve` runs this file. Each test below was seen failing on the step as it was before they moved.
+const open = () => toy({ top: { evaluatorPaths: ['evals/bonus.txt'] } });   // the config itself is not an evaluator path here
+const addMeasure = `node ${CFG} "c.metrics.push({ name: 'notes', cmd: 'echo 1', extract: 'number', direction: 'up' })"`;
+test('contract: a win that also edits the contract is put back whole, exit 1, and the line says the contract changed', () => {
+  const d = open(), base = head(d), before = read(d, 'promptwheel.config.json');
+  const r = step(d, `${GOOD}; ${addMeasure}`);
+  assert.equal(r.code, 1, r.err); assert.match(r.out, /^ 1 {2}contract .*promptwheel\.config\.json/);
+  assert.equal(head(d), base); assert.equal(read(d, 'promptwheel.config.json'), before); assert.equal(read(d, 'src/score.txt'), '100'); assert.ok(clean(d));
+  assert.equal(record(d)[0].result, 'contract');
+  assert.equal(step(open(), GOOD).code, 0, 'the same win without the contract edit is kept, so the test can tell the difference');
+});
+test('contract: a file inside the repo that the contract extends is the contract too', () => {
+  const d = toy({ top: { evaluatorPaths: ['evals/bonus.txt'], extends: './more.json' }, files: { 'more.json': '{}\n' } });
+  const r = step(d, `${GOOD}; printf '{ }\\n' > more.json`);
+  assert.equal(r.code, 1, r.err); assert.match(r.out, /contract .*more\.json/); assert.equal(read(d, 'more.json'), '{}');
+});
+test('contract: a change the gate already sends back keeps the gate\'s result', () => {
+  const r = step(toy(), `${GOOD}; ${addMeasure}`);   // here the config is an evaluator path: an edit beside a win is gamed
+  assert.equal(r.code, 2, r.err); assert.match(r.out, / gamed /);
+});
+test('mark: a run killed outright leaves its mark, the next run names the commit it started from, and a clean tree clears it', async () => {
+  const d = toy(), base = head(d), mark = join(d, '.git', 'improve', 'running.json');
+  const child = spawn(process.execPath, [RIG, '--attempt', `echo 110 > src/score.txt; touch ${d}.started; sleep 30`], { cwd: d, env: ENV, stdio: 'ignore' });
+  for (let i = 0; i < 200 && !existsSync(`${d}.started`); i++) await new Promise((res) => setTimeout(res, 50));
+  child.kill('SIGKILL'); await new Promise((res) => child.on('exit', res));
+  assert.ok(existsSync(mark), 'the killed run left its mark');
+  let r = step(d, GOOD);
+  assert.equal(r.code, 64); assert.match(r.err, new RegExp(`started at ${base.slice(0, 12)} did not finish`)); assert.match(r.err, new RegExp(`git reset --hard ${base}`));
+  git(d, 'reset', '-q', '--hard', base); git(d, 'clean', '-qfd');
+  r = step(d, GOOD); assert.equal(r.code, 0, r.err); assert.ok(!existsSync(mark), 'once the tree is clean the old mark goes, and a finished run leaves none');
+});
+test('mark: a second run in the same repo while the first is going is refused', () => {
+  const d = toy(); mkdirSync(join(d, '.git', 'improve'), { recursive: true });
+  writeFileSync(join(d, '.git', 'improve', 'running.json'), JSON.stringify({ start: head(d), pid: process.pid, at: new Date().toISOString() }) + '\n');
+  const r = step(d, GOOD); assert.equal(r.code, 64); assert.match(r.err, new RegExp(`another run of the loop is going in this repo \\(process ${process.pid}\\)`));
+  assert.equal(read(d, 'src/score.txt'), '100', 'the attempt never ran');
+});
+// an attempt that does something different at each turn: case on PW_TURN
+const byTurn = (...cases) => `case "$PW_TURN" in ${cases.map((c, i) => `${i + 1}) ${c};;`).join(' ')} esac`;
+test('turns: a change that needs a level step first is kept: each turn goes on from the last, and the whole change is judged against the start', () => {
+  const d = toy(), base = head(d);
+  const attempt = byTurn('echo helper > src/helper.txt', 'echo 110 > src/score.txt');
+  assert.equal(step(toy(), attempt).code, 3, 'judged alone, the level first step is put back');
+  const r = step(d, attempt, '--turns', '3');
+  assert.equal(r.code, 0, r.err); assert.match(r.out, / kept .*score 100 to 110 \(turn 2 of 3\)/);
+  assert.equal(git(d, 'rev-parse', 'HEAD~1'), base); assert.equal(at(d, 'src/helper.txt'), 'helper'); assert.equal(at(d, 'src/score.txt'), '110');
+  const lines = record(d);
+  assert.deepEqual(lines.map((l) => [l.result, l.turn ?? null, l.standing ?? null]), [['turn', 1, 'flat'], ['turn', 2, 'win'], ['turn', 3, 'same'], ['kept', null, null]]);
+  assert.equal(lines[3].best, 2); assert.equal(lines[3].turns, 3); assert.equal(new Set(lines.map((l) => l.episode)).size, 1, 'one run, one episode');
+});
+test('turns: the best turn is kept, not the last, after it is measured once more', () => {
+  const d = toy();
+  const r = step(d, byTurn('echo 120 > src/score.txt', 'echo 105 > src/score.txt'), '--turns', '3');
+  assert.equal(r.code, 0, r.err); assert.equal(at(d, 'src/score.txt'), '120'); assert.match(r.out, /turn 1 of 3/);
+  const run = record(d).at(-1); assert.equal(run.best, 1); assert.equal(run.asks, 3, 'two turns asked once each, and the best was asked once more');
+});
+test('turns: the next turn is handed the reading of the whole change so far', () => {
+  const d = toy(), seen = join(TMP_ROOT, `fb-${Date.now()}`); mkdirSync(seen);
+  step(d, `cp "$PW_FEEDBACK" ${seen}/turn-$PW_TURN.txt; ${byTurn('echo 110 > src/score.txt', 'echo 120 > src/score.txt')}`, '--turns', '2');
+  assert.match(readFileSync(join(seen, 'turn-1.txt'), 'utf8'), /^Turn 1 of 2\..*\nNothing is measured yet\./s);
+  const two = readFileSync(join(seen, 'turn-2.txt'), 'utf8');
+  assert.match(two, /After turn 1:\n  score: 100 at the start, 110 now \(better\)/); assert.match(two, /As it stands this would be kept/);
+});
+test('turns: a gamed turn makes no win at a later one, and the run is put back as gamed', () => {
+  const d = toy(), base = head(d);
+  const r = step(d, byTurn('echo 50 > evals/bonus.txt', 'echo 110 > src/score.txt'), '--turns', '2');
+  assert.equal(r.code, 2, r.err); assert.equal(head(d), base); assert.equal(read(d, 'evals/bonus.txt'), '0'); assert.ok(clean(d));
+  assert.deepEqual(record(d).filter((l) => l.result === 'turn').map((l) => l.standing), ['gamed', 'gamed']);
+});
+test('turns: patience ends the run once there is a best and no new best for that many turns', () => {
+  const d = toy();
+  const r = step(d, byTurn('echo 110 > src/score.txt', 'echo a > src/a.txt', 'echo b > src/a.txt', 'echo 130 > src/score.txt'), '--turns', '4', '--patience', '2');
+  assert.equal(r.code, 0, r.err); assert.equal(at(d, 'src/score.txt'), '110', 'turn 4 never ran'); assert.match(r.out, /2 turns in a row with no new best/);
+  assert.equal(record(d).at(-1).turns, 3);
+});
+test('turns: a turn cut off before it saved anything does not end the run, and the next turn is told', () => {
+  const d = toy(), seen = join(TMP_ROOT, `fb-${Date.now()}-cut`); mkdirSync(seen);
+  const r = step(d, `cp "$PW_FEEDBACK" ${seen}/turn-$PW_TURN.txt; ${byTurn('exit 124', 'echo 110 > src/score.txt')}`, '--turns', '3');
+  assert.equal(r.code, 0, r.err); assert.equal(at(d, 'src/score.txt'), '110');
+  assert.match(readFileSync(join(seen, 'turn-2.txt'), 'utf8'), /turn 1 ended with code 124 and changed nothing on disk/);
+});
+test('turns: a contract change at one turn stands against the start, the next turn is told, and a later turn that puts it back can be kept', () => {
+  const d = open(), seen = join(TMP_ROOT, `fb-${Date.now()}-con`); mkdirSync(seen);
+  const r = step(d, `cp "$PW_FEEDBACK" ${seen}/turn-$PW_TURN.txt; ${byTurn(`${GOOD}; ${addMeasure}`, 'git checkout -q -- promptwheel.config.json')}`, '--turns', '3');
+  assert.equal(r.code, 0, r.err); assert.equal(at(d, 'src/score.txt'), '110'); assert.doesNotMatch(at(d, 'promptwheel.config.json'), /notes/);
+  assert.match(readFileSync(join(seen, 'turn-2.txt'), 'utf8'), /THE CONTRACT WAS CHANGED at turn 1/);
+  assert.deepEqual(record(d).filter((l) => l.result === 'turn').map((l) => l.standing).slice(0, 2), ['contract', 'win']);
+});
+test('turns: --turns and --patience take whole numbers of 1 or more', () => {
+  const d = toy();
+  for (const bad of [['--turns', '0'], ['--turns', 'x'], ['--turns', '1.5'], ['--patience', '0']]) {
+    const r = step(d, GOOD, ...bad); assert.equal(r.code, 64, bad.join(' ')); assert.match(r.err, /whole number/);
+  }
+  assert.equal(read(d, 'src/score.txt'), '100');
+});
+test('turns: an interrupt keeps a best turn that had passed its check', async () => {
+  const d = toy(), base = head(d);
+  const child = spawn(process.execPath, [RIG, '--turns', '5', '--attempt', byTurn(GOOD, `touch ${d}.turn2; sleep 30`)], { cwd: d, env: ENV, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+  let out = ''; child.stdout.on('data', (x) => { out += x; });
+  for (let i = 0; i < 400 && !existsSync(`${d}.turn2`); i++) await new Promise((res) => setTimeout(res, 50));
+  process.kill(-child.pid, 'SIGINT');
+  const code = await new Promise((res) => child.on('exit', (c) => res(c)));
+  assert.equal(code, 0, out); assert.equal(git(d, 'rev-parse', 'HEAD~1'), base); assert.equal(at(d, 'src/score.txt'), '110'); assert.ok(clean(d));
+  assert.match(out, /stopped at turn 2/);
+});
