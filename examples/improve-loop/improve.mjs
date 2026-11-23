@@ -220,7 +220,7 @@ const quiet = { GIT_CONFIG_COUNT: String(k + 2), [`GIT_CONFIG_KEY_${k}`]: 'core.
 const restored = new Set(), refsLost = [];   // which of the loop's own files the attempt touched, and what could not be put back
 const wrote = new Set();                     // the refs under refs/improve that this run of the step put there
 let asks = 0;   // how often the gate was asked in this try: what the try cost
-const putBack = () => { git('reset', '-q', '--hard', base); git('clean', '-qfd'); };
+const putBack = () => { git('reset', '-q', '--hard', base, '--'); git('clean', '-qfd'); };   // `--`: a file named as that commit would make git refuse
 const note = (result, why, extra = {}) => {
   // One rule, kept here because every line is written here: refs/improve/<n> holds a change exactly when line n names
   // one, and it is that change. The report holds the record to this rule, and says "not whole" when it is broken.
@@ -293,7 +293,7 @@ const leftBranch = () => {
 };
 const foldOrRefuse = () => {
   const now = git('rev-parse', 'HEAD');
-  if (now !== base && holds('merge-base', '--is-ancestor', base, now)) git('reset', '-q', base);   // its commits become a working change, judged like any other
+  if (now !== base && holds('merge-base', '--is-ancestor', base, now)) git('reset', '-q', base, '--');   // its commits become a working change, judged like any other
   else if (now !== base) {
     git('update-ref', `refs/improve/${n}`, now); wrote.add(`refs/improve/${n}`); putBack();
     const why = `the attempt moved the branch off the commit it started on. It is put back, and where the attempt left it is under refs/improve/${n}`;
@@ -321,7 +321,7 @@ const ask = (...refs) => {
   try { return JSON.parse(run.stdout); } catch { throw new Error(`could not read the gate's report (exit ${run.status}): ${(run.stderr || '').trim().slice(0, 300)}`); }
 };
 const moved = (m) => (m.after == null ? `${m.name} could not be read${m.before == null ? '' : ' after the change'}` : `${m.name} ${m.before} to ${m.after}`);
-const changedSince = (candidate) => execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', base, candidate], { encoding: 'utf8', maxBuffer: READ_MAX }).split('\0').filter(Boolean);
+const changedSince = (candidate) => execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', base, candidate, '--'], { encoding: 'utf8', maxBuffer: READ_MAX }).split('\0').filter(Boolean);
 
 // How a candidate stands against the commit the step started on: what the gate says, read with the step's rules.
 const judge = ({ files, candidate }) => {
@@ -371,7 +371,7 @@ const keep = ({ tree, candidate }, t, why, extra) => {
     if (b.status === 'regressed') { putBack(); finish('worse', `${target} was ${b.before} at its best and is ${b.after} now: under the floor`, 1, { ...extra, floor: { best: top.commit, before: b.before, after: b.after } }); }
   }
   const commit = git('commit-tree', tree, '-p', base, '-m', `improve: ${label}\n\n${why}`);
-  git('reset', '-q', '--hard', commit); git('clean', '-qfd');
+  git('reset', '-q', '--hard', commit, '--'); git('clean', '-qfd');
   if (floor) writeFileSync(bestFile, JSON.stringify(better(t.after, top.score) ? { commit, score: t.after } : top) + '\n');
   finish('kept', why, 0, { ...extra, commit });
 };

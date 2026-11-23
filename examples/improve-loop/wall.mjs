@@ -132,7 +132,7 @@ else {
     const made = git(['write-tree'], { env: index });
     rmSync(P, { recursive: true, force: true }); P = null;
     if (made !== git(['rev-parse', `${head}^{tree}`])) {
-      const changed = git(['diff-tree', '-r', '--name-only', '--no-renames', '-z', head, made]).split('\0').filter(Boolean);
+      const changed = git(['diff-tree', '-r', '--name-only', '--no-renames', '-z', head, made, '--']).split('\0').filter(Boolean);
       const unseen = hidden().filter((f) => changed.includes(f));
       if (unseen.length) leave(`these files are hidden from git in your repo, so a change to them cannot be handed back: ${unseen.join(', ')}. Nothing is handed back`, 65);
       git(['read-tree', '-m', '-u', head, made]);   // files change in your tree; a file you edited meanwhile makes this refuse

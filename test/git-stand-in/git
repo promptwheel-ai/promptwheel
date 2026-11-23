@@ -1,0 +1,3 @@
+#!/bin/sh
+# A stand-in for git that a test puts first on the path: see stand-in.mjs beside it.
+exec node "$(dirname "$0")/stand-in.mjs" "$@"

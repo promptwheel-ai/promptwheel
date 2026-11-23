@@ -27,7 +27,12 @@ const git = (args, cwd) => execFileSync('git', args, { cwd, encoding: 'utf8' }).
 // above 127, a double quote, a backslash or a tab comes back inside quotes with the bytes escaped
 // ("src/a\303\261adir.js", git's core.quotePath), and that string is no file: it matches no protected path and no
 // pathspec, so an honest fix in such a file read "gamed" and a new workflow with such a name was no protected path.
-const gitNames = (args, cwd) => execFileSync('git', [...args, '-z'], { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).split('\0').filter(Boolean);
+// A REVISION IS FOLLOWED BY `--`, IN EVERY GIT CALL THAT NAMES ONE. Without it git has to guess whether a word is a
+// revision or a path, and refuses when a file of that name exists ("ambiguous argument 'HEAD': both revision and
+// filename"). Until 0.8.19 a commit that added a file named HEAD, or one named as its base, stopped this program with an
+// error where the pull-request action calls it, for an honest commit too (proof-bench/no-baseline, P2 to P5, 2026-11-23).
+// So -z goes right after the command and never at the end, where it would be read as a path.
+const gitNames = (args, cwd) => execFileSync('git', [args[0], '-z', ...args.slice(1)], { cwd, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }).split('\0').filter(Boolean);
 // The engine's own git calls run no hook, no fsmonitor command, and read no replace object, whatever the repo's or the
 // person's git settings say. A hook an agent planted ran inside the loop's own git calls and moved the branch after the
 // keep, an fsmonitor command ran in every later step, and a replace ref swapped the object the check read for an older
@@ -579,7 +584,7 @@ function checkMandates(repo, base, head, cfg, baseMandates) {
   const mandates = [...headList.filter((m) => m && baseNames.has(m.name)), ...kept];
   if (!mandates.length) return [];
   let changed = [];
-  try { changed = gitNames(['diff', '--name-only', '--no-renames', base, head], repo); } catch { return []; }   // --no-renames: a move out of a protected path also touches it
+  try { changed = gitNames(['diff', '--name-only', '--no-renames', base, head, '--'], repo); } catch { return []; }   // --no-renames: a move out of a protected path also touches it
   const out = [];
   for (const m of mandates) {
     const pats = (Array.isArray(m.paths) ? m.paths : []).filter((s) => typeof s === 'string' && s.trim());
@@ -646,7 +651,7 @@ function runnerScripts(repo, base, cfg) {
   return out;
 }
 function changedSourcePaths(repo, base, head, isEval = () => false, cfg = null) {
-  const all = gitNames(['diff', '--name-only', '--no-renames', base, head], repo);
+  const all = gitNames(['diff', '--name-only', '--no-renames', base, head, '--'], repo);
   const runners = cfg ? runnerScripts(repo, base, cfg) : new Set();
   const nonSrc = (p) => isNonSource(p) || isEval(p) || runners.has(p) || pyTestModule(repo, base, head, p);
   return { source: all.filter((p) => !nonSrc(p)), nonSource: all.filter(nonSrc) };
@@ -972,7 +977,7 @@ function blobHashAt(repo, ref, path) {
 function changedEvaluatorPaths(repo, base, head, cfg) {
   const isEval = evaluatorMatcher(cfg);
   let changed = [];
-  try { changed = gitNames(['diff', '--name-only', '--no-renames', base, head], repo).filter(isEval); }
+  try { changed = gitNames(['diff', '--name-only', '--no-renames', base, head, '--'], repo).filter(isEval); }
   catch { return []; }
   return changed.map((p) => ({ path: p, base: blobHashAt(repo, base, p), head: blobHashAt(repo, head, p) }))
     .filter((e) => e.base !== e.head);
@@ -1024,7 +1029,7 @@ const reasonNames = (reason, label) => new RegExp(`(^|[^A-Za-z0-9_-])${label.rep
 // A reason written in a commit. Every commit of the change is read (base..head), not the last one alone: a fix run
 // that adds a commit must not lose the reason an earlier commit of the same change gave. With no base, the head commit.
 function readAllowTrailer(repo, ref, base) {
-  const log = (args) => { try { return execFileSync('git', ['log', '--no-show-signature', '--format=%B', ...args], { cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return ''; } };
+  const log = (args) => { try { return execFileSync('git', ['log', '--no-show-signature', '--format=%B', ...args, '--'], { cwd: repo, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] }); } catch { return ''; } };
   const msg = (base && log([`${base}..${ref}`])) || log(['-1', ref]);
   const found = [...msg.matchAll(/^[ \t]*(?:Promptwheel-Allow|Sawbuck-Allow)[ \t]*:[ \t]*(\S.*?)[ \t]*$/gim)].map((m) => m[1].trim()).filter(Boolean);
   return found.length ? { reason: [...new Set(found)].join(' | ').slice(0, 300) } : null;
@@ -1104,7 +1109,7 @@ function readChange(repo, base, head, defs, cfg = {}) {
   if (!trip.length) return out;
   let dir = '';
   try {
-    const raw = execFileSync('git', ['diff-tree', '-r', '-z', '--raw', '--no-renames', '--no-abbrev', base, head], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1024 * 1024 * 1024 }).split('\0');
+    const raw = execFileSync('git', ['diff-tree', '-r', '-z', '--raw', '--no-renames', '--no-abbrev', base, head, '--'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1024 * 1024 * 1024 }).split('\0');
     const ends = readableEndings(trip), isFile = (mode) => mode === '100644' || mode === '100755';
     const wants = [];
     for (let i = 0; i + 1 < raw.length; i += 2) {
@@ -1151,14 +1156,14 @@ const PER_FILE = new Set(['test_count', 'assertions']);
 function lostInFiles(repo, base, head, files, def, seen = {}) {
   const worse = (fellIn(files, def) || []).filter((w) => w.before > 0);
   if (!worse.length) return null;
-  const diff = (args) => execFileSync('git', ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '-U0', base, head, ...args], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1024 * 1024 * 1024 }).split('\n');
+  const diff = (paths) => execFileSync('git', ['diff', '--no-ext-diff', '--no-textconv', '--no-color', '--no-renames', '-U0', base, head, '--', ...paths], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1024 * 1024 * 1024 }).split('\n');
   const pick = (lines, sign) => lines.filter((l) => l[0] === sign && l[1] !== sign).map((l) => l.slice(1).trim()).filter((l) => l.length >= 12);
   const tally = (lines) => { const t = new Map(); for (const l of lines) t.set(l, (t.get(l) || 0) + 1); return t; };
   try {
     if (!seen.added) seen.added = tally(pick(diff([]), '+'));   // every added line of the change, read once for both counts
     const out = [];
     for (const w of worse) {
-      const own = diff(['--', `:(literal)${w.file}`]);
+      const own = diff([`:(literal)${w.file}`]);
       const gone = pick(own, '-'), back = tally(pick(own, '+'));
       const moved = gone.filter((l) => (seen.added.get(l) || 0) - (back.get(l) || 0) > 0).length;   // it turns up in another file
       if (gone.length && moved * 2 >= gone.length) continue;
@@ -1613,7 +1618,7 @@ function recordRun(repo, report, cfg, extra = {}) {
   try {
     const p = report.provenance || {};
     const base = p.baseSha || report.base, head = p.headSha || report.head;
-    let names = []; try { names = gitNames(['diff', '--name-only', '--no-renames', base, head], repo); } catch { /* a ref that is gone */ }
+    let names = []; try { names = gitNames(['diff', '--name-only', '--no-renames', base, head, '--'], repo); } catch { /* a ref that is gone */ }
     const row = {
       ts: new Date().toISOString(), base: report.base, head: report.head, mode: report.mode, verdict: report.verdict,
       cohort: extra.cohort ?? (process.env.CI ? 'ci' : 'local'),
@@ -1918,7 +1923,7 @@ function backfill(argv) {
   if (!hasConfigFile(repo) && !args.noAuto) config = autoConfig(repo);
   const listArgs = ['rev-list', '--no-merges'];
   if (args.since) listArgs.push(`${args.since}..HEAD`); else listArgs.push('-n', String(args.n ?? 30), 'HEAD');
-  const commits = git(listArgs, repo).split('\n').filter(Boolean).reverse();   // oldest first, so the record stays in the order things happened
+  const commits = git([...listArgs, '--'], repo).split('\n').filter(Boolean).reverse();   // oldest first, so the record stays in the order things happened
   if (!commits.length) bad('promptwheel backfill: no commits to read');
   const seen = new Set(readRecord(repo).filter((r) => r.cohort === 'backfill').map((r) => r.head));
   const cfg = config ?? loadConfig(repo);
@@ -1927,7 +1932,7 @@ function backfill(argv) {
   for (const c of commits) {
     try { git(['rev-parse', '--verify', '-q', `${c}~1`], repo); } catch { skipped++; continue; }   // the first commit has no parent
     if (seen.has(short(repo, c))) { skipped++; continue; }                                          // already in the record
-    const subj = git(['log', '-1', '--format=%s', c], repo);
+    const subj = git(['log', '-1', '--format=%s', c, '--'], repo);
     const type = /^(feat|fix|docs|test|chore|refactor|perf|ci|build|style)\b/i.exec(subj)?.[1]?.toLowerCase();
     let report;
     try { report = gate(repo, { base: `${c}~1`, head: c, repeat: args.repeat, detectGaming: args.dgExplicit ? args.detectGaming : false, config }); }
@@ -2598,7 +2603,7 @@ const TESTS_READ_COMMITS = 60, TESTS_READ_FILES = 2000, TESTS_READ_BLOB = 2 * 10
 function testsAddedAt(repo, base, head, cache) {
   // the tests `head` adds over `base`, by name: Map name -> how many more of it. null: this step cannot be read.
   const g = (args, input) => execFileSync('git', args, { cwd: repo, input, maxBuffer: 1 << 30, stdio: ['pipe', 'pipe', 'ignore'] });
-  let parts; try { parts = g(['diff', '--name-status', '-z', '--no-renames', base, head]).toString('utf8').split('\0'); } catch { return null; }
+  let parts; try { parts = g(['diff', '--name-status', '-z', '--no-renames', base, head, '--']).toString('utf8').split('\0'); } catch { return null; }
   const changed = [];
   for (let i = 0; i + 1 < parts.length; i += 2) { const f = parts[i + 1]; if (TESTS_READ.has(testExt(f)) && !f.includes('\n')) changed.push({ st: parts[i][0], f }); }
   if (changed.length > TESTS_READ_FILES) return null;
@@ -2643,10 +2648,10 @@ export function testsTakenOut(repo, steps) {
 function changeSteps(repo, base, head) {
   const g = (...a) => { try { return execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return null; } };
   const b = g('rev-parse', '--verify', '--quiet', `${base}^{commit}`), h = g('rev-parse', '--verify', '--quiet', `${head}^{commit}`); if (!b || !h) return null;
-  const ps = (g('rev-list', '--parents', '-n', '1', h) || '').split(' ');
+  const ps = (g('rev-list', '--parents', '-n', '1', h, '--') || '').split(' ');
   const tip = ps.length === 3 && ps[1] === b ? ps[2] : h;
   const fork = g('merge-base', b, tip); if (!fork) return null;
-  const list = (g('rev-list', '--first-parent', '--parents', '--reverse', `${fork}..${tip}`) || '').split('\n').filter(Boolean).map((l) => l.split(' '));
+  const list = (g('rev-list', '--first-parent', '--parents', '--reverse', `${fork}..${tip}`, '--') || '').split('\n').filter(Boolean).map((l) => l.split(' '));
   if (list.length < 2) return null;
   let from = fork; const steps = [];
   for (const [c, ...parents] of list) { if (parents.length > 1) from = g('merge-base', b, c) || from; steps.push({ base: from, head: c }); }
