@@ -49,17 +49,27 @@ const inRun = (t) => begun.find((b) => t.n >= b.from && t.n <= (b.done ? b.done.
 // ---------------------------------------------------------------- what happened
 const count = (list) => { const c = {}; for (const t of list) c[t.result] = (c[t.result] || 0) + 1; return c; };
 const metric = (t, name) => (t.metrics || []).find((m) => m.name === name);
-const sum = (list, target) => {
-  const judged = list.filter((t) => metric(t, target)), kept = list.filter((t) => t.result === 'kept');
-  return { tries: list.length, kept: kept.length, results: count(list), asks: list.reduce((n, t) => n + (t.asks || 0), 0),
-    start: judged.length ? metric(judged[0], target).before : null, now: kept.length ? metric(kept[kept.length - 1], target).after : (judged.length ? metric(judged[0], target).before : null),
+// The target a try was made with is on its line. A line from before the step wrote it was made under `score`.
+const targetOf = (t) => t.target || 'score';
+// Where a target stood before the first try that read it, and where the last kept try that read it left it.
+const stands = (list, target) => {
+  const judged = list.filter((t) => metric(t, target)), kept = judged.filter((t) => t.result === 'kept');
+  const start = judged.length ? metric(judged[0], target).before : null;
+  return { target, start, now: kept.length ? metric(kept[kept.length - 1], target).after : start };
+};
+// A run has one target, its plan's. Tries made by hand each name their own, so there can be several: the first is
+// `target`, `start` and `now` as before, and `targets` lists them all when there is more than one.
+const sum = (list, targets) => {
+  const per = targets.map((target) => stands(list, target));
+  return { target: per[0].target, tries: list.length, kept: list.filter((t) => t.result === 'kept').length, results: count(list), asks: list.reduce((n, t) => n + (t.asks || 0), 0),
+    start: per[0].start, now: per[0].now, ...(per.length > 1 ? { targets: per } : {}),
     touched: list.filter((t) => t.restored).map((t) => ({ n: t.n, what: t.restored })) };
 };
 const groups = [...begun.map((b) => ({ run: b, list: tries.filter((t) => inRun(t) === b) })), { run: null, list: tries.filter((t) => !inRun(t)) }].filter((g) => g.run || g.list.length);
 const report = { whole: wrong.length === 0, wrong, runs: groups.map(({ run, list }) => ({
   ...(run ? { run: run.run, plan: run.planPath, planBlob: run.planBlob, arm: run.arm || null, base: run.base, began: run.at, ended: run.done ? run.done.ended : null, planned: run.plan.tries, mayChange: run.plan.mayChange, wall: run.plan.wall !== false,
     ...(run.heldOut !== undefined || (run.done && run.done.heldOut !== undefined) ? { heldOut: { start: run.heldOut ?? null, end: run.done ? run.done.heldOut ?? (runs.find((r) => r.run === run.run && r.heldOutLate !== undefined) || {}).heldOutLate ?? null : null } } : {}) } : { run: null }),
-  target: run ? run.plan.target : 'score', ...sum(list, run ? run.plan.target : 'score'),
+  ...sum(list, run ? [run.plan.target] : [...new Set(list.map(targetOf))]),
   list: list.map((t) => ({ n: t.n, result: t.result, why: t.why, label: t.label, ...(t.candidate ? { change: `refs/improve/${t.n}` } : {}), ...(t.commit ? { commit: t.commit } : {}) })),
 })) };
 // It prints, sets its exit code and ends by itself, so everything printed is written first. It used to end with
@@ -74,7 +84,7 @@ function words() {
     console.log(r.run ? `run ${r.run}: plan ${r.plan} (${r.planBlob.slice(0, 12)})${r.arm ? `, arm ${r.arm}` : ''}, began ${r.began.slice(0, 16).replace('T', ' ')} at ${r.base.slice(0, 12)}` : 'tries made outside a run (the step was called by hand):');
     if (r.run) console.log(`  ${r.tries} of ${r.planned} tries. Ended: ${ENDED[r.ended] || 'not ended'}. May change: ${r.mayChange.join(', ')}. Wall: ${r.wall ? 'on' : 'off'}.`);
     console.log(`  kept ${r.kept} of ${r.tries}${r.tries ? ` (${Math.round((100 * r.kept) / r.tries)}%)` : ''}${Object.entries(r.results).filter(([k]) => k !== 'kept').map(([k, v]) => ` · ${k} ${v}`).join('')}`);
-    if (r.start != null) console.log(`  ${r.target}: ${r.start} at the start, ${r.now} now`);
+    for (const s of r.targets || [r]) if (s.start != null) console.log(`  ${s.target}: ${s.start} at the start, ${s.now} now`);
     if (r.heldOut) console.log(`  held-out: ${r.heldOut.start ?? 'could not be read'} at the start, ${r.heldOut.end ?? (['tries', 'flat', 'no room'].includes(r.ended) ? 'could not be read' : 'not measured, the run did not finish')} at the end`);
     console.log(`  the gate was asked ${r.asks} ${r.asks === 1 ? 'time' : 'times'}`);
     for (const t of r.touched) console.log(`  try ${t.n} touched the loop's own files, which were put back: ${t.what.join(', ')}`);

@@ -221,6 +221,12 @@ const restored = new Set(), refsLost = [];   // which of the loop's own files th
 let asks = 0;   // how often the gate was asked in this try: what the try cost
 const putBack = () => { git('reset', '-q', '--hard', base); git('clean', '-qfd'); };
 const note = (result, why, extra = {}) => {
+  // One rule, kept here because every line is written here: refs/improve/<n> holds a change exactly when line n names
+  // one, and it is that change. The closing line of a run over turns names its best turn's change, so that change is
+  // readable under the closing line's number too. A line that names no change (a stop while a check ran) leaves none
+  // behind under its number. The report holds the record to this rule, and says "not whole" when it is broken.
+  const ref = `refs/improve/${n}`;
+  if (extra.candidate) git('update-ref', ref, extra.candidate); else if (holds('rev-parse', '-q', '--verify', ref)) git('update-ref', '-d', ref);
   const line = { n, at: new Date().toISOString(), label, base, target, result, why, ...extra, ...(asks ? { asks } : {}), ...(restored.size ? { recordPutBack: true, restored: [...restored] } : {}), ...(refsLost.length ? { refsLost } : {}) };
   appendFileSync(record, JSON.stringify(line) + '\n');
   n++;
@@ -479,7 +485,9 @@ try {
     const room = READ_MAX >= 1048576 ? `${Math.round(READ_MAX / 1048576)} MB` : `${READ_MAX} bytes`;
     finish('nothing', `the change is too wide to read: more than ${room} came from git or the gate at once, so it was not measured and is put back`, 3);
   }
-  // anything this did not plan for: put the attempt back and say so, with the code for "could not run"
+  // anything this did not plan for: put the attempt back and say so, with the code for "could not run". No line is
+  // written for it, so the change is not left under a number that no line has.
   try { putBack(); } catch { /* the message below is what matters */ }
+  try { if (holds('rev-parse', '-q', '--verify', `refs/improve/${n}`)) git('update-ref', '-d', `refs/improve/${n}`); } catch { /* the message below is what matters */ }
   die(String(e.message || e).split('\n').filter((l) => l.trim()).slice(0, 3).join(' '));
 }

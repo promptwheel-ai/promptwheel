@@ -4688,6 +4688,25 @@ test('improve is a door onto the loop step: its record, its line and its exit co
   r = pw2(d, ['improve', '--target', 'todos', '--attempt', 'true', '--json']); assert.equal(r.code, 3); assert.equal(JSON.parse(r.out).result, 'nothing');
   r = pw2(d, ['improve', '--target', 'nope', '--attempt', 'echo x > y.txt']); assert.equal(r.code, 64); assert.match(r.err, /no metric named "nope"/);
 });
+// The README's first loop example, run as it is written there, and then the report a person asks for next. Found by
+// the rehearsal of 0.2.5 from the packed copy (2026-11-22): the line printed what the README says and `improve --report`
+// after it ended with a TypeError. The line and what it prints are read from the README, so the page is held to them.
+// (The line uses `sed -i` with no suffix, as other tests here do: the sed on a Mac does not take that form. Lead L127.)
+test('the README\'s own improve line, as written, on a repo with one failing test and no config: what it prints, and then --report', () => {
+  const readme = readFileSync(join(dirname(ENGINE), '..', 'README.md'), 'utf8');
+  const m = readme.match(/```\npromptwheel improve --attempt "(.+)"\n\n# ( 1 {2}kept .+)\n```/);
+  assert.ok(m, 'the README gives the line and what it prints');
+  const d = mkdtempSync(join(tmpdir(), 'pw-readme-'));
+  for (const a of [['init', '-q', '-b', 'main', '.'], ['config', 'user.email', 't@example.com'], ['config', 'user.name', 't'], ['config', 'commit.gpgsign', 'false']]) execFileSync('git', a, { cwd: d });
+  mkdirSync(join(d, 'src')); mkdirSync(join(d, 'test'));
+  writeFileSync(join(d, 'package.json'), '{"name":"r","scripts":{"test":"node --test"}}\n'); writeFileSync(join(d, 'src', 'add.js'), 'exports.add = (a, b) => a - b;\n');
+  writeFileSync(join(d, 'test', 'add.test.js'), "const assert = require('node:assert');\nconst { test } = require('node:test');\ntest('add', () => { assert.equal(require('../src/add.js').add(2, 2), 4); });\n");
+  commitAll(d, 'base');
+  const r = pw2(d, ['improve', '--attempt', m[1]]);
+  assert.equal(r.code, 0, r.out + r.err); assert.equal(r.out, m[2] + '\n', 'the line the README shows');
+  const rep = pw2(d, ['improve', '--report']);
+  assert.equal(rep.code, 0, rep.out + rep.err); assert.match(rep.out, /\n {2}tests_pass: 0 at the start, 1 now\n/); assert.match(rep.out, /whole: yes/);
+});
 test('improve asks the engine it ships with, whatever PROMPTWHEEL says, and hands the attempt your environment', () => {
   const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
   const seen = join(mkdtempSync(join(tmpdir(), 'pw-door-')), 'env.txt');

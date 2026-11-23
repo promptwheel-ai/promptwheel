@@ -58,7 +58,24 @@ function toy(over = {}) {
   git(d, 'add', '-A'); git(d, 'commit', '-q', '-m', 'start: score 100, cost 100');
   return d;
 }
-const run = (d, args, env = {}) => { const r = spawnSync(process.execPath, [RIG, ...args], { cwd: d, encoding: 'utf8', env: { ...ENV, ...env }, timeout: 120000 }); return { code: r.status, out: r.stdout, err: r.stderr }; };
+// One rule every scenario in this file is held to, whatever else it tests: after the step has run, refs/improve/<n>
+// holds a change exactly when line n of the record names one, and it is that change. The loop's report reads the two
+// as "not whole" when they differ. Found 2026-11-22, by running the report after the guide's own lines: a run over
+// turns that kept its best turn, a try that could not be judged, and a stop while a check ran each left them apart,
+// and no scenario here had read both.
+const agree = (d) => {
+  let gitDir, refs;
+  try {
+    gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: d, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    refs = Object.fromEntries(execFileSync('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/improve'], { cwd: d, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\n').filter(Boolean).map((l) => l.split(' ')));
+  } catch { return; }   // no repository here: nothing to hold
+  const f = join(gitDir, 'improve', 'attempts.jsonl'); let lines;
+  try { lines = existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []; } catch { return; }   // a record a test broke on purpose
+  if (lines.some((l) => l.refsLost)) return;   // the step said itself that a ref could not be put back
+  for (const l of lines) if (l.candidate) assert.equal(refs[`refs/improve/${l.n}`], l.candidate, `line ${l.n} (${l.result}) names a change, and refs/improve/${l.n} does not hold it`);
+  for (const ref of Object.keys(refs)) assert.ok(lines.some((l) => `refs/improve/${l.n}` === ref && l.candidate), `${ref} holds a change, and the record has no line for it`);
+};
+const run = (d, args, env = {}) => { const r = spawnSync(process.execPath, [RIG, ...args], { cwd: d, encoding: 'utf8', env: { ...ENV, ...env }, timeout: 120000 }); agree(d); return { code: r.status, out: r.stdout, err: r.stderr }; };
 const step = (d, attempt, ...flags) => run(d, ['--attempt', attempt, ...flags]);
 const banded = () => toy({ score: { noise: 10 } });
 // the same small trade again and again: 5 off the score, 10 off the cost. Returns each step's exit code.
@@ -261,6 +278,7 @@ test('loop: stopped in the middle of an attempt (Ctrl-C), it puts the attempt ba
   assert.equal(await ended, 64, 'the step ends by itself with the code for "could not run", so a while loop stops');
   assert.equal(head(d), base); assert.equal(read(d, 'src/score.txt'), '100'); assert.ok(!existsSync(join(d, 'src/new.txt'))); assert.ok(clean(d));
   assert.deepEqual(record(d).map((x) => x.result), ['stopped']);
+  agree(d);
 });
 test('loop: an attempt that commits its own bad work is still judged, and the commit is taken back', () => {
   const d = toy(), base = head(d);
@@ -884,6 +902,7 @@ test('mark: a run killed outright leaves its mark, the next run names the commit
   assert.equal(r.code, 64); assert.match(r.err, new RegExp(`started at ${base.slice(0, 12)} did not finish`)); assert.match(r.err, new RegExp(`git reset --hard ${base}`));
   git(d, 'reset', '-q', '--hard', base); git(d, 'clean', '-qfd');
   r = step(d, GOOD); assert.equal(r.code, 0, r.err); assert.ok(!existsSync(mark), 'once the tree is clean the old mark goes, and a finished run leaves none');
+  agree(d);
 });
 test('mark: a second run in the same repo while the first is going is refused', () => {
   const d = toy(); mkdirSync(join(d, '.git', 'improve'), { recursive: true });
@@ -960,6 +979,7 @@ test('turns: an interrupt keeps a best turn that had passed its check', async ()
   const code = await new Promise((res) => child.on('exit', (c) => res(c)));
   assert.equal(code, 0, out); assert.equal(git(d, 'rev-parse', 'HEAD~1'), base); assert.equal(at(d, 'src/score.txt'), '110'); assert.ok(clean(d));
   assert.match(out, /stopped at turn 2/);
+  agree(d);
 });
 test('target: a target that counts down is kept when it falls, and the line says so', () => {
   const d = toy(), r = step(d, 'echo 90 > src/cost.txt', '--target', 'cost');
@@ -1024,6 +1044,7 @@ test('turns: Ctrl-C ends the run even when the attempt catches it and ends by it
   process.kill(-child.pid, 'SIGINT');
   const code = await new Promise((res) => child.on('exit', (c) => res(c)));
   assert.equal(code, 0, out); assert.match(out, /stopped at turn 2/); assert.equal(at(d, 'src/score.txt'), '110', 'turn 3 never ran'); assert.equal(git(d, 'rev-parse', 'HEAD~1'), base);
+  agree(d);
 });
 test('turns: a run stopped before any turn won puts the tree back', async () => {
   const d = toy(), base = head(d);
@@ -1033,6 +1054,7 @@ test('turns: a run stopped before any turn won puts the tree back', async () => 
   process.kill(-child.pid, 'SIGINT');
   const code = await new Promise((res) => child.on('exit', (c) => res(c)));
   assert.equal(code, 64, err); assert.match(err, /stopped .*at turn 1/); assert.equal(head(d), base); assert.ok(!existsSync(join(d, 'src', 'new.txt'))); assert.ok(clean(d));
+  agree(d);
 });
 test('turns: the next turn is told a measure that got worse is worse', () => {
   const d = toy(), seen = join(TMP_ROOT, `fb-${Date.now()}-worse`); mkdirSync(seen);
@@ -1056,6 +1078,7 @@ test('mark: a second run while the first is going is refused, by the first run\'
   const r = step(d, GOOD);
   process.kill(-child.pid, 'SIGINT'); await new Promise((res) => child.on('exit', res));
   assert.equal(r.code, 64); assert.match(r.err, new RegExp(`another run of the loop is going in this repo \\(process ${child.pid}\\)`));
+  agree(d);
 });
 test('mark: a run that could not run to its end leaves no mark behind', () => {
   const d = toy(), r = step(d, GOOD, '--target', 'nope');

@@ -8,7 +8,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ENV, NODE, TMP_ROOT, WALL, STEP, at, clean, git, head, put, q, read, record, run, step, toy, walled } from './improve-loop-helpers.mjs';
+import { agree, at, clean, git, head, put, q, read, record, run, step, toy, walled, ENV, NODE, STEP, TMP_ROOT, WALL } from './improve-loop-helpers.mjs';
 
 const wall = (d, attempt, ...flags) => run(WALL, d, [...flags, '--', attempt]);
 const out = (name) => join(TMP_ROOT, `${name}-${Math.random().toString(36).slice(2)}`);   // where an attempt can leave a note for the test
@@ -159,6 +159,7 @@ test('wall + step: stopped with Ctrl-C, nothing comes back, the step notes it, a
   assert.equal(await Promise.race([done, sleep(15000).then(() => 'still running')]), 64);
   assert.ok(clean(d)); assert.equal(read(d, 'src/cost.txt'), '100'); assert.equal(record(d)[0].result, 'stopped');
   await sleep(200); assert.deepEqual(copies(), []);
+  agree(d);
 });
 
 // ------------------------------------------------------------------ what it refuses, and what it says

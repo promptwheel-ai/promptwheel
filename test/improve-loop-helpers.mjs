@@ -57,8 +57,24 @@ export function toy(over = {}) {
   return d;
 }
 
+// One rule every scenario is held to, whatever else it tests: after the step or a run has ended, refs/improve/<n> holds
+// a change exactly when line n of the record names one, and it is that change. The report reads the two as "not
+// whole" when they differ. (Found 2026-11-22 by running the report after the guide's own lines.)
+export const agree = (d) => {
+  let gitDir, refs;
+  try {
+    gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: d, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    refs = Object.fromEntries(execFileSync('git', ['for-each-ref', '--format=%(refname) %(objectname)', 'refs/improve'], { cwd: d, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).split('\n').filter(Boolean).map((l) => l.split(' ')));
+  } catch { return; }   // no repository here: nothing to hold
+  const f = join(gitDir, 'improve', 'attempts.jsonl'); let rows;
+  try { rows = existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []; } catch { return; }   // a record a test broke on purpose
+  if (rows.some((l) => l.refsLost)) return;   // the step said itself that a ref could not be put back
+  for (const l of rows) if (l.candidate && refs[`refs/improve/${l.n}`] !== l.candidate) throw new Error(`line ${l.n} (${l.result}) names a change, and refs/improve/${l.n} does not hold it`);
+  for (const ref of Object.keys(refs)) if (!rows.some((l) => `refs/improve/${l.n}` === ref && l.candidate)) throw new Error(`${ref} holds a change, and the record has no line for it`);
+};
 export const run = (file, d, args, env = {}) => {
   const r = spawnSync(NODE, [file, ...args], { cwd: d, encoding: 'utf8', env: { ...ENV, ...env }, timeout: 120000 });
+  if (file === STEP || file === RUN) agree(d);
   return { code: r.status, out: r.stdout, err: r.stderr, signal: r.signal };
 };
 export const step = (d, attempt, ...flags) => run(STEP, d, ['--attempt', attempt, ...flags]);

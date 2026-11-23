@@ -266,6 +266,57 @@ test('report: it says which tries touched the loop\'s own files', () => {
   const d = planned([`git tag sneaky; ${WIN}`], { wall: false }); go(d);
   assert.match(report(d).out, /try 1 touched the loop's own files, which were put back: refs/);
 });
+// Found by the rehearsal of 0.2.5 in a container (2026-11-22), from the packed copy: the README's own improve line
+// was kept, and `improve --report` after it ended with a TypeError. Every test of the report had made its tries under
+// a target called score, and the report took that name for every try made by hand.
+test('report: tries made by hand are read under the target each was made with, whatever it is called', () => {
+  const d = toy({ score: { name: 'tests_pass' } });
+  assert.equal(step(d, WIN, '--target', 'tests_pass').code, 0);
+  let r = report(d);
+  assert.equal(r.code, 0, r.err + r.out); assert.match(r.out, /tries made outside a run[\s\S]*\n {2}tests_pass: 100 at the start, 110 now\n[\s\S]*whole: yes/);
+  assert.equal(step(d, 'echo 90 > src/cost.txt', '--target', 'cost').code, 0);   // a second target, by hand
+  assert.equal(step(d, NOTHING, '--target', 'tests_pass').code, 3);
+  r = report(d);
+  assert.equal(r.code, 0, r.err + r.out); assert.match(r.out, /\n {2}tests_pass: 100 at the start, 110 now\n {2}cost: 100 at the start, 90 now\n/);
+  const j = JSON.parse(report(d, '--json').out).runs[0];
+  assert.equal(j.target, 'tests_pass'); assert.deepEqual(j.targets, [{ target: 'tests_pass', start: 100, now: 110 }, { target: 'cost', start: 100, now: 90 }]);
+});
+test('report: a line written before the step recorded its target is read as score, and a kept line with no reading of the target does not end the report', () => {
+  const rewrite = (d, fn) => { const f = join(d, '.git/improve/attempts.jsonl'); writeFileSync(f, readFileSync(f, 'utf8').split('\n').filter(Boolean).map((l) => { const e = JSON.parse(l); fn(e); return JSON.stringify(e); }).join('\n') + '\n'); };
+  const old = toy(); assert.equal(step(old, WIN).code, 0); rewrite(old, (e) => { delete e.target; });
+  let r = report(old);
+  assert.equal(r.code, 0, r.err + r.out); assert.match(r.out, /\n {2}score: 100 at the start, 110 now\n/);
+  const bare = planned([WIN]); go(bare); rewrite(bare, (e) => { delete e.metrics; });
+  r = report(bare);
+  assert.equal(r.code, 0, r.err + r.out); assert.doesNotMatch(r.out, /at the start/); assert.match(r.out, /whole: yes/);
+});
+// The same day, by running the report after the guide's other lines. Each of these read "whole: no" with nothing wrong:
+// the step had left refs/improve and the record apart. The step now keeps one rule (see `note` in improve.mjs), every
+// scenario in the loop's tests is held to it (`agree` in the helpers), and these three say it in the report's words.
+test('report: after a run over turns by hand the record is whole, and the closing line\'s change is readable under its own number', () => {
+  const d = toy(), byTurn = 'case "$PW_TURN" in 1) echo 105 > src/score.txt;; 2) echo 110 > src/score.txt;; esac';
+  assert.equal(step(d, byTurn, '--turns', '2').code, 0);
+  const rows = record(d); assert.deepEqual(rows.map((l) => l.result), ['turn', 'turn', 'kept']);
+  assert.equal(rows[2].candidate, rows[1].candidate, 'the closing line names the best turn\'s change');
+  assert.equal(git(d, 'rev-parse', 'refs/improve/3'), rows[2].candidate);
+  const r = report(d);
+  assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, /\n {2}score: 100 at the start, 110 now\n[\s\S]* 3 {2}kept [\s\S]*whole: yes/);
+});
+test('report: a try that could not be judged leaves nothing under its number, so the record stays whole and the next try takes the number', () => {
+  const d = toy(); assert.equal(step(d, WIN).code, 0);
+  const typo = step(d, WIN2, '--target', 'nope');
+  assert.equal(typo.code, 64); assert.match(typo.err, /no metric named "nope"/); assert.equal(record(d).length, 1);
+  assert.equal(git(d, 'for-each-ref', '--format=%(refname)', 'refs/improve'), 'refs/improve/1');
+  let r = report(d); assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, /whole: yes/);
+  assert.equal(step(d, WIN2).code, 0); assert.deepEqual(record(d).map((l) => l.n), [1, 2]);
+  r = report(d); assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, /whole: yes/);
+});
+test('report: a plan whose target the gate does not measure ends as a try that could not run, and the report is whole', () => {
+  const d = planned([WIN], { target: 'nope' }), r = go(d);
+  assert.equal(r.code, 1); assert.match(r.err + r.out, /no metric named "nope"/); assert.equal(record(d).length, 0);
+  assert.equal(git(d, 'for-each-ref', '--format=%(refname)', 'refs/improve'), '');
+  const rep = report(d); assert.equal(rep.code, 0, rep.out + rep.err); assert.match(rep.out, /Ended: a try could not run[\s\S]*whole: yes/);
+});
 test('report: with no record at all it is exit 64, and a flag it does not know is too', () => {
   const d = toy(); assert.equal(report(d).code, 64); assert.equal(run(REPORT, TMP_ROOT, []).code, 64);
   const ran = planned([WIN]); go(ran); assert.equal(report(ran).code, 0); assert.equal(report(ran, '--jsn').code, 64);
