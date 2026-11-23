@@ -128,6 +128,8 @@ export interface CheckOptions {
   label?: string;
   /** A folder outside the repository that keeps the base's measurement between runs (`--base-cache`). A kept number is reused only for the same tree measured the same way (commands, setup, env, linked dirs, repeat count, engine version, platform), and only a clean measurement is kept. A folder inside the repository throws a `ConfigError`: a kept number the change can reach is a goalpost. */
   baseCache?: string;
+  /** The change is a pull request (`--pull-request`; the Action passes it there and only there): tests an earlier commit of it added, all gone at its head, fail the check as `tests_taken_out`, which a person's reason (`allow`) lets through. Default `false`: they are a note. */
+  pullRequest?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +272,8 @@ export interface Report {
   openerCounts?: true;
   /** In a run between two commits with more than one commit between them: an earlier commit of the change (`at`, short) added `added` tests, by name, and the change as it stands adds none. `names` holds at most ten of them, `more` how many are left out. A note for a reader, never part of a verdict. */
   testsTakenOut?: { added: number; names: string[]; more: number; at: string };
+  /** two or more test names gone over the changed files, or a file that stays lost every test (0.8.20): a note, never part of the verdict */
+  testsGone?: { gone: number; names: string[]; more: number; emptied: string[] };
   /** Present only when the `setup` command failed: at which ref, with what exit code, and its last output line. */
   setup?: { base?: SetupFailure; head?: SetupFailure };
   provenance: Provenance;
@@ -506,6 +510,7 @@ export interface NamedTest { name: string; line: number; asserts: number; skippe
 export declare function testsIn(path: string, text: string): NamedTest[];
 /** The tests an earlier step of a change added and its last step no longer adds. `steps` are the change's commits in order, each with the commit it is held against. `null` when there is nothing to say or a step cannot be read. */
 export declare function testsTakenOut(repo: string, steps: { base: string; head: string }[]): { added: number; names: string[]; more: number; at: string } | null;
+export declare function testsGone(repo: string, base: string, head: string): { gone: number; names: string[]; more: number; emptied: string[] } | null;
 
 // ---------------------------------------------------------------------------
 // The record's views. The CLI's `insights`, `playbook` and `suggest` are built on these.

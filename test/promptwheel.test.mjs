@@ -5095,3 +5095,41 @@ test('the action passes --pull-request on a pull request, and only there', () =>
   assert.match(action, /github\.event_name == 'pull_request' && '--pull-request'/);
 });
 
+// ---- 0.8.20: a note when two or more named tests are gone, or a file that stays lost every test (queue row Q55) ----
+// The reading R1(c) held both of its lines on 128 fresh controls; five of the six it spoke on were renames or rewrites,
+// so the note says what was read and not what it means (the words he approved on 2026-11-23).
+const goneNote = (rep) => renderMarkdown(rep).split('\n').find((l) => l.includes('named in the changed files')) || '';
+test('a change that takes two named tests out of a file that stays: a note that names them, and says a rename reads the same way; never a verdict', () => {
+  const d = prRepo(); put(d, 'test/more.test.js', T3); commitAll(d, 'three tests'); const base = rev(d);
+  put(d, 'test/more.test.js', "const t=require('node:test'),a=require('node:assert');\nt.test('adds two', () => a.equal(1 + 1, 2));\n"); commitAll(d, 'two tests out');
+  const { code, rep } = range(d, base);
+  assert.equal(code, 0); assert.equal(rep.verdict, 'pass', 'a note only');
+  assert.deepEqual(rep.testsGone, { gone: 2, names: ['adds four', 'adds three'], more: 0, emptied: [] });
+  assert.equal(goneNote(rep), '> ℹ️ **Note:** 2 tests that were named in the changed files are not named in them now: `adds four`, `adds three`. A rename reads the same way.');
+});
+test('the note is not said for one name gone, for tests moved to another changed file, or for a deleted file of one test; it is said for a file that stays and lost its only test', () => {
+  let d = prRepo(); put(d, 'test/more.test.js', T3); commitAll(d, 'three tests'); let base = rev(d);
+  put(d, 'test/more.test.js', "const t=require('node:test'),a=require('node:assert');\nt.test('adds two', () => a.equal(1 + 1, 2));\nt.test('adds three', () => a.equal(1 + 2, 3));\n"); commitAll(d, 'one out');
+  assert.equal(range(d, base).rep.testsGone, undefined, 'one name gone');
+  d = prRepo(); put(d, 'test/more.test.js', T3); commitAll(d, 'three tests'); base = rev(d);
+  unlinkSync(join(d, 'test/more.test.js')); put(d, 'test/moved.test.js', T3); commitAll(d, 'moved');
+  assert.equal(range(d, base).rep.testsGone, undefined, 'the same names in another changed file');
+  d = prRepo(); put(d, 'test/one.test.js', "const t=require('node:test'),a=require('node:assert');\nt.test('only', () => a.ok(true));\n"); commitAll(d, 'one test'); base = rev(d);
+  unlinkSync(join(d, 'test/one.test.js')); commitAll(d, 'the file goes');
+  assert.equal(range(d, base).rep.testsGone, undefined, 'a deleted file of one test');
+  d = prRepo(); put(d, 'test/one.test.js', "const t=require('node:test'),a=require('node:assert');\nt.test('only', () => a.ok(true));\n"); commitAll(d, 'one test'); base = rev(d);
+  put(d, 'test/one.test.js', "// nothing here yet\n"); commitAll(d, 'emptied');
+  const rep = range(d, base).rep;
+  assert.deepEqual(rep.testsGone, { gone: 1, names: ['only'], more: 0, emptied: ['test/one.test.js'] });
+  assert.equal(goneNote(rep), '> ℹ️ **Note:** 1 test that was named in the changed files is not named in them now: `only`. A rename reads the same way.');
+});
+test('the note reads the change from where it left the base: tests the base gained after that are not read as taken out', () => {
+  const d = prRepo(); const fork = rev(d);
+  gitIn(d, 'checkout', '-q', '-b', 'topic'); put(d, 'src/a.js', 'exports.f = () => 1 // tidied\n'); commitAll(d, 'tidy');
+  gitIn(d, 'checkout', '-q', '-'); put(d, 'test/more.test.js', T3); commitAll(d, 'the base gains three tests'); const main = rev(d);
+  gitIn(d, 'checkout', '-q', 'topic');
+  assert.notEqual(main, fork);
+  const { rep } = range(d, main);
+  assert.equal(rep.testsGone, undefined, 'the change took no test out');
+});
+
