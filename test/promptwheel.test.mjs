@@ -4634,6 +4634,8 @@ test('playbook and suggest run over a real record; the playbook lists what was t
   writeFileSync(join(d, 'app/x.js'), 'a\nb\n'); commitAll(d, 'improve');
   pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD', '--label', 'remove todos']);
   r = pw(d, ['playbook']); assert.equal(r.code, 0, r.out); assert.match(r.out, /Nothing has earned a line yet/); assert.doesNotMatch(r.out, /Tried and thrown away/);
+  // one run is one run (queue row Q51: the views said "1 checked runs")
+  for (const c of ['playbook', 'insights', 'suggest']) { const o = pw(d, [c]).out; assert.match(o, /\b1 checked run\b(?!s)/, c); assert.doesNotMatch(o, /\b1 checked runs\b/, c); }
   writeFileSync(join(d, 'app/x.js'), 'a\nb // TODO\nc // TODO\n'); commitAll(d, 'regress2'); pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
   writeFileSync(join(d, 'app/x.js'), 'a\nb\nc\n'); commitAll(d, 'improve2'); pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);
   writeFileSync(join(d, 'app/x.js'), 'a // TODO\n'); commitAll(d, 'regress3'); pw(d, ['run', '--base', 'HEAD~1', '--head', 'HEAD']);

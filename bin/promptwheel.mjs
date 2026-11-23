@@ -1753,7 +1753,7 @@ function insights(argv) {
   const over = attempts.filter((r) => typeof r.turns === 'number');
   const overTurns = over.length ? { runs: over.length, kept: over.filter((r) => r.result === 'kept').length, bestTurns: over.filter((r) => r.result === 'kept' && typeof r.best === 'number').map((r) => r.best) } : null;
   if (args.json) { console.log(JSON.stringify({ runs: runs.length, attempts: attempts.length, kept, ...(overTurns ? { overTurns } : {}), metrics: rows }, null, 2)); return; }
-  console.log(`\nPromptWheel insights, ${runs.length} checked runs in the record${attempts.length ? ` (${attempts.length} attempts of the loop, ${kept} kept)` : ''}\n`);
+  console.log(`\nPromptWheel insights, ${runs.length} checked run${runs.length === 1 ? '' : 's'} in the record${attempts.length ? ` (${attempts.length} attempts of the loop, ${kept} kept)` : ''}\n`);
   console.log(`  ${'measure'.padEnd(26)} ${'runs'.padStart(5)} ${'up'.padStart(5)} ${'worse'.padStart(5)} ${'unsure'.padStart(6)} ${'net'.padStart(9)}  lever`);
   for (const r of rows) console.log(`  ${oneLine(r.name, 26).padEnd(26)} ${String(r.runs).padStart(5)} ${String(r.improved).padStart(5)} ${String(r.regressed).padStart(5)} ${String(r.inconclusive).padStart(6)} ${String(r.net).padStart(9)}  ${(r.lever * 100).toFixed(0)}%`);
   console.log('\n  lever = runs that made the measure better, out of all runs. It says where a change has paid here before.');
@@ -1885,7 +1885,7 @@ function playbook(argv) {
   const suff = entries.filter((e) => e.sufficient);
   const pct = (x) => `${Math.round(x * 100)}%`;
   const out = [];
-  out.push(`## What the record shows here (${runs.length} checked runs; a run counts half as much every ${HALF_LIFE} runs)`);
+  out.push(`## What the record shows here (${runs.length} checked run${runs.length === 1 ? '' : 's'}; a run counts half as much every ${HALF_LIFE} runs)`);
   out.push('Every line below was measured by the check. Nothing here is a guess, and a line fades unless new runs earn it again.', '');
   if (!suff.length) out.push(`_Nothing has earned a line yet. A key needs ${MIN_MOVED} weighted runs in which it moved. ${entries.length} keys are being counted._`);
   else {
@@ -1919,7 +1919,7 @@ function suggest(argv) {
   const stalled = attempts.length >= STALL_W && attempts.slice(-STALL_W).every((r) => r.result !== 'kept');
   const leastTried = stalled && arms.length ? [...arms].sort((a, b) => a.w - b.w)[0].key : null;
   if (args.json) { console.log(JSON.stringify({ runs: runs.length, thin: runs.length < 10, stalled, ...(leastTried ? { leastTried } : {}), retired, arms: arms.slice(0, 10) }, null, 2)); return; }
-  console.log(`\nPromptWheel suggest, over ${runs.length} checked runs${runs.length < 10 ? '  (a thin record: mostly a guess, the bonus for what is untried decides)' : ''}\n`);
+  console.log(`\nPromptWheel suggest, over ${runs.length} checked run${runs.length === 1 ? '' : 's'}${runs.length < 10 ? '  (a thin record: mostly a guess, the bonus for what is untried decides)' : ''}\n`);
   if (stalled) console.log(`  The last ${STALL_W} attempts kept nothing. Try what the record has seen least: ${leastTried}\n`);
   for (const a of arms.slice(0, 5)) console.log(`  ${a.ucb.toFixed(3)}  ${a.key.padEnd(28)} lever ${a.lever.toFixed(3)} (helped ${a.p}, moved ${a.move}) · moved in ${a.moved.toFixed(1)} of ${a.n} runs${a.sufficient ? '' : ' · too few to earn a line'}`);
   if (!arms.length) console.log('  (nothing in the record yet that an attempt could improve: every measure is gone from the contract, already passes, or is a count that more of alone is not a win)');
