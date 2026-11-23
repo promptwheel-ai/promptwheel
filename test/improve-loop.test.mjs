@@ -180,7 +180,7 @@ test('loop: an attempt command that exits non-zero is still judged by what it ch
 test('loop: the step prints one line on stdout whatever the attempt prints, so a driver can read it', () => {
   const d = toy();
   const r = step(d, 'echo chatter from the proposer; echo 110 > src/score.txt');
-  assert.equal(r.out, ' 1  kept     echo chatter from the proposer; echo 110 > src/score.txt: score 100 to 110\n');
+  assert.equal(r.out, ' 1  kept     echo: score 100 to 110\n');   // named by the command's first word (0.8.19)
   assert.match(r.err, /chatter from the proposer/, 'the attempt\'s own words go to stderr');
 });
 test('loop --json: the step prints its record line as JSON instead', () => {
