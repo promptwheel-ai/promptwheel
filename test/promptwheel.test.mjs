@@ -5056,3 +5056,42 @@ test('run: an earlier state that could not run for want of something not install
   m = mk((d) => { pkg(d, { test: 'node --test' }); commitAll(d, 'a'); pkg(d, { test: 'node --test', posttest: 'a-tool-nobody-installed' }); commitAll(d, 'b'); });
   assert.equal(m.before, 1); assert.equal(m.after, 0); assert.equal(m.baseUnrun, undefined);
 });
+
+// ---- 0.8.20: on a pull request, tests the change added and then took out send it back (queue row Q54) -------------
+// The note of 0.8.17 (testsTakenOut) spoke on none of 128 fresh controls and on 14 of 139 objected pull requests. On a
+// pull request (the action passes --pull-request) it is a guard of its own: the job fails, a person's reason lets it
+// through, and the comment's line keeps the note's sentence with the mark every send-back has. Nowhere else.
+const takenOutRepo = () => {
+  const d = prRepo(); const base = rev(d);
+  put(d, 'test/more.test.js', T3); commitAll(d, 'three more tests');
+  put(d, 'src/a.js', 'exports.f = () => 1 // tidied\n'); commitAll(d, 'tidy');
+  unlinkSync(join(d, 'test/more.test.js')); commitAll(d, 'drop the tests that went red');
+  return { d, base };
+};
+test('on a pull request, a change that took out every test it had added fails, with the note\'s sentence as a line that needs a look and the way out after it', () => {
+  const { d, base } = takenOutRepo();
+  // pw2 keeps stdout apart: on a failing verdict the command also writes to stderr, and range() reads both together
+  const r = pw2(d, ['run', '--base', base, '--head', 'HEAD', '--no-record', '--json', '--pull-request']); const rep = JSON.parse(r.out);
+  assert.equal(r.code, 1, 'the job fails'); assert.equal(rep.verdict, 'fail');
+  const md = renderMarkdown(rep);
+  assert.match(md, /> ✋ \*\*Needs a look:\*\* an earlier commit of this pull request \(`[0-9a-f]{7,}`\) added 3 tests\. None of them is in it now: `adds four`, `adds three`, `adds two`\./);
+  assert.doesNotMatch(md, /ℹ️ \*\*Note:\*\* an earlier commit of this pull request/, 'not said twice');
+  assert.match(md, /sawbuck-allow:/, 'the way out follows');
+});
+test('on a pull request, a person\'s reason lets the change that took its added tests out through', () => {
+  const { d, base } = takenOutRepo();
+  const { code, rep } = range(d, base, 'HEAD', '--pull-request', '--allow', 'the three tests moved to the next pull request');
+  assert.equal(code, 0, 'let through'); assert.equal(rep.verdict, 'pass');
+  assert.ok(rep.allowed && (rep.allowed.cleared || []).includes('tests_taken_out'), 'and the report says what was let through');
+});
+test('without --pull-request the change that took its added tests out is a note, as before', () => {
+  const { d, base } = takenOutRepo();
+  const { code, rep } = range(d, base);
+  assert.equal(code, 0); assert.equal(rep.verdict, 'pass'); assert.ok(rep.testsTakenOut);
+  assert.ok(!rep.metrics.some((m) => m.name === 'tests_taken_out'), 'no guard of its own off a pull request');
+});
+test('the action passes --pull-request on a pull request, and only there', () => {
+  const action = readFileSync(join(dirname(ENGINE), '..', 'action.yml'), 'utf8');
+  assert.match(action, /github\.event_name == 'pull_request' && '--pull-request'/);
+});
+

@@ -1022,7 +1022,7 @@ function gateWeakenings(baseGate, headMetrics) {
 // A reason names a thing when the thing's name stands in it as a whole word, in any case (`mandate:` is optional).
 // The checks that are about the tests themselves are ONE thing to a reason: deleting a test moves the green, the count
 // of tests and the count of assertions in one act, and a person who accepts that act has accepted all three.
-const TEST_KIND = new Set(['tests_pass', 'test_count', 'skipped_tests', 'assertions']);
+const TEST_KIND = new Set(['tests_pass', 'test_count', 'skipped_tests', 'assertions', 'tests_taken_out']);
 const kindOf = (label) => (TEST_KIND.has(label) ? 'the tests' : label);
 const kindsIn = (labels) => new Set([...labels].map(kindOf)).size;
 const reasonNames = (reason, label) => new RegExp(`(^|[^A-Za-z0-9_-])${label.replace(/^mandate:/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_-])`, 'i').test(reason);
@@ -1453,6 +1453,14 @@ function gateInner(repo, opts) {
   // - an allowable mandate (the lock file, the contract, the hooks), by the flag only.
   // Never implicit: without a reason each of these fails as usual, and the reason is recorded.
   const mode = new Map((cfg.metrics || []).filter((c) => c && c.allowable && c.name).map((c) => [c.name, c.allowable]));
+  // ON A PULL REQUEST (the action says so: --pull-request), every test an earlier commit of the change added, gone at its
+  // head, is a guard of its own, let through by a person's reason as the counts are (0.8.20). Off a pull request it stays
+  // the note it was: it spoke on none of 128 fresh controls nobody had looked at, and on 14 of 139 objected ones.
+  const takenOutEarly = (opts.pullRequest && !opts.working) ? testsTakenOut(repo, changeSteps(repo, base, head)) : null;
+  if (takenOutEarly) {
+    metrics.push({ name: 'tests_taken_out', guard: true, ok: false, status: 'regressed', before: takenOutEarly.added, after: 0, delta: -takenOutEarly.added, confidence: 'high', tripwire: true, gamingCheck: false, takenOut: takenOutEarly });
+    mode.set('tests_taken_out', 'flag');
+  }
   const gm = opts.detectGaming ? metrics.filter((m) => m.gamed === true) : [];
   const up = opts.detectGaming ? metrics.filter((m) => m.unprovable === true) : [];
   const gw = !!(opts.detectGaming && gateInfo && gateInfo.weakened);
@@ -1493,7 +1501,7 @@ function gateInner(repo, opts) {
     if (change) for (const m of held) { const w = change.has(m.name) && lostInFiles(repo, base, head, change.get(m.name), defOf(m.name), seen); if (w) m.lostIn = w; }
   }
   // tests an earlier commit of this change added, all gone at its head (testsTakenOut): a note, never part of the verdict
-  const takenOut = opts.working ? null : testsTakenOut(repo, changeSteps(repo, base, head));
+  const takenOut = takenOutEarly || (opts.working ? null : testsTakenOut(repo, changeSteps(repo, base, head)));
   const byCommit = opts.working || trailersOff() ? [] : guards.filter((m) => !m.allowed && mode.get(m.name) === true).map((m) => m.name);
   const mandated = mandateViolations.length > 0;
   const verdict = deriveVerdict(metrics, gateInfo, mandated);
@@ -1540,7 +1548,7 @@ function run(argv) {
     config = autoConfig(repo);
     console.error(`no promptwheel.config.json, auto-gating the detected test command: ${config.metrics[0].cmd}  (promptwheel init to customize; --no-auto to require a config)`);
   }
-  const report = gate(repo, { base: args.base, head: args.head, working: args.working, repeat: args.repeat, detectGaming: args.detectGaming, allow: args.allow, config, baseCache: args.baseCache });
+  const report = gate(repo, { base: args.base, head: args.head, working: args.working, repeat: args.repeat, detectGaming: args.detectGaming, allow: args.allow, config, baseCache: args.baseCache, pullRequest: !!args.pullRequest });
   // one short row in the record (the git folder, never the tree), unless --no-record. The report is not changed by it.
   if (!args.noRecord) recordRun(repo, report, config ?? loadConfig(repo), { label: args.label });
   if (args.json) console.log(JSON.stringify(report, null, 2));
@@ -2221,7 +2229,7 @@ const allowFlag = (r) => `--allow "${allowNames(r)}<reason>"`;
 const PLAIN = {
   lifecycle_scripts: 'a new install script', dependency_entries: 'a new dependency', lock_nonregistry_sources: 'a dependency from outside the registry',
   unpinned_execution: 'something that runs without a pinned version', install_policy_gaps: 'a weaker install policy', lock_drift: 'the shape of the repo changed',
-  pins_changed: 'resolved dependency versions changed', tests_pass: 'tests stopped passing', test_count: 'fewer tests', skipped_tests: 'more skipped tests',
+  pins_changed: 'resolved dependency versions changed', tests_pass: 'tests stopped passing', test_count: 'fewer tests', skipped_tests: 'more skipped tests', tests_taken_out: 'tests this change added and then took out',
   suppressions: 'more silenced checks', assertions: 'fewer assertions',
 };
 // What the measurement borrows from the machine it runs on and no diff shows: a variable that can change which tests
@@ -2245,7 +2253,7 @@ function explainMetrics(repo, metrics) {
   if (hit.some((m) => m.name === 'lock_drift')) {
     try { items = JSON.parse(execFileSync(process.execPath, ['.promptwheel/packs/supply-chain/lock.mjs', 'drift', '.', '--json'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).slice(0, 8); } catch { /* words without the list */ }
   }
-  return hit.map((m) => ({ metric: m.name, noted: !!m.noted, what: PLAIN[m.name] || m.name, ...(m.name === 'lock_drift' && items.length ? { items } : {}), ...(m.allowable ? { allowable: true } : {}) }));
+  return hit.map((m) => ({ metric: m.name, noted: !!m.noted, what: (m.name === 'tests_taken_out' && m.takenOut) ? takenOutSaid(m.takenOut, true) : (PLAIN[m.name] || m.name), ...(m.name === 'lock_drift' && items.length ? { items } : {}), ...(m.allowable ? { allowable: true } : {}) }));
 }
 // A reason a person left on a pull request. The newest `sawbuck-allow: <reason>` comment from someone with write
 // access wins. A bot never counts. Since 0.8.10 neither does the account that opened the pull request (`author`),
@@ -2375,7 +2383,7 @@ function renderMarkdown(r, o = {}) {
     ...(r.allowed && (r.allowable || []).some((l) => !r.allowed.cleared.includes(l)) ? [`> ✋ **Not let through:** \`${r.allowable.filter((l) => !r.allowed.cleared.includes(l)).join('`, `')}\`. A reason lets through only what it names when there is more than one thing. ${mdAccept(r, true)}`] : []),
     ...(r.gate && r.gate.changed ? [`> ⚠ **Gate definition changed** in this diff (fingerprint \`${r.gate.fingerprint.base}\` -> \`${r.gate.fingerprint.head}\`): a metric, guard, evaluatorPath, mandate, or the setup, env or linked dirs they are measured with was added, removed or edited. Review the config change with the code.`] : []),
     ...(lost.length ? [lost.join('\n')] : []),
-    ...(r.testsTakenOut ? [`> ℹ️ **Note:** ${takenOutSaid(r.testsTakenOut, true)}`] : []),
+    ...(r.testsTakenOut && !r.metrics.some((m) => m.name === 'tests_taken_out') ? [`> ℹ️ **Note:** ${takenOutSaid(r.testsTakenOut, true)}`] : []),   // on a pull request it is a line that needs a look instead
     ...(o.note && String(o.note).trim() ? [String(o.note).trim()] : []),
     o.fold === false ? `\`${span}\`${rest}\n\n${table}` : `<details><summary>What was measured (<code>${span}</code>${rest})</summary>\n\n${table}\n\n</details>`,
     MD_FOOT,
@@ -2726,6 +2734,7 @@ function parseArgs(argv) {
     else if (argv[i] === '-n' || argv[i] === '--limit') a.n = parseInt(argv[++i], 10);
     else if (argv[i] === '--allow') a.allow = argv[++i];
     else if (argv[i] === '--detect-gaming') { a.detectGaming = true; a.dgExplicit = true; }
+    else if (argv[i] === '--pull-request') a.pullRequest = true;   // the action, on a pull request: tests a change added and took out send it back
     else if (argv[i] === '--no-detect-gaming') { a.detectGaming = false; a.dgExplicit = true; }
     else if (argv[i] === '--json') a.json = true;
     else if (argv[i] === '--markdown') a.markdown = true;
@@ -2809,6 +2818,7 @@ export function check(options = {}) {
     detectGaming: options.detectGaming ?? true,
     allow: options.allow,
     baseCache: options.baseCache,
+    pullRequest: !!options.pullRequest,
   });
   // the library writes no row unless asked: a caller that keeps its own record (Sawbuck) decides
   if (options.record === true) recordRun(repo, report, config ?? loadConfig(repo), { label: options.label });
@@ -2975,7 +2985,7 @@ export function conformsToContract(report) {
 // the next argument; anything not starting with `-` is positional. --no-record checks without adding a row
 // to the record (Sawbuck and some CI steps pass it). `improve` is not in the table: it is the loop step's, which
 // refuses a flag it does not know, and takes no --allow (a person lets a change through, not a loop).
-const GATE_FLAGS = ['--base', '--head', '--repeat', '--working', '--no-record', '--no-auto', '--allow', '--detect-gaming', '--no-detect-gaming', '--json', '--markdown', '--label', '--base-cache'];
+const GATE_FLAGS = ['--base', '--head', '--repeat', '--working', '--no-record', '--no-auto', '--allow', '--detect-gaming', '--no-detect-gaming', '--json', '--markdown', '--label', '--base-cache', '--pull-request'];
 const COMMAND_FLAGS = {
   run: GATE_FLAGS, init: ['--preset', '--list', '--force', '--no-agent-block'], lock: [], calibrate: ['--runs', '--repeat', '--metric', '--json'],
   insights: ['--json'], playbook: ['--json'], suggest: ['--json'],

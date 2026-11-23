@@ -82,7 +82,7 @@ runs:
       run: |
         set +e
         node "$GITHUB_ACTION_PATH/bin/promptwheel.mjs" run \
-          --base "${{ inputs.base }}" --head HEAD --repeat "${{ inputs.repeat }}" --json ${ALLOW:+--allow "$ALLOW"} \
+          --base "${{ inputs.base }}" --head HEAD --repeat "${{ inputs.repeat }}" --json ${ALLOW:+--allow "$ALLOW"} ${{ github.event_name == 'pull_request' && '--pull-request' || '' }} \
           > "$RUNNER_TEMP/promptwheel.json" 2> "$RUNNER_TEMP/promptwheel.err"
         code=$?
         cat "$RUNNER_TEMP/promptwheel.err" >&2
