@@ -62,9 +62,14 @@ Fixed vocabularies (use exactly these):
 - `metric.status` is one of `improved | regressed | unchanged | inconclusive | unmeasurable`
 - `direction` is one of `up | down | pass` (the direction that counts as better; `pass` is a 0/1 gate)
 
-`noise` is the measured jitter band, a single number, across the top-level `repeat` runs; a
-delta inside it is `inconclusive`, never a regression. `retained` is the fraction of a
-metric's gain that survived the source-only re-run (Section 3). `confidence`
+`noise` is the noise band, a single number: the one the contract declares for the metric (`"noise"` in the
+config), else the jitter measured across the top-level `repeat` runs; a
+delta inside it is `inconclusive`, never a regression. Where the band was declared, `spread` carries the measured
+jitter beside it. `baseMeasured` (top level, optional) is present when the base's numbers were kept from an earlier
+run (`--base-cache`) and not measured in this one: the time they were measured. `retained` is the fraction of a
+metric's gain that survived the source-only re-run (Section 3). The re-run is read with the same band: a metric
+that improved in the full change reads `inconclusive` with `gamed: false` when its source-only reading was inside
+the band of both ends, and `gamingReason` says so. `confidence`
 (`none | unverified | low | medium | high`, `none` for an unmeasurable metric) and `sourceOnly` are informational fields this
 implementation adds; a minimal conforming report may omit them. `gate` (optional) records a
 truncated SHA-256 fingerprint of the gate definition (metrics, guards, `evaluatorPaths`,
@@ -99,6 +104,7 @@ echo $?   # 0 pass | 1 fail | 2 gamed | 3 inconclusive | 64 usage/config error (
 
 ```bash
 promptwheel run --working --json        # gate uncommitted changes (incl. newly added files)
+promptwheel run --working --json --base-cache "$KEPT"   # in a loop: the base is measured once, each try pays for one run
 promptwheel run --no-detect-gaming       # the bare gate, without the Section 3 re-proof
 ```
 
@@ -140,8 +146,11 @@ Returns the Section 2 verdict object (identical to `run --json`). Reproducible f
 | `config` | object | load `promptwheel.config.json`, or auto-detect | a resolved config `{ metrics: [...], ... }`, supplied in process |
 | `auto` | boolean | `true` | with no config file and no `config` option, gate the auto-detected test command (zero-config); `false` throws instead |
 | `repeat` | number | `config.repeat ?? 1` | measurement repeats for the noise band |
+| `baseCache` | string | none | a folder outside the repository that keeps the base's measurement between runs (the same as `--base-cache`), reused only for the same tree measured the same way; a folder inside the repository throws. The folder is only as safe as who can write it: an attempt that runs as you can edit a kept number, so a loop that hands attempts a shell puts the folder back after each one |
 | `detectGaming` | boolean | `true` | run the Section 3 source-only re-proof |
 | `allow` | string | none | a declared override reason (the same as `--allow` / a `Promptwheel-Allow:` trailer): a would-be `gamed`, or an `unprovable` win (its source-only re-run could not be applied), reads `pass` with the reason recorded in `report.allowed`. When it could let more than one thing through, it lets through only the ones it names (`report.allowable` lists the names). The checks on the tests themselves (`tests_pass`, `test_count`, `skipped_tests`, `assertions`) count as one thing, and naming any of them names them all |
+| `record` | boolean | `false` | add one short row for this run to the record in the repo's git folder (the CLI's `run` does unless `--no-record`; the library only when asked). The record never changes a verdict |
+| `label` | string | none | a short name for the change, kept in the row when `record` is on |
 
 Preconditions throw (they do not exit the host): not inside a git repository; `auto: false`
 with no `promptwheel.config.json` and no `config` option; a `config` with no non-empty
@@ -176,6 +185,11 @@ self-check the artifact it emits. `errors` is a list of human-readable problems,
 `CONTRACT_VERSION` (the protocol revision this build implements), and the frozen vocab
 arrays `VERDICTS`, `METRIC_STATUSES`, `DIRECTIONS`, so a consumer validates against the source
 of truth instead of hardcoding the strings.
+
+`calibrate(options)` measures the noise band a metric needs (`{ ref, runs, repeat, metrics: [{ name, runs, median,
+spread, noise }] }`): it runs each metric `runs` times (default 20) at one commit and gives the band for `repeat` runs
+a side, to declare on the metric as `"noise"`. It writes nothing. `noiseBand(samples, repeat)` is the arithmetic
+under it, for readings you already have.
 
 ---
 

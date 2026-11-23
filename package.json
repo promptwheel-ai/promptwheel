@@ -18,7 +18,11 @@
   "files": [
     "bin",
     "packs",
-    "INTEGRATE.md"
+    "INTEGRATE.md",
+    "examples/improve-loop/improve.mjs",
+    "examples/improve-loop/wall.mjs",
+    "examples/improve-loop/run.mjs",
+    "examples/improve-loop/report.mjs"
   ],
   "engines": {
     "node": ">=18"

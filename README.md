@@ -56,6 +56,8 @@ npm i -g promptwheel                      # or run everything through: npx promp
 npx promptwheel run                       # zero-config: gates your detected test command; base = merge-base with main, head = HEAD
 npx promptwheel run --working             # gate UNCOMMITTED changes (incl. newly added files)
 npx promptwheel run --repeat 5 --json     # measure 5× to establish a noise band, emit JSON
+npx promptwheel calibrate --metric score  # a score that does not hold still: run it 20 times at HEAD, print the noise band to declare for it
+npx promptwheel run --base-cache ~/.cache/pw-myrepo   # in a loop: keep the base's numbers, so a slow or paid scorer is asked about the base once
 
 npx promptwheel init                      # optional: write promptwheel.config.json (guarded tests + antihack tripwires, + lint if eslint is set up)
 npx promptwheel init --list               # presets: antihack · no-ai-tells · supply-chain
@@ -94,6 +96,7 @@ Gaming detection is on by default in `run`; `--no-detect-gaming` gives you the b
 - **guard**, `true` = a *trusted* regression **fails** the gate; `false` = informational.
 - **report**, `true` on a guard = its regression is shown as a note and does not fail the gate. `"no-win"` = a note only when nothing else measured got better in the same change; beside a win it fails like any guard. Either way it is still a guard to the integrity check below: a change that softens a guard is judged by the guard it was.
 - **budget**, on a guard: `{ "gain": "score", "base": 0.10, "rate": 0.2 }` lets a trusted regression of this metric through when the named metric improved in the same change, the source earned that improvement, and this metric got worse by a share of its old value no larger than `base + rate x gain`. With no such gain the guard is a wall, as before. It is for a loop that runs with no person, where a wall is too strict and no limit is too loose: this much gain buys this much cost. A change cannot write or loosen its own budget: the budget is part of the guard, and a guard is judged as it stood before the change.
+- **noise**, the noise band for this metric, in its own units: `"noise": 0.03` says a difference of 0.03 or less is not a win and not a failure (`inconclusive`). It is for a number that does not hold still: a model-graded score, a timing. It takes the place of the band measured across repeats, so it holds with one run a side, and more repeats do not widen it. `promptwheel calibrate` measures one for you. Not read on a `pass` metric or an `exact` one. It is part of how the metric is judged: a change is held to the band the contract had before it, and a band a change adds counts from the next change on.
 - **gamingCheck**, `false` exempts a metric from the source-only re-run. Use it for tripwire / test-side guards (assertion counts, test counts) whose gains legitimately live in test files, otherwise adding real tests would be flagged as gaming. The `antihack` preset sets this on its tripwires. Set on a metric that had the re-run on, it takes effect from the next change: the change that sets it is still re-proven.
 - **gamingThreshold**, the fraction of a win that must survive the source-only re-run to count as earned (default `0.5`). Config-level scalar, overridable per metric; inherited through `extends` like `repeat`. A change that lowers it is still judged by the value before it.
 - **evaluatorPaths**, globs for files that *define* your gate (a threshold file, a budget, a CI limit). Editing one in the same diff that improves a metric is `GAMED` by declaration, deterministically. Opt-in, because only you know which files are the goalposts.
@@ -176,9 +179,80 @@ The Action runs straight from its own checkout, no npm install, no build. See [`
 
 Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommitted changes). See [`plugins/promptwheel/`](plugins/promptwheel/). A Stop-hook that refuses to let an agent end a turn on a `GAMED` win ships at [`examples/detect-gaming-stop.sh`](examples/detect-gaming-stop.sh).
 
+## The loop: keep a change only if it measured better
+
+`improve` runs any agent or script, checks what it changed, and keeps it only if the target measure improved.
+
+```
+promptwheel improve --attempt "sed -i 's/a - b/a + b/' src/add.js"
+
+#  1  kept     sed -i 's/a - b/a + b/' src/add.js: tests_pass 0 to 1
+```
+
+That was run as written, on a repo with one failing test and no config. Put your agent where the `sed` is.
+
+- **Kept means one commit. Anything else means the tree is put back as it was.** Exit `0` kept, `1` a guard got
+  worse (or the floor held, or it changed a file it may not, or the contract), `2` the win came from a change to the
+  tests, `3` nothing improved, `64` it could not run, or the attempt could not. So this stops by itself:
+  `while promptwheel improve --attempt "..."; do :; done`
+- **An attempt that could not run is not a try.** If your attempt command ends with 64, or the shell could not find
+  or run it and no file changed, nothing is judged and nothing is written, and `improve` exits 64: the loop stops,
+  and no try is used up. A wrapper script around an agent should end with 64 when the agent could not start at all:
+  no sign-in, a usage limit, no network. Over several turns, a later turn that could not run ends the run as a run
+  ends: a best turn that had passed is kept once it wins again when measured once more.
+- **Only the target makes a win.** `--target <measure>` names it (`--goal` is another name). If you name none, it
+  is the measure called `score`, or else the contract's only measure, or else its only measure that is not a
+  tripwire. On the contract `init` writes, and with no config, that is the test run. If that still leaves a choice,
+  `improve` stops before the attempt runs and lists the measures. More tests alone is no win unless tests are what
+  you named. `--cheaper <measure>` also keeps a change that holds the target and costs less.
+- **A commit the agent makes is still checked,** as one change with the rest.
+- **What is kept is exactly what was checked.** The commit is made from the tree that was judged. No git hook runs
+  on it, and a file written after the check is not in it.
+- **What judges is put back.** The loop's record, the engine and the loop's own files, a file hidden from git, and
+  git's own files (the repo's git config, its hooks, the refs, your global git config) are put back after each
+  attempt, before the change is judged. If your global config changed while an attempt ran, it is put back too, and
+  the line names the file. A change the check would keep is put back when it touched the contract.
+- **`--may-change "src/**"`** names the only paths an attempt may touch; **`--floor`** holds each kept change against
+  the best score so far; **`--base-cache <dir>`** keeps the base's numbers between tries.
+- **Start from a clean tree.** A thrown-away attempt is undone with `git reset` and `git clean`.
+
+**Over a number of turns.** One attempt judged alone is put back unless it improved by itself. Under a pass-or-fail
+measure (do the tests pass) that loses any fix bigger than one attempt. `--turns N` judges the whole run instead:
+each turn goes on from where the last one left the tree; after every turn the whole change so far is checked against
+the commit the run started from, so a test edited at one turn makes no win at a later one; the next turn is told the
+reading (its path is in `PW_FEEDBACK`); the best turn is kept, as one commit, after it is measured once more. A run
+ends early when a turn ends by itself having changed nothing, when the target can go no further, or after
+`--patience` turns (3) with no new best once there is one. An interrupt puts the tree back, and keeps a best turn
+that had passed its check.
+
+`improve` runs the loop step that ships beside the engine, [`examples/improve-loop/improve.mjs`](examples/improve-loop/).
+It is the one keeper: there were three for a day (that step, a copy of it in another line of work, and a command
+inside the engine), and they are one now. It asks the engine as a separate process, so what is judged never runs
+inside what judges it. Its own page says every flag and every limit.
+
+The engine's own git calls run no hook and no fsmonitor command; that needs git 2.31 or newer, and an older git
+ignores the setting and says nothing. The loop's step refuses to run on an older git.
+
+What the loop cannot hold: an installed dependency your measure runs, a safety rule deleted behind another one, a
+process the attempt leaves running (it can write into the copy the check measures in), anything outside the repo. The
+attempt runs as you. A container, or the check run again on a pull request, holds those ([docs/LEARNING.md](docs/LEARNING.md)).
+
+What this is not: a promise that more turns do better. In our own first runs with a real agent the count of work
+left fell in steps, not slopes: most turns that were cut short had saved nothing ([docs/LEARNING.md](docs/LEARNING.md)).
+
+Every try of the loop is one line in `.git/improve/attempts.jsonl`, and the change it made stays readable as
+`refs/improve/<n>`. Every check adds one short row to the engine's own record in the repo's git folder (never the
+working tree; `run --no-record` adds none). Three commands read them: `insights` (how each measure responds),
+`playbook` (what has paid here, and what the loop tried and threw away, in the loop's own words) and `suggest` (where
+to spend the next attempt). `backfill` fills the engine's record from past commits.
+
+We do not say the loop gets better with use. That has a test, and the test has not been passed:
+[docs/LEARNING.md](docs/LEARNING.md).
+
+
 ## Trust model
 
-**What it catches.** After the normal gate, every *win* is re-proven using the agent's source edits alone. If the win only survived by skipping or deleting a test, mocking the grader, editing a golden, relaxing a declared config, or touching zero source files, the verdict is `GAMED` (exit 2). A grader is recognized by its file name in a scripting language (`eval.py`, `grader.sh`, `score.js`, `scoring.ts`) or by an `evals/` or `grader(s)/` directory; a production file with one of those names (`src/score.py`) is treated as a grader too, so a fix there needs `--allow`, and a grader with any other name (`evaluate.py`, `check.py`) is source unless you list it in `evaluatorPaths`. On top of that:
+**What it catches.** After the normal gate, every *win* is re-proven using the agent's source edits alone. A change that moved no test, grader or config has nothing to set aside: its source-only tree is the tree that was just measured, so that measurement stands and nothing is run a second time. When a goalpost did move, the second reading is read with the same noise band as the first: a part of the gain that did not survive and is no wider than the band is not called gamed, and a win the source alone did not move past the band is not counted as a win (the metric reads `inconclusive`, with the reason beside it). If the win only survived by skipping or deleting a test, mocking the grader, editing a golden, relaxing a declared config, or touching zero source files, the verdict is `GAMED` (exit 2). A grader is recognized by its file name in a scripting language (`eval.py`, `grader.sh`, `score.js`, `scoring.ts`) or by an `evals/` or `grader(s)/` directory; a production file with one of those names (`src/score.py`) is treated as a grader too, so a fix there needs `--allow`, and a grader with any other name (`evaluate.py`, `check.py`) is source unless you list it in `evaluatorPaths`. On top of that:
 
 - **Tripwire guards** (`test_count`, `skipped_tests`, `assertions`, written by the plain `init` default) catch the quieter shape: a suite gutted or skipped while the metric stays flat. A fourth count, `suppressions` (`@ts-nocheck`, `eslint-disable`, `# noqa`, `//nolint`, `#[allow(`), is written with `"report": "no-win"`. One more silencer is a note when nothing else got better in the same change, which is what a person's ordinary work looks like. It still fails the gate when it arrives with a win, such as a red lint step that turned green: that is the trade the count exists to catch. The numbers behind this are in the changelog (0.8.9). Delete the `report` key to make it block always.
 - **Gate integrity.** A change is judged by the gate that was in force before it. The gate is resolved as of the base commit too, through `extends`. A change that disables a guard, deletes a guarded metric, or measures it another way (a new `cmd` such as `true`, `extract`, `direction`, `exact` or `report`) in the same diff it passes is re-measured under the base definition and reads `GAMED` if that guard would have failed, or would still fail. If the old guard only passes because the same change also edited the test, it reads `GAMED` too: a win under the old definition still has to survive the source-only re-run. A file declared in `evaluatorPaths` before the change still counts as a goalpost for that change, even if the change drops the declaration. The same goes for `setup`, `env` and `linkDirs`: when a change edits them, each guard is measured again with the old values and so is the source-only re-run, so a `setup` that rewrites a test cannot carry a pass (`gate.weakened[].change: measurement-edited`). `gamingCheck: false` on a metric that had the re-run on, and a lower `gamingThreshold`, apply from the next change. A change that adds the first config is compared with the zero-config gate (the detected test command), so `tests_pass` set to `true` in a new config is an edited guard; a first config that keeps the detected command, or replaces the placeholder, is not. The gate definition (each metric with its command and how it is read, guards, `evaluatorPaths`, `gamingThreshold`, mandate names and paths, `setup`, `env`, linked dirs) is fingerprinted at both refs; a difference is recorded as `gate.changed` and printed. Two limits: a test that could not run at all before a `setup` fix reads `GAMED` on the change that adds the fix (say so with `--allow`; the `setup` that `init` writes into a first config is exempt), and a base config that `extends` a file outside the repository is not compared on `setup`, `env` or `linkDirs`.
@@ -186,7 +260,7 @@ Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommit
 - **It says what it borrowed.** The check runs your test command in the environment it is run in. When that environment sets `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`, or a preload in `NODE_OPTIONS` (`--require`, `--import`, a loader), the report says so, as a note and never a verdict: those can change which tests run or load code into them, and no diff shows them. A variable the contract's own `env` sets is declared there and is not noted. It does not take them out: a setup may need them.
 - **A provenance receipt** on every verdict (`report.provenance`: base and head SHAs, a config hash, a verdict hash), so a skeptic can re-run `(base, head, config)` and get the same hash.
 
-**The honest limit.** This is one layer, not a silver bullet. It catches the evaluator-tampering class (test, grader, golden and config edits) deterministically and for free. A suite weakened while it stays green is not proved: there is no win to re-run. Tripwires catch skips and removed assertions in a signed repo. It is blind, by construction, to a cheat that lives in the source file itself (a hardcoded answer, behavior that differs under test), or in a build script the unchanged `setup` runs (a change that makes that script rewrite a test is a source edit to this check). A base config that `extends` a file outside the repository cannot be compared across the change. These need held-out tests, an LLM judge, or a human, and those expensive layers should be reserved for the calls only they can make. The coverage matrix and the in/out-of-scope boundary are in [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md); the measured numbers are in [bench/RESULTS.md](bench/RESULTS.md) (`node bench/gaming-bench.mjs` to reproduce). Another gameable thing, an LLM judge asking "did you cheat?", is deliberately not part of the check.
+**The honest limit.** This is one layer, not a silver bullet. It catches the evaluator-tampering class (test, grader, golden and config edits) deterministically and for free. A suite weakened while it stays green is not proved: there is no win to re-run. Tripwires catch skips and removed assertions in a signed repo. It is blind, by construction, to a cheat that lives in the source file itself (a hardcoded answer, behavior that differs under test), or in a build script the unchanged `setup` runs (a change that makes that script rewrite a test is a source edit to this check). A base config that `extends` a file outside the repository cannot be compared across the change. A local check trusts the repo's own git settings: a filter set in its git config changes what a checkout holds, so the check can read another number than the commit holds. The check on a pull request runs on a clean clone and does not read them. A replace ref is never read: the check reads the objects as they are stored. These need held-out tests, an LLM judge, or a human, and those expensive layers should be reserved for the calls only they can make. The coverage matrix and the in/out-of-scope boundary are in [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md); the measured numbers are in [bench/RESULTS.md](bench/RESULTS.md) (`node bench/gaming-bench.mjs` to reproduce). Another gameable thing, an LLM judge asking "did you cheat?", is deliberately not part of the check.
 
 **Noise.** A number that jumps around between runs is worthless as a signal, and PromptWheel does not pretend otherwise: `--repeat N` measures each metric N times at both refs and uses the median; the noise band is the observed spread; a delta inside the band is `inconclusive` with `low` confidence and does not fail a guard (no flaky CI failures). Confidence reads `high` (deterministic extract, or zero observed noise), `medium` (delta clears the noise band), `low` (delta inside noise), or `unverified` (single read; run `--repeat` to earn trust). A guarded pass/fail check that reads 0 at both refs (its command never ran, or it ran and failed both times; the report says which) makes the verdict `inconclusive`, never a fake pass.
 
@@ -194,7 +268,7 @@ Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommit
 
 ## Per-turn cost
 
-A check runs your metric commands in two throwaway worktrees (before and after) plus a source-only re-run when a metric improved, so one check takes roughly 2 to 3× your metric command's runtime plus about 40ms of worktree overhead. Point the per-turn gate at a *fast* metric (a lint count, a quick test subset, a build-size check) and leave the slow full suite for CI: a 50ms check is invisible in a loop, a two-minute one is not. A deterministic metric (a test exit, a count) is accurate at the default `repeat: 1`; only a noisy metric (latency, timing) needs `repeat: 3` or more, which multiplies the cost.
+A check runs your metric commands in two throwaway worktrees (before and after), plus a source-only re-run when a metric improved in a change that also moved a test, a grader or a config, so one check takes roughly 2 to 3× your metric command's runtime plus about 40ms of worktree overhead. A loop that tries many changes against one commit can keep that commit's numbers with `--base-cache <dir>` (a folder outside the repo), and then pays for one run a try. The folder is only as safe as who can write it: an attempt that runs as you can edit a kept number, so a loop that hands attempts a shell puts the folder back after each one (the example loop step does). Point the per-turn gate at a *fast* metric (a lint count, a quick test subset, a build-size check) and leave the slow full suite for CI: a 50ms check is invisible in a loop, a two-minute one is not. A deterministic metric (a test exit, a count) is accurate at the default `repeat: 1`; only a noisy metric (latency, timing) needs `repeat: 3` or more, which multiplies the cost.
 
 **Footprint.** It never touches your working tree: every measurement runs in a throwaway git worktree in your system temp dir (one at a time; configured `linkDirs` are symlinked, not copied), removed when the run finishes. Those worktrees run none of your git hooks (what a checkout needs before it can be measured goes in `setup`), and your own git settings do not change a verdict: no `a/` `b/` prefixes, an outside diff tool, forced colour and shown signatures are each tested, on git 2.25 through 2.52. A run writes nothing to your repo; only `init` and `lock` write files, the ones you commit. A hard-killed run can leave a worktree in your temp dir; a later run removes it once it is a day old (an unregistered checkout of this repo after an hour). It removes only directories named the way it names its own (`promptwheel-`, `promptwheel-src-` or `pw-idx-`, then an 8-hex repo tag, then 6 random characters). Any other folder or worktree in the temp dir is left alone, at any age.
 
@@ -208,6 +282,7 @@ The core gamed-win check is git only and runs anywhere git does: it classifies t
 - [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md), how the source-only re-run fits as the deterministic layer alongside held-out tests, LLM judges, and human review: the coverage matrix and the honest in/out-of-scope boundary.
 - [docs/ENFORCEMENT.md](docs/ENFORCEMENT.md), making "the agent can't skip it" real: the two places to enforce (CI + branch protection, a Claude Code Stop-hook), the exact wiring, and the protect-the-gate's-own-config caveat.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), how the engine works: schemas, extract modes, the trust/noise model.
+- [docs/LEARNING.md](docs/LEARNING.md), the loop (`improve`), the record and its views: what may be said about them, and the test that would open the claim.
 - [CHANGELOG.md](CHANGELOG.md), what shipped in each version.
 - [CLAUDE.md](CLAUDE.md), the working notes for anyone (human or agent) changing this repo.
 

@@ -1,0 +1,139 @@
+# The wheel: the record, the loop, and what may be said about them
+
+Status: **built, and its claim is still closed.** The code below runs and is tested. No page of ours says the loop
+gets better with use, because that has not been shown. This file says what would show it.
+
+## What there is
+
+| | what it does |
+|---|---|
+| the records | two, each in the repo's git folder, so never in the working tree or a commit. The engine's: every checked run adds one short row (the verdict, each measure before and after, the top folders the change landed in) in `promptwheel/outcomes.jsonl` under `git rev-parse --git-common-dir`; nothing a person typed is in a row, a label only when `--label` gave one, and `run --no-record` adds none. The loop's: every try is one line in `.git/improve/attempts.jsonl`, in the loop's own words, and the change it made stays readable as `refs/improve/<n>` |
+| `improve --attempt "<cmd>"` | runs the loop's one keeper, the step that ships beside the engine (`examples/improve-loop/improve.mjs`): run any agent or script, check what it changed, and keep it as one commit only if the target improved (`--target`, or `--goal`; with neither, `score`, or the contract's only measure, or its only one that is not a tripwire). If a guard got worse, if the win came from a change to the tests, or if the target did not improve, the tree is put back as it was. Commits the attempt made itself are checked as one change. The step asks the engine as a separate process |
+| `insights` | how each measure has responded, straight from the record |
+| `playbook` | what has paid here: for each measure, and each measure in each folder, how often a change helped when it moved. A row counts half as much every 20 runs. A line is shown only past 3 weighted runs in which the key moved. Then the list of what the loop tried and threw away, newest first, each with the measured reason |
+| `suggest` | where to spend the next attempt: a lever that has paid, or what was tried least (UCB). When the last 3 attempts kept nothing, it names the least tried arm first. It offers nothing an attempt could not improve: no measure that is gone from the contract, no count that more of alone is not a win, no pass or fail guard that already passes |
+| `backfill` | fills the record from past commits, each checked against its parent with the measures as they are now. Rows are marked `backfill`, and a commit's type (fix, feat, ...) becomes its label |
+
+The record is read as a hint and never changes a verdict. Anything that can write to the repo can write to it.
+
+## Over a number of turns
+
+`improve --attempt "<cmd>" --turns N`. One attempt judged alone is a greedy step: improved, or put back. A change
+that needs a level step first (or a worse one) can never be kept that way, and under a pass-or-fail measure a fix
+bigger than one attempt shows nothing until it is whole. So the rule that judges each step alone gets small sure
+steps and nothing else. With `--turns`:
+
+| | |
+|---|---|
+| between turns | nothing is put back. Each turn goes on from where the last left the tree |
+| what is measured | after every turn, the whole change so far against the commit the run STARTED from. The same check, the source-only re-run included. A test edited at turn 2 cannot make a win at turn 4 |
+| what is kept | the best turn (the largest gain on the measures that make a win), not the last. One commit |
+| the second look | the best turn is measured once more before it is kept. N turns are N tries at a measure that may be noisy |
+| what the next turn is told | a short file: each measure at the start and now, what is worse than at the start, which turn this is. `PW_FEEDBACK` holds its path. Nothing a person typed is in it |
+| when it ends | after N turns; when a turn ends by itself having changed nothing (one that was cut off, or failed, does not end the run); when nothing more can be gained; after `--patience` turns (3) with no new best, once there is a best |
+| the contract | the person's. A change the check would keep is put back when it touched `promptwheel.config.json`, a file inside the repo it extends, or a file it names as part of the gate. A win is a gain on the target |
+| where the best so far is held | in the running process. There is no file an attempt could delete or rewrite to lower the bar. A run killed outright leaves a mark (`.git/improve/running.json`) that the next run names |
+| an interrupt | the tree is put back. A best turn that had passed its check is kept |
+| the record | a line a turn in the loop's record, then a line for the run. A turn that changed nothing is not judged again. `playbook` prints each run's path. Counts over the record are over runs |
+
+The brakes do not get looser with more turns. They matter more: more turns are more tries, and RRSI's plain loop
+fit its own tasks. The floor (no guard worse than at the start), the source-only re-run over the whole run, and
+the second look all apply at the end, and a measure the loop never sees is still missing.
+
+## What is judged cannot touch what judges it
+
+That sentence is from another session's work on its own loop step (2026-11-21). It wrote 28 attacks: an attempt
+that tries to get a bad change kept, lose earlier work, leave a mess, or bend the judge for the tries after it.
+Run against this command, 8 of the 25 that apply got through. Six were holes, and each was a place where the loop
+trusted something the attempt could write. They are closed:
+
+| | |
+|---|---|
+| keep exactly what was judged | the commit is made from the tree that was checked, with `git commit-tree`. Not from the working tree as it is a moment later (a process the attempt left behind may have written to it). **No git hook runs on it**: a hook the attempt planted could add to the commit after the check had looked |
+| a file hidden from git | `skip-worktree` and `assume-unchanged` hide a change from `git status`, and `git reset --hard` does not put such a file back. The loop does not start while a file is hidden. If an attempt hides one, it is shown again and the attempt is put back |
+| the loop's own files | the record and the program itself (this file, and the packs beside it) are put back if an attempt changed them, and that attempt is put back too. The record may grow during an attempt (a check the attempt ran adds a row). The lines that were there must still be there |
+| the contract | an attempt that changes it is put back (above) |
+| git's own files | the repo's git config, its hooks and info folders, the refs, and your global git config, attributes file and ignore file. Git does not track them and an attempt can write them. A second list of attacks from the same session went through them: a hook moved the branch after the keep, a filter made the commit hold another number than the one measured, a replace ref swapped the object the check read, an fsmonitor command ran inside the loop's own git calls. They are read before each attempt and put back after it, before the change is judged, and the change is then judged as usual. If your global config changed while the attempt ran, it is put back too, and the line names the file. A file that is a link stays a link |
+| the engine's own git calls | run no hook, no fsmonitor command, and read no replace object, whatever the repo's settings say. The commands it runs for you (a metric, the setup, the attempt) get your environment as you set it. This needs git 2.31 or newer: an older git ignores the setting that turns hooks and fsmonitor off, and says nothing |
+
+**What this cannot hold, said plainly.** The attempt runs as you, with no wall around it.
+- **An installed dependency that a measure runs** (`node_modules`, a `vendor` folder git ignores). An attempt can
+  edit it and every later measure reads differently. Git does not see it. Got through every step that was tried.
+- **A safety rule deleted behind another one.** If two rules cover the same thing and an attempt deletes one, no
+  measure moves, and a measure of cost may even improve. What protects has to be frozen (a protected path in the
+  contract), not scored.
+- **A process the attempt leaves running.** It cannot get anything into the commit: the commit is the judged tree.
+  It can write to the tree after the loop has finished. The next run will not start on a tree that is not clean,
+  and says so. It can also write into the copy the check measures in, in the temp folder, while it is measured: a
+  new file that moved no number was kept as a win that way. Ending the attempt's process group would stop the plain
+  form and not one that leaves its group. A container stops both.
+- **Anything outside the repo:** a database, a service, a file in your home folder. Your global git config is
+  put back; a file it includes from somewhere else is not.
+- **A sparse checkout** hides files the same way an attack does, so the loop does not run in one.
+A container around the attempt, or the check run again where the attempt cannot reach (a pull request), is what
+holds these. The loop does not.
+
+## What may be said, and what may not
+
+**May be said:** the loop keeps a change only if it measured better, and puts the tree back if not. That is the
+check, run on an attempt. It is tested.
+
+**May be said:** with `--turns`, a change that takes more than one turn can be kept, and a run that ends with
+nothing gained leaves the tree as it was. Tested, with scripted attempts.
+
+**May not be said:** that `--turns` helps a real agent. Three runs on 2026-11-21 (Haiku 5.5, 45 seconds a turn, a
+job that takes one unhurried attempt 135 seconds, a pass-or-fail measure) did not show it. The count of work left,
+after each turn, read like this: `89 89 89 89 81 81 81 81 81`, or `89 89 89 74 74 0`. Staircases: most turns that
+were cut short had saved nothing, a small step that was saved was kept and not built on, and then one turn did the
+rest. The same job took that agent anything from 23 seconds to over 180. For it, the finished job was the unit of
+progress, not the turn. Judging over turns was no worse than judging each attempt alone, and no better.
+
+**May not be said, until it is shown:** that the loop gets better with use, that the playbook makes later attempts
+better, or that the list of what was thrown away keeps an attempt from being tried twice.
+
+The test is `bench/compounding-ab.mjs`. Two arms take turns on one repo with one agent. One arm is handed a fresh
+playbook before each attempt and the other is not. The check judges every attempt. The claim opens only if the
+playbook arm keeps more, by 15 points or more over 20 attempts or more, and again on a second repo. A run that
+shows no gap is written down the same way.
+
+What is known so far points both ways:
+- A controlled test of notes across runs (March 2026) found they saved tokens and did not make the code better.
+- In sessions, a change a person had undone came back in the next session 27 of 27 times with nothing shown, and
+  0 of 27 with the undo and the person's reason at the prompt. A line that only stated the fact did not carry it
+  (22 of 27 came back). A line that said to stop and ask did (1 of 27). So a bare list of rejects is not known to
+  be enough. The reason is what carried. (Sawbuck's benches, 2026-11-10 and 2026-11-17.)
+- Google's RRSI paper (arXiv 2609.24972) measured a loop of this shape on agent harnesses. Without brakes it
+  gained on its own tasks (89.4 to 92.8), gained almost nothing on unseen ones (39.7 to 40.3), and used 2.4 times
+  the tokens. With brakes it gained less on its own tasks (90.5) and more on unseen ones (43.6).
+
+## The parts, beside RRSI's
+
+RRSI searches over an agent's harness with the tasks held fixed. This loop searches over a repo's files with the
+agent held fixed. The parts line up, and where they do not, it is said.
+
+| RRSI | here |
+|---|---|
+| a candidate: a bundle of edits, each with a hypothesis | one attempt: whatever the command changed, with a label and a goal if the driver gives them |
+| score on the task set, several trials | the contract's measures, each run `repeat` times, the middle value taken |
+| a noise band from re-running the unchanged base | the spread of the repeats. A move inside it is not a move |
+| the floor: no worse than the best so far, less the noise | a guard may not get worse than the base, and the base is the last kept commit |
+| the cost rule: a gain must pay for what it costs | `budget` on a guard, since 0.8.14 |
+| the leak critic, a model that reads the diff for task-specific edits | no model. A win is run again from the source edits alone, and a protected path fails the check. It asks a narrower thing: did the gain come from changing the measure? |
+| the edit log: every edit tried, with what it did and whether it was kept | the record, and the playbook's list of what was thrown away |
+| the exploration slot when the search stalls (3 rounds) | `suggest`: the least tried arm, named first after 3 attempts with nothing kept |
+| the edit budget that shrinks over the rounds | not here. The size of an attempt is the agent's |
+| the round: the same harness scored over 20 rounds, the curve reported | `--turns`: one run judged over its turns, its path in the record. RRSI's within-band rule (a level edit may be accepted) has its counterpart here: a level turn is not put back |
+| the pruner, which removes parts that stopped paying | not here. A line in the playbook fades unless it is earned again. Nothing is removed from the repo |
+| a held-out set the search never sees | not here, and it is the largest gap. A loop that improves the repo's own tests can fit those tests. The source-only re-run stops the cheapest way and no other |
+
+## History
+
+Built in June and July 2026 (`improve`, the record, `insights`, then `playbook`, `suggest`, `backfill` and the
+compounding test). Removed in November 2026 for a smaller surface before launch: the views in 0.7.5 and the loop
+and the record in 0.8.0. Neither cut followed a measurement, and the compounding test had never been run on real
+use. When the record was cut it held 224 rows across six repos, and none of them was an attempt of the loop: the
+loop itself had not been given real work. Put back in November 2026, with the changes named at the top of the
+engine's section "The wheel".
+
+The first run with a real agent (three attempts, 2026-11-21) found a fault in the rule on counts the same night:
+it threw away three real improvements, because it did not ask which way a count runs. Fixed, with the test.
