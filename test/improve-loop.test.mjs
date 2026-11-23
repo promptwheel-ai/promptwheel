@@ -354,10 +354,22 @@ test('loop: the attempt is handed the record and the target, so a proposer can r
   const file = join(git(d, 'rev-parse', '--absolute-git-dir'), 'improve', 'attempts.jsonl');
   assert.deepEqual(readFileSync(seen, 'utf8').trim().split('\n'), [`score 0 ${file}`, `score 1 ${file}`]);
 });
-test('loop: a label is kept as given, quotes and all, and with no label the attempt command is the label', () => {
+test('loop: a label is kept as given, quotes and all, and with no label the name of a try is the first word of its command', () => {
   const d = toy();
   step(d, 'echo 90 > src/score.txt', '--label', 'try "plan B", it\'s the 2nd'); step(d, 'echo 91 > src/score.txt');
-  assert.deepEqual(record(d).map((x) => x.label), ['try "plan B", it\'s the 2nd', 'echo 91 > src/score.txt']);
+  assert.deepEqual(record(d).map((x) => x.label), ['try "plan B", it\'s the 2nd', 'echo']);
+});
+// The label is the kept commit's subject and a field of the record, and both are pushed with the repo. Until 0.8.19 the
+// default label was the whole attempt command, so a prompt typed for an agent, or a key set in front of the command,
+// landed there. The owner's call (2026-11-23): the first word, and only the program's name in it.
+test('loop: with no label, nothing of the attempt command but its first word lands in the kept commit, the record or what is printed', () => {
+  const said = 'please fix the billing export for ACME'; const key = 'sk-not-a-real-key-123';
+  for (const [attempt, name] of [[`API_KEY=${key} sh -c "echo 120 > src/score.txt # ${said}"`, 'sh'], [`"/bin/sh" -c "echo 120 > src/score.txt # ${said}"`, 'sh'], [`( echo 120 > src/score.txt ) # ${said}`, 'echo']]) {
+    const d = toy(); const r = step(d, attempt);
+    assert.equal(r.code, 0, r.out + r.err); assert.deepEqual(record(d).map((x) => [x.label, x.result]), [[name, 'kept']], attempt);
+    assert.equal(git(d, 'log', '-1', '--format=%s'), `improve: ${name}`);
+    for (const where of [git(d, 'log', '-1', '--format=%B'), readFileSync(join(d, '.git', 'improve', 'attempts.jsonl'), 'utf8'), r.out, r.err]) { assert.ok(!where.includes(said), 'the words typed for the agent'); assert.ok(!where.includes(key), 'the key set in front of the command'); }
+  }
 });
 test('loop: an attempt that deletes or rewrites the record does not erase what was tried', () => {
   const d = toy();

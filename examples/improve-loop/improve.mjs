@@ -120,7 +120,16 @@ if (!attempt) die('--attempt "<command that changes the repo>" is required');
 { let said = ''; try { said = execFileSync('git', ['--version'], { encoding: 'utf8' }).trim(); } catch { /* said below */ }
   const v = /^git version (\d+)\.(\d+)/.exec(said);
   if (!v || Number(v[1]) < 2 || (Number(v[1]) === 2 && Number(v[2]) < 31)) die(`git 2.31 or newer is needed, and this is "${said || 'no git at all'}": an older git does not hold hooks off for the step's own calls`); }
-const label = args['--label'] ?? attempt, target = args['--target'] ?? 'score', cheaper = args['--cheaper'], floor = args['--floor'] === true;
+// The name of a try, when none is given: the first word of its command, and of that word only the program's name. The
+// label is the kept commit's subject and a field of the record, and both are pushed with the repo. The whole command
+// can hold a prompt someone typed for an agent, or a key set in front of it (NAME=value), and until 0.8.19 it was the
+// default. `--label` names a try otherwise, and is kept as given.
+const firstWord = (cmd) => {
+  const word = String(cmd).trim().split(/\s+/).find((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && /[A-Za-z0-9]/.test(w)) || '';
+  const name = (word.match(/[A-Za-z0-9_.+\/\\-]+/) || [''])[0].split(/[\/\\]/).filter(Boolean).pop() || '';
+  return name.slice(0, 60) || 'attempt';
+};
+const label = args['--label'] ?? firstWord(attempt), target = args['--target'] ?? 'score', cheaper = args['--cheaper'], floor = args['--floor'] === true;
 const whole = (flag, dflt) => { if (args[flag] === undefined) return dflt; const v = Number(args[flag]); if (!Number.isInteger(v) || v < 1) die(`${flag} needs a whole number of 1 or more`); return v; };
 const turns = whole('--turns', 1), patience = whole('--patience', 3);
 // The same pattern rules as the gate's evaluatorPaths and mandates, so one pattern means one thing in both places.

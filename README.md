@@ -184,12 +184,13 @@ Then `/promptwheel:setup` (write a config) · `/promptwheel:gate` (gate uncommit
 `improve` runs any agent or script, checks what it changed, and keeps it only if the target measure improved.
 
 ```
-promptwheel improve --attempt "sed -i 's/a - b/a + b/' src/add.js"
+promptwheel improve --attempt "perl -pi -e 's/a - b/a + b/' src/add.js"
 
-#  1  kept     sed -i 's/a - b/a + b/' src/add.js: tests_pass 0 to 1
+#  1  kept     perl: tests_pass 0 to 1
 ```
 
-That was run as written, on a repo with one failing test and no config. Put your agent where the `sed` is.
+That was run as written, on a repo with one failing test and no config. Put your agent where the `perl` is.
+The kept commit is named by the command's first word. `--label "<words>"` names it yourself.
 
 - **Kept means one commit. Anything else means the tree is put back as it was.** Exit `0` kept, `1` a guard got
   worse (or the floor held, or it changed a file it may not, or the contract), `2` the win came from a change to the
