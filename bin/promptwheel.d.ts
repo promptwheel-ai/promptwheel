@@ -511,6 +511,8 @@ export declare function testsIn(path: string, text: string): NamedTest[];
 /** The tests an earlier step of a change added and its last step no longer adds. `steps` are the change's commits in order, each with the commit it is held against. `null` when there is nothing to say or a step cannot be read. */
 export declare function testsTakenOut(repo: string, steps: { base: string; head: string }[]): { added: number; names: string[]; more: number; at: string } | null;
 export declare function testsGone(repo: string, base: string, head: string): { gone: number; names: string[]; more: number; emptied: string[] } | null;
+/** The same reading over one span, `from` to `to`, with no search for where the change left its base. */
+export declare function testsGoneIn(repo: string, from: string, to: string): { gone: number; names: string[]; more: number; emptied: string[] } | null;
 
 // ---------------------------------------------------------------------------
 // The record's views. The CLI's `insights`, `playbook` and `suggest` are built on these.

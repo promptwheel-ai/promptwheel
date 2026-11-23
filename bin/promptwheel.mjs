@@ -2652,12 +2652,17 @@ function testsAddedAt(repo, base, head, cache, out = null) {
 // a test and has none. On 128 fresh controls nobody had looked at it spoke on 6, and five of those were renames or
 // rewrites: so it is a note that says what was read, never part of a verdict. -> { gone, names, more, emptied } | null
 // The change is read from the point it left the base (the last of changeStepsAll), as the benchmark's rows were read:
-// a base that moved on since does not read as tests the change took out.
+// a base that moved on since does not read as tests the change took out. A clone too shallow to find that point gets
+// no note.
 export function testsGone(repo, base, head) {
   const all = changeStepsAll(repo, base, head); if (!all || !all.length) return null;
   const span = all[all.length - 1];
+  return testsGoneIn(repo, span.base, span.head);
+}
+// the reading over one span, from -> to (exported for the benchmark's sealed harness, whose clones are shallow)
+export function testsGoneIn(repo, from, to) {
   const cache = new Map(), out = {};
-  if (testsAddedAt(repo, span.base, span.head, cache, out) === null || !out.tally) return null;
+  if (testsAddedAt(repo, from, to, cache, out) === null || !out.tally) return null;
   const gone = [...out.tally].filter(([, v]) => v < 0);
   const n = gone.reduce((a, [, v]) => a - v, 0);
   const emptied = (out.changed || []).filter((c) => c.st !== 'D' && c.a && c.b && (cache.get(c.a) || []).length >= 1 && (cache.get(c.b) || []).length === 0).map((c) => c.f).sort();
