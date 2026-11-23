@@ -310,6 +310,18 @@ test('loop: an attempt that throws away earlier commits is put back to where the
 });
 
 // ------------------------------------------------------------------ the record
+// A second reader of the rule above (the same night it was written) found what it took too much of: a line that names
+// no change took away whatever sat under its number, and the refs are shared by every worktree of a repo while each
+// worktree keeps its own record and its own numbers. The step only takes away a ref that this run of it put there.
+test('loop: a try in another worktree of the repo, one that changes nothing, leaves this worktree\'s kept change readable', () => {
+  const d = toy(); assert.equal(step(d, GOOD).code, 0);
+  const kept = git(d, 'rev-parse', 'refs/improve/1'), wt = `${d}-wt`;
+  git(d, 'worktree', 'add', '-q', '-b', 'other', wt);
+  // not through step(): `agree` holds one record to the refs, and a second worktree has a record of its own
+  const r = spawnSync(process.execPath, [RIG, '--attempt', 'true'], { cwd: wt, encoding: 'utf8', env: ENV, timeout: 120000 });
+  assert.equal(r.status, 3, r.stderr);
+  assert.equal(git(d, 'rev-parse', '--verify', '-q', 'refs/improve/1'), kept, 'a ref another record names is not this run\'s to take away');
+});
 test('loop: every attempt, kept or not, is on record with what the gate saw', () => {
   const d = toy();
   step(d, 'echo 110 > src/score.txt', '--label', 'a'); step(d, 'echo 90 > src/score.txt', '--label', 'b'); step(d, 'echo 50 > evals/bonus.txt', '--label', 'c'); step(d, 'true', '--label', 'd');

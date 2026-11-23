@@ -218,6 +218,7 @@ const k = Number(process.env.GIT_CONFIG_COUNT) || 0;
 const quiet = { GIT_CONFIG_COUNT: String(k + 2), [`GIT_CONFIG_KEY_${k}`]: 'core.hooksPath', [`GIT_CONFIG_VALUE_${k}`]: '/dev/null', [`GIT_CONFIG_KEY_${k + 1}`]: 'core.fsmonitor', [`GIT_CONFIG_VALUE_${k + 1}`]: 'false' };
 
 const restored = new Set(), refsLost = [];   // which of the loop's own files the attempt touched, and what could not be put back
+const wrote = new Set();                     // the refs under refs/improve that this run of the step put there
 let asks = 0;   // how often the gate was asked in this try: what the try cost
 const putBack = () => { git('reset', '-q', '--hard', base); git('clean', '-qfd'); };
 const note = (result, why, extra = {}) => {
@@ -225,8 +226,10 @@ const note = (result, why, extra = {}) => {
   // one, and it is that change. The closing line of a run over turns names its best turn's change, so that change is
   // readable under the closing line's number too. A line that names no change (a stop while a check ran) leaves none
   // behind under its number. The report holds the record to this rule, and says "not whole" when it is broken.
+  // Only a ref this run put there is ever taken away (`wrote`): the refs are shared by every worktree of a repo, each
+  // worktree keeps a record and numbers of its own, and a ref another record names is not this run's to remove.
   const ref = `refs/improve/${n}`;
-  if (extra.candidate) git('update-ref', ref, extra.candidate); else if (holds('rev-parse', '-q', '--verify', ref)) git('update-ref', '-d', ref);
+  if (extra.candidate) git('update-ref', ref, extra.candidate); else if (wrote.has(ref)) git('update-ref', '-d', ref);
   const line = { n, at: new Date().toISOString(), label, base, target, result, why, ...extra, ...(asks ? { asks } : {}), ...(restored.size ? { recordPutBack: true, restored: [...restored] } : {}), ...(refsLost.length ? { refsLost } : {}) };
   appendFileSync(record, JSON.stringify(line) + '\n');
   n++;
@@ -290,7 +293,7 @@ const foldOrRefuse = () => {
   const now = git('rev-parse', 'HEAD');
   if (now !== base && holds('merge-base', '--is-ancestor', base, now)) git('reset', '-q', base);   // its commits become a working change, judged like any other
   else if (now !== base) {
-    git('update-ref', `refs/improve/${n}`, now); putBack();
+    git('update-ref', `refs/improve/${n}`, now); wrote.add(`refs/improve/${n}`); putBack();
     const why = `the attempt moved the branch off the commit it started on. It is put back, and where the attempt left it is under refs/improve/${n}`;
     note('rewrote', why, { candidate: now }); return why;
   }
@@ -304,7 +307,7 @@ const candidateOf = (subject) => {
   const files = git('diff', '--cached', '--name-only').split('\n').filter(Boolean);
   const tree = git('write-tree');
   const candidate = git('commit-tree', tree, '-p', base, '-m', subject);
-  git('update-ref', `refs/improve/${n}`, candidate);
+  git('update-ref', `refs/improve/${n}`, candidate); wrote.add(`refs/improve/${n}`);
   git('reset', '-q');
   return { files, tree, candidate };
 };
@@ -488,6 +491,6 @@ try {
   // anything this did not plan for: put the attempt back and say so, with the code for "could not run". No line is
   // written for it, so the change is not left under a number that no line has.
   try { putBack(); } catch { /* the message below is what matters */ }
-  try { if (holds('rev-parse', '-q', '--verify', `refs/improve/${n}`)) git('update-ref', '-d', `refs/improve/${n}`); } catch { /* the message below is what matters */ }
+  try { if (wrote.has(`refs/improve/${n}`)) git('update-ref', '-d', `refs/improve/${n}`); } catch { /* the message below is what matters */ }
   die(String(e.message || e).split('\n').filter((l) => l.trim()).slice(0, 3).join(' '));
 }
