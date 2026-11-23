@@ -74,7 +74,7 @@ if (args.includes('--self-test')) {
     const arm = i % 2 === 0 ? 'playbook' : 'control';
     const pb = arm === 'playbook' ? renderPlaybook(d, pbDir) : '';
     // the scripted "agent" of the playbook arm acts only when it was handed a playbook file: the hand-over is tested too
-    const cmd = arm === 'playbook' ? "test -n \"$PW_PLAYBOOK\" && sed -i '0,/ \\/\\/ TODO/s///' app.js" : 'test -z "$PW_PLAYBOOK"';
+    const cmd = arm === 'playbook' ? "test -n \"$PW_PLAYBOOK\" && node -e 'const fs=require(\"fs\");fs.writeFileSync(\"app.js\",fs.readFileSync(\"app.js\",\"utf8\").replace(\" // TODO\",\"\"))'" : 'test -z "$PW_PLAYBOOK"';
     if (pb) sawPlaybook = true;
     tally[arm][attempt(d, cmd, pb, 'todos')] += 1;
   }

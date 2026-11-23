@@ -4705,7 +4705,7 @@ test('the wheel in the CLI: --help names each command, and an unknown flag to on
 // the door itself; the step's own behaviour is held by test/improve-loop.test.mjs.
 test('improve is a door onto the loop step: its record, its line and its exit code are the step\'s, and --goal is another name for --target', () => {
   const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base'); const base = rev(d);
-  let r = pw2(d, ['improve', '--goal', 'todos', '--label', 'one todo out', '--attempt', "sed -i '1s| // TODO||' app.js"]);
+  let r = pw2(d, ['improve', '--goal', 'todos', '--label', 'one todo out', '--attempt', "sed -i.bak '1s| // TODO||' app.js && rm -f app.js.bak"]);
   assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, /^ 1 {2}kept {5}one todo out: todos 2 to 1\n$/);
   assert.equal(execFileSync('git', ['rev-parse', 'HEAD~1'], { cwd: d, encoding: 'utf8' }).trim(), base);
   const lines = readFileSync(join(d, '.git', 'improve', 'attempts.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
@@ -4718,7 +4718,7 @@ test('improve is a door onto the loop step: its record, its line and its exit co
 // The README's first loop example, run as it is written there, and then the report a person asks for next. Found by
 // the rehearsal of 0.2.5 from the packed copy (2026-11-22): the line printed what the README says and `improve --report`
 // after it ended with a TypeError. The line and what it prints are read from the README, so the page is held to them.
-// (The line uses `sed -i` with no suffix, as other tests here do: the sed on a Mac does not take that form. Lead L127.)
+// (Every in-place sed here takes a suffix and removes the copy: a Mac's sed refuses `sed -i` with none. Lead L127.)
 test('the README\'s own improve line, as written, on a repo with one failing test and no config: what it prints, and then --report', () => {
   const readme = readFileSync(join(dirname(ENGINE), '..', 'README.md'), 'utf8');
   const m = readme.match(/```\npromptwheel improve --attempt "(.+)"\n\n# ( 1 {2}kept .+)\n```/);
@@ -4737,13 +4737,13 @@ test('the README\'s own improve line, as written, on a repo with one failing tes
 test('improve asks the engine it ships with, whatever PROMPTWHEEL says, and hands the attempt your environment', () => {
   const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\n'); commitAll(d, 'base');
   const seen = join(mkdtempSync(join(tmpdir(), 'pw-door-')), 'env.txt');
-  const r = spawnSync(process.execPath, [ENGINE, 'improve', '--target', 'todos', '--attempt', `echo "$MINE $PROMPTWHEEL $GIT_NO_REPLACE_OBJECTS" > ${seen}; sed -i 's| // TODO||' app.js`], { cwd: d, encoding: 'utf8', env: { ...process.env, PROMPTWHEEL: '/nowhere/promptwheel.mjs', MINE: 'mine' } });
+  const r = spawnSync(process.execPath, [ENGINE, 'improve', '--target', 'todos', '--attempt', `echo "$MINE $PROMPTWHEEL $GIT_NO_REPLACE_OBJECTS" > ${seen}; sed -i.bak 's| // TODO||' app.js && rm -f app.js.bak`], { cwd: d, encoding: 'utf8', env: { ...process.env, PROMPTWHEEL: '/nowhere/promptwheel.mjs', MINE: 'mine' } });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(readFileSync(seen, 'utf8').trim(), 'mine', 'the attempt has your variable, no PROMPTWHEEL, and none of the engine\'s own git settings');
 });
 test('the views over a run of several turns: the playbook prints its path from the loop\'s record, a turn that changed nothing carries the last reading, and insights counts the run', () => {
   const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
-  const attempt = `case "$PW_TURN" in 1) echo helper > helper.txt;; 2) sed -i '1s| // TODO||' app.js;; esac`;
+  const attempt = `case "$PW_TURN" in 1) echo helper > helper.txt;; 2) sed -i.bak '1s| // TODO||' app.js && rm -f app.js.bak;; esac`;
   const r = pw2(d, ['improve', '--target', 'todos', '--label', 'two steps', '--turns', '4', '--attempt', attempt]);
   assert.equal(r.code, 0, r.out + r.err);
   assert.match(pw(d, ['playbook']).out, /- \*\*two steps\*\*: kept at turn 2 of 3: `todos` 2 → 2 → 1 → 1/);
@@ -4796,18 +4796,18 @@ const addRepo = () => {   // no config file: a package whose one test fails unti
   writeFileSync(join(z, 'test', 'add.test.js'), "const t = require('node:test'), a = require('node:assert')\nt.test('add', () => a.equal(require('../src/add.js').add(2, 2), 4))\n");
   g('add', '-A'); g('commit', '-qm', 'base'); return { z, g };
 };
-const FIX_ADD = "sed -i 's/a - b/a + b/' src/add.js";
+const FIX_ADD = "sed -i.bak 's/a - b/a + b/' src/add.js && rm -f src/add.js.bak";
 // an attempt that leaves its mark outside the repo, where no put-back reaches: whether it ran at all
 const ranMark = () => { const f = join(mkdtempSync(join(tmpdir(), 'pw-ran-')), 'ran'); return { f, attempt: `touch '${f}'` }; };
 test('improve: with no target named, the door picks the contract\'s only measure: one measure, a target beside tripwires, no config file, and the contract init writes', () => {
   const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a // TODO\nb // TODO\n'); commitAll(d, 'base');
-  let r = pw2(d, ['improve', '--attempt', "sed -i '1s| // TODO||' app.js"]);
+  let r = pw2(d, ['improve', '--attempt', "sed -i.bak '1s| // TODO||' app.js && rm -f app.js.bak"]);
   assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, / kept .*todos 2 to 1/);
   assert.equal(JSON.parse(readFileSync(join(d, '.git', 'improve', 'attempts.jsonl'), 'utf8').trim()).target, 'todos');
   const t = tmpRepo([TRIP, TODOS]); writeFileSync(join(t, 'app.js'), 'a // TODO\n'); writeFileSync(join(t, 'notes.txt'), 'x\n'); commitAll(t, 'base');
-  r = pw2(t, ['improve', '--attempt', "sed -i 's| // TODO||' app.js"]); assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, / kept .*todos 1 to 0/, 'dashes is a tripwire');
+  r = pw2(t, ['improve', '--attempt', "sed -i.bak 's| // TODO||' app.js && rm -f app.js.bak"]); assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, / kept .*todos 1 to 0/, 'dashes is a tripwire');
   const w = tmpRepo([TRIP]); writeFileSync(join(w, 'notes.txt'), 'a -- b\n'); commitAll(w, 'base');
-  r = pw2(w, ['improve', '--attempt', "sed -i 's/ -- / /' notes.txt"]); assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, / kept .*: dashes \d+ to \d+$/m, 'a contract\'s one measure, tripwire or not');
+  r = pw2(w, ['improve', '--attempt', "sed -i.bak 's/ -- / /' notes.txt && rm -f notes.txt.bak"]); assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, / kept .*: dashes \d+ to \d+$/m, 'a contract\'s one measure, tripwire or not');
   const { z } = addRepo();
   r = pw2(z, ['improve', '--attempt', FIX_ADD]); assert.equal(r.code, 0, r.out + r.err); assert.match(r.out, / kept .*tests_pass 0 to 1/);
   const { z: y, g } = addRepo(); assert.equal(pw(y, ['init']).code, 0); g('add', '-A'); g('commit', '-qm', 'contract');
@@ -4823,7 +4823,7 @@ test('improve: on a contract of several measures with none named score, the door
     assert.equal(existsSync(m.f), false, 'the attempt never ran');
   }
   const h = pw2(d, ['improve', '--help']); assert.equal(h.code, 0, h.err); assert.match(h.out, /--attempt/);
-  const k = pw2(d, ['improve', '--goal', 'todos', '--attempt', "sed -i 's| // TODO||' app.js"]); assert.equal(k.code, 0, k.out + k.err); assert.match(k.out, / kept .*todos 1 to 0/);
+  const k = pw2(d, ['improve', '--goal', 'todos', '--attempt', "sed -i.bak 's| // TODO||' app.js && rm -f app.js.bak"]); assert.equal(k.code, 0, k.out + k.err); assert.match(k.out, / kept .*todos 1 to 0/);
   const a = tmpRepo([TRIP, { ...TRIP, name: 'dashes2' }]); writeFileSync(join(a, 'notes.txt'), 'x\n'); commitAll(a, 'base');
   const m = ranMark(); const r = pw2(a, ['improve', '--attempt', m.attempt]); assert.equal(r.code, 64); assert.equal(existsSync(m.f), false);
   assert.match(r.err, /the contract's 2 measures are all tripwires and none is named score, so name the one this run is for: --target <dashes \| dashes2>/);

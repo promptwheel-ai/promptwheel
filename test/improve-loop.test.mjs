@@ -1099,7 +1099,7 @@ test('contract: a repo with no config has no contract file to guard, and a win t
   put(d, 'package.json', '{"name":"zc","scripts":{"test":"node --test"}}\n'); put(d, 'src/add.js', 'exports.add=(a,b)=>a-b\n');
   put(d, 'test/add.test.js', "const t=require('node:test'),a=require('node:assert');t.test('add',()=>a.equal(require('../src/add.js').add(2,2),4))\n");
   git(d, 'add', '-A'); git(d, 'commit', '-q', '-m', 'base');
-  const r = step(d, "sed -i 's/a-b/a+b/' src/add.js", '--target', 'tests_pass');
+  const r = step(d, "sed -i.bak 's/a-b/a+b/' src/add.js && rm -f src/add.js.bak", '--target', 'tests_pass');
   assert.equal(r.code, 0, r.err + r.out); assert.match(r.out, / kept .*tests_pass 0 to 1/);
 });
 test('mark: a second run while the first is going is refused, by the first run\'s own mark', async () => {
