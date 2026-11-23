@@ -5073,6 +5073,7 @@ test('on a pull request, a change that took out every test it had added fails, w
   // pw2 keeps stdout apart: on a failing verdict the command also writes to stderr, and range() reads both together
   const r = pw2(d, ['run', '--base', base, '--head', 'HEAD', '--no-record', '--json', '--pull-request']); const rep = JSON.parse(r.out);
   assert.equal(r.code, 1, 'the job fails'); assert.equal(rep.verdict, 'fail');
+  assert.equal(conformsToContract(rep).ok, true, JSON.stringify(conformsToContract(rep).errors || conformsToContract(rep)));   // second read of 0.2.7: the guard had no direction
   const md = renderMarkdown(rep);
   assert.match(md, /> ✋ \*\*Needs a look:\*\* an earlier commit of this pull request \(`[0-9a-f]{7,}`\) added 3 tests\. None of them is in it now: `adds four`, `adds three`, `adds two`\./);
   assert.doesNotMatch(md, /ℹ️ \*\*Note:\*\* an earlier commit of this pull request/, 'not said twice');
@@ -5083,6 +5084,7 @@ test('on a pull request, a person\'s reason lets the change that took its added 
   const { code, rep } = range(d, base, 'HEAD', '--pull-request', '--allow', 'the three tests moved to the next pull request');
   assert.equal(code, 0, 'let through'); assert.equal(rep.verdict, 'pass');
   assert.ok(rep.allowed && (rep.allowed.cleared || []).includes('tests_taken_out'), 'and the report says what was let through');
+  assert.equal(conformsToContract(rep).ok, true, 'and the report conforms');
 });
 test('without --pull-request the change that took its added tests out is a note, as before', () => {
   const { d, base } = takenOutRepo();
@@ -5131,5 +5133,19 @@ test('the note reads the change from where it left the base: tests the base gain
   assert.notEqual(main, fork);
   const { rep } = range(d, main);
   assert.equal(rep.testsGone, undefined, 'the change took no test out');
+});
+// second read of 0.2.7: a test moved out of a file that stays left that file "emptied" with nothing gone, and the note said
+// "0 tests ... : ."; a test file grown past what the note reads (2 MiB) read as all its tests gone
+test('the note is not said for tests that moved out of a file that stays: nothing is gone', () => {
+  const d = prRepo(); put(d, 'test/more.test.js', T3); commitAll(d, 'three tests'); const base = rev(d);
+  put(d, 'test/more.test.js', '// the tests moved\n'); put(d, 'test/moved.test.js', T3); commitAll(d, 'move them');
+  const { rep } = range(d, base);
+  assert.equal(rep.testsGone, undefined); assert.doesNotMatch(renderMarkdown(rep), /named in the changed files/);
+});
+test('a test file grown past what the note reads is left out of it, not read as its tests gone', () => {
+  const d = prRepo(); put(d, 'test/more.test.js', T3); commitAll(d, 'three tests'); const base = rev(d);
+  put(d, 'test/more.test.js', T3 + '// ' + 'x'.repeat(2.1 * 1024 * 1024) + '\n'); commitAll(d, 'a long comment');
+  const { rep } = range(d, base);
+  assert.equal(rep.testsGone, undefined);
 });
 
