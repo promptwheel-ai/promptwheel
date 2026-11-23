@@ -3640,6 +3640,31 @@ test('--base-cache: a kept number answers only for the same tree measured the sa
   assert.ok(w1.baseMeasured); assert.equal(w1.metrics[0].before, 2); assert.equal(w1.metrics[0].after, 5);
   a.done();
 });
+// lead L64: on a Mac the temp folder sits behind a symlink (/var is /private/var), and git lists a worktree by its real
+// path. The self-heal named its folders through the link, never matched a registered worktree, and took a live one
+// (over an hour old, still measuring) for one a killed run left behind. The base-cache guard compared the real path of
+// the repo with the folder as typed, so a folder inside the repo named through a link read as outside.
+test('self-heal through a temp folder behind a symlink: a registered worktree another run is measuring in is left alone', () => {
+  const realTmp = mkdtempSync(join(tmpdir(), 'pw-heal-real-')); const link = `${realTmp}-link`; symlinkSync(realTmp, link);
+  const d = tmpRepo([TODOS]); writeFileSync(join(d, 'app.js'), 'a\n'); commitAll(d, 'base');
+  const live = join(link, `promptwheel-src-${ownerTag(d)}-LIVE02`);
+  execFileSync('git', ['worktree', 'add', '--quiet', '--detach', live, 'HEAD'], { cwd: d });
+  const old = new Date(Date.now() - 7200_000); utimesSync(live, old, old);
+  pwTmp(link, d, ['run', '--working']);
+  const listed = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: d, encoding: 'utf8' });
+  assert.match(listed, /-LIVE02$/m, 'still registered'); assert.equal(existsSync(live), true, 'still on disk');
+  execFileSync('git', ['worktree', 'remove', '--force', live], { cwd: d });
+  for (const p of [link, realTmp, d]) rmSync(p, { recursive: true, force: true });
+});
+test('--base-cache: a folder inside the repository named through a symlink is refused as well', () => {
+  const a = countedRepo(), base = rev(a.d); a.level(2, 'a try');
+  const link = `${a.d}-link`; symlinkSync(a.d, link);
+  const refused = (e) => e.name === 'ConfigError' && e.exitCode === 64 && /outside the repository/.test(e.message);
+  assert.throws(() => check({ repo: a.d, base, head: 'HEAD', baseCache: join(link, '.kept') }), refused, 'the folder named through the link');
+  assert.throws(() => check({ repo: link, base, head: 'HEAD', baseCache: join(a.d, '.kept') }), refused, 'the repo named through the link');
+  assert.equal(a.times(), 0, 'refused before anything is run');
+  rmSync(link, { force: true });
+});
 test('--base-cache: the folder must sit outside the repository, and a base that gave no number is not kept', () => {
   const a = countedRepo(), base = rev(a.d);
   a.level(2, 'a try');

@@ -406,7 +406,9 @@ function measureAt(repo, ref, cfg, repeat) {
 // installed node_modules) is not in the key, so a caller that changes it empties the folder.
 function measureBase(repo, base, cfg, repeat, dir) {
   if (!dir) return { samples: measureAt(repo, base, cfg, repeat) };
-  const abs = resolve(dir), inRepo = relative(realpathSync(repo), abs);
+  // the folder by its real path, as far as it exists yet: a folder inside the repo named through a symlink is inside (lead L64)
+  const realish = (x) => { const tail = []; let a = resolve(x); for (;;) { try { return join(realpathSync(a), ...tail); } catch { const up = dirname(a); if (up === a) return resolve(x); tail.unshift(basename(a)); a = up; } } };
+  const abs = resolve(dir), inRepo = relative(realpathSync(repo), realish(abs));
   if (!inRepo.startsWith('..') && !isAbsolute(inRepo)) bad(`promptwheel: --base-cache needs a folder outside the repository (got ${dir}): a kept number the change can reach is a goalpost`);
   const how = [git(['rev-parse', `${base}^{tree}`], repo), cfg.metrics.map((m) => [m.name, m.cmd ?? null, m.extract ?? 'number', m.allowNonzero === true, m.timeoutSec ?? null]), measuredWith(cfg), repeat, TOOL_VERSION, process.platform];
   const file = join(abs, `${createHash('sha256').update(JSON.stringify(how)).digest('hex').slice(0, 32)}.json`);
@@ -824,14 +826,17 @@ function selfHeal(repo) {
         .split('\n').filter((l) => l.startsWith('worktree ')).map((l) => l.slice(9).trim()),
     );
     const tmp = tmpBase(repo), now = Date.now(), mine = tmpOwnerTag(repo);
+    // git lists a worktree by its real path; the temp folder may sit behind a symlink (on a Mac /var is /private/var), and
+    // a registered worktree named through the link was taken for one a killed run left behind (lead L64)
+    const real = (x) => { try { return realpathSync(x); } catch { return x; } };
     for (const name of readdirSync(tmp)) {
       const made = ENGINE_TMP.exec(name);
       if (!made) continue;   // not a name this engine generates (worktrees + temp-index dirs): never removed
       const tag = made[2];
       // ours after an hour; another repo's only after a full day
-      const p = join(tmp, name);
-      if (tracked.has(p) && tag !== mine) continue;   // a registered worktree this repo's gate did not make
-      const maxAge = tag === mine && !tracked.has(p) ? 3600_000 : 86_400_000;
+      const p = join(tmp, name), registered = tracked.has(p) || tracked.has(real(p));
+      if (registered && tag !== mine) continue;   // a registered worktree this repo's gate did not make
+      const maxAge = tag === mine && !registered ? 3600_000 : 86_400_000;
       // lstat: the engine makes directories, so a file or a symlink under one of its names is left alone
       try { const st = lstatSync(p); if (st.isDirectory() && st.mtimeMs < now - maxAge) rmSync(p, { recursive: true, force: true }); } catch { /* */ }
     }

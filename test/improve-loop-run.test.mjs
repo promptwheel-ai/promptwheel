@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { ENV, GATE, HERE, NODE, REPORT, RUN, STEP, TMP_ROOT, agree, asked, at, bump, clean, git, head, lines, put, read, record, run, step, toy } from './improve-loop-helpers.mjs';
 
@@ -150,7 +150,8 @@ test('run: the wall is on unless the plan turns it off', () => {
   const on = planned([`pwd > ${where}; ${WIN}`]); go(on);
   assert.notEqual(readFileSync(where, 'utf8').trim(), on); assert.equal(results(on)[0], 'kept');
   const off = planned([`pwd > ${where}; ${WIN}`], { wall: false }); go(off);
-  assert.equal(readFileSync(where, 'utf8').trim(), off);
+  // by real path: `pwd` names the folder by where it is, and the temp folder may sit behind a symlink (a Mac's does)
+  assert.equal(realpathSync(readFileSync(where, 'utf8').trim()), realpathSync(off));
 });
 test('run: the plan\'s wall settings reach the wall: with, minutes and record', () => {
   const note = join(TMP_ROOT, `note-${++made}`);
