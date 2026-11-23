@@ -223,13 +223,15 @@ let asks = 0;   // how often the gate was asked in this try: what the try cost
 const putBack = () => { git('reset', '-q', '--hard', base); git('clean', '-qfd'); };
 const note = (result, why, extra = {}) => {
   // One rule, kept here because every line is written here: refs/improve/<n> holds a change exactly when line n names
-  // one, and it is that change. The closing line of a run over turns names its best turn's change, so that change is
-  // readable under the closing line's number too. A line that names no change (a stop while a check ran) leaves none
-  // behind under its number. The report holds the record to this rule, and says "not whole" when it is broken.
-  // Only a ref this run put there is ever taken away (`wrote`): the refs are shared by every worktree of a repo, each
-  // worktree keeps a record and numbers of its own, and a ref another record names is not this run's to remove.
+  // one, and it is that change. The report holds the record to this rule, and says "not whole" when it is broken.
+  // - A change this run made is named by the line under its number, whatever else the line says: a change too wide
+  //   to read and a turn stopped while its check ran are on record, and what they changed stays readable.
+  // - The closing line of a run over turns names its best turn's change, which is so readable under its number too.
+  // - Nothing is taken away here. The refs are shared by every worktree of a repo, each worktree keeps a record and
+  //   numbers of its own, and a ref this run did not write (`wrote`) is not this run's to touch.
   const ref = `refs/improve/${n}`;
-  if (extra.candidate) git('update-ref', ref, extra.candidate); else if (wrote.has(ref)) git('update-ref', '-d', ref);
+  if (!extra.candidate && wrote.has(ref)) extra = { ...extra, candidate: git('rev-parse', ref) };
+  if (extra.candidate) git('update-ref', ref, extra.candidate);
   const line = { n, at: new Date().toISOString(), label, base, target, result, why, ...extra, ...(asks ? { asks } : {}), ...(restored.size ? { recordPutBack: true, restored: [...restored] } : {}), ...(refsLost.length ? { refsLost } : {}) };
   appendFileSync(record, JSON.stringify(line) + '\n');
   n++;
@@ -489,7 +491,7 @@ try {
     finish('nothing', `the change is too wide to read: more than ${room} came from git or the gate at once, so it was not measured and is put back`, 3);
   }
   // anything this did not plan for: put the attempt back and say so, with the code for "could not run". No line is
-  // written for it, so the change is not left under a number that no line has.
+  // written for it (it is not a try), so the change this run put under the next number is taken away again.
   try { putBack(); } catch { /* the message below is what matters */ }
   try { if (wrote.has(`refs/improve/${n}`)) git('update-ref', '-d', `refs/improve/${n}`); } catch { /* the message below is what matters */ }
   die(String(e.message || e).split('\n').filter((l) => l.trim()).slice(0, 3).join(' '));

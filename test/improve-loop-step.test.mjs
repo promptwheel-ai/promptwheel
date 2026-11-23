@@ -345,9 +345,25 @@ test('step: a change whose file list and gate report are each more than 1 MB is 
   assert.equal(r.code, 0, r.out + r.err); assert.notEqual(head(d), before); assert.ok(clean(d));
   assert.equal(record(d).length, 1); assert.equal(record(d)[0].result, 'kept');
 });
+// The other way to be too wide: the change itself is small and was stored, and it is the check's answer that is wider
+// than the step reads. That try is on record too, and what it changed stays readable under its number, named by its
+// line (the step's own header says every attempt's does). Before 2026-11-22 the line named no change while the ref
+// held one, so the report read "not whole"; the first rule for refs written that night then took the ref away, and a
+// second reader found that. Seen failing on both.
+test('step: a change whose check is too wide to read is on record, and what it changed can still be read back under its number', () => {
+  const d = toy(), before = head(d);
+  const r = run(STEP, d, ['--attempt', 'echo 110 > src/score.txt'], { IMPROVE_READ_MAX: '600' });
+  assert.equal(r.code, 3, r.out + r.err); assert.equal(head(d), before); assert.ok(clean(d), 'the change is put back');
+  const line = record(d)[0];
+  assert.equal(line.result, 'nothing'); assert.match(line.why, /too wide to read/);
+  assert.ok(line.candidate, 'the line names the change'); assert.equal(git(d, 'rev-parse', '--verify', '-q', 'refs/improve/1'), line.candidate);
+  assert.equal(git(d, 'show', `${line.candidate}:src/score.txt`), '110', 'and it is the change the attempt made');
+});
 test('step: a change too wide for the step to read is put back and on record as one that could not be measured, never left off', () => {
   const d = toy(), before = head(d);
   const r = run(STEP, d, ['--attempt', `i=0 && while [ $i -lt 100 ]; do echo "// $i" > src/case-$i-${LONG}.txt; i=$((i+1)); done && echo 101 > src/score.txt`], { IMPROVE_READ_MAX: '2000' });
   assert.equal(r.code, 3, r.out + r.err); assert.equal(head(d), before); assert.ok(clean(d), 'the change is put back');
   assert.equal(record(d).length, 1, 'the try is on record'); assert.equal(record(d)[0].result, 'nothing'); assert.match(record(d)[0].why, /too wide to read/);
+  // here the change is too wide even to list, so no copy of it was ever stored: the line names none and no ref is left
+  assert.equal(record(d)[0].candidate, undefined); assert.equal(git(d, 'for-each-ref', '--format=%(refname)', 'refs/improve'), '');
 });
