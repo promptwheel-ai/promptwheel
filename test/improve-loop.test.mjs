@@ -367,7 +367,11 @@ test('loop: with no label, nothing of the attempt command but its first word lan
   // the last four were found by a second reader: a word split inside quotes or inside $( ) put part of a value in the name
   for (const [attempt, name] of [[`API_KEY=${key} sh -c "echo 120 > src/score.txt # ${said}"`, 'sh'], [`"/bin/sh" -c "echo 120 > src/score.txt # ${said}"`, 'sh'], [`( echo 120 > src/score.txt ) # ${said}`, 'echo'],
     [`API_KEY='${key} part2' sh -c "echo 120 > src/score.txt"`, 'sh'], [`PROMPT="${said}" sh -c "echo 120 > src/score.txt"`, 'sh'],
-    [`TOKEN=$(echo ${key}) sh -c "echo 120 > src/score.txt"`, 'sh'], [`X=\`echo ${key}\` sh -c "echo 120 > src/score.txt"`, 'sh']]) {
+    [`TOKEN=$(echo ${key}) sh -c "echo 120 > src/score.txt"`, 'sh'], [`X=\`echo ${key}\` sh -c "echo 120 > src/score.txt"`, 'sh'],
+    // and from its second read: a ${...} default with a space, a double quote inside $( ) or backticks inside a double-quoted
+    // value, and a redirection before the command
+    [`KEY=\${KEY:-${key} fallback} sh -c "echo 120 > src/score.txt"`, 'sh'], [`TOKEN="$(printf "%s" "${key} token")" sh -c "echo 120 > src/score.txt"`, 'sh'],
+    [`X="\`echo "${key} file"\`" sh -c "echo 120 > src/score.txt"`, 'sh'], [`2>/dev/null sh -c "echo 120 > src/score.txt"`, 'sh'], [`<"/dev/null" sh -c "echo 120 > src/score.txt # ${said}"`, 'sh']]) {
     const d = toy(); const r = step(d, attempt);
     assert.equal(r.code, 0, r.out + r.err); assert.deepEqual(record(d).map((x) => [x.label, x.result]), [[name, 'kept']], attempt);
     assert.equal(git(d, 'log', '-1', '--format=%s'), `improve: ${name}`);
