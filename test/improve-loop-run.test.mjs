@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ENV, GATE, HERE, NODE, REPORT, RUN, TMP_ROOT, asked, at, bump, clean, git, head, lines, put, read, record, run, step, toy } from './improve-loop-helpers.mjs';
+import { ENV, GATE, HERE, NODE, REPORT, RUN, STEP, TMP_ROOT, agree, asked, at, bump, clean, git, head, lines, put, read, record, run, step, toy } from './improve-loop-helpers.mjs';
 
 let made = 0;
 // a proposer: try k runs line k of `acts`. Returns the attempt command for a plan.
@@ -316,6 +316,25 @@ test('report: a plan whose target the gate does not measure ends as a try that c
   assert.equal(r.code, 1); assert.match(r.err + r.out, /no metric named "nope"/); assert.equal(record(d).length, 0);
   assert.equal(git(d, 'for-each-ref', '--format=%(refname)', 'refs/improve'), '');
   const rep = report(d); assert.equal(rep.code, 0, rep.out + rep.err); assert.match(rep.out, /Ended: a try could not run[\s\S]*whole: yes/);
+});
+// The last case a second reader found (2026-11-22): turn 1 wins, and turn 2 is stopped while its check runs. The win
+// is kept under the next number, which is the number turn 2's change had been stored under, so that change was left
+// under no number. The stopped turn now gets a line of its own first, and its change stays readable there.
+// The scorer sends the interrupt itself, the moment it is asked to read the tree turn 2 made.
+test('turns: a turn stopped while its check ran, after an earlier turn had won: the win is kept, and what the stopped turn had changed is on record and can still be read back', async () => {
+  const pidfile = join(TMP_ROOT, `stopped-${Date.now()}.pid`);
+  const scorer = `if [ "$(cat src/score.txt)" = "120" ]; then /bin/kill -s INT -- -$(cat ${pidfile}); sleep 3; fi; echo $(( $(cat src/score.txt) + $(cat evals/bonus.txt) ))`;
+  const d = toy({ scorer });
+  const child = spawn(NODE, [STEP, '--attempt', 'case "$PW_TURN" in 1) echo 110 > src/score.txt;; 2) echo 120 > src/score.txt;; esac', '--turns', '3'], { cwd: d, env: ENV, stdio: 'ignore', detached: true });
+  writeFileSync(pidfile, String(child.pid));
+  const code = await new Promise((res) => child.on('exit', res));
+  const rows = record(d);
+  assert.deepEqual(rows.map((l) => l.result), ['turn', 'stopped', 'kept'], `exit ${code}`);
+  assert.equal(code, 0); assert.equal(at(d, 'src/score.txt'), '110', 'the win is what the branch holds'); assert.ok(clean(d));
+  assert.equal(git(d, 'show', 'refs/improve/2:src/score.txt'), '120', 'what the stopped turn had changed');
+  assert.equal(git(d, 'show', 'refs/improve/3:src/score.txt'), '110', 'what was kept');
+  agree(d);
+  const r = report(d); assert.equal(r.code, 0, r.out); assert.match(r.out, /whole: yes/);
 });
 test('report: with no record at all it is exit 64, and a flag it does not know is too', () => {
   const d = toy(); assert.equal(report(d).code, 64); assert.equal(run(REPORT, TMP_ROOT, []).code, 64);

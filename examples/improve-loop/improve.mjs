@@ -429,6 +429,9 @@ try {
     const left = leftBranch(); if (left) die(left);
     // stopped: a best turn that had passed its whole check is kept; anything else is put back
     const stop = (how) => {
+      // A turn stopped while its check ran had made a change, stored under the next number. The win that is kept below
+      // takes a number too, so the stopped turn gets its line first: what it changed stays readable under its own.
+      if (lead && wrote.has(`refs/improve/${n}`)) note('stopped', `the attempt was stopped (${how}) at turn ${t}, so it is put back`, { episode, turn: t, turns: turnsRun });
       if (lead) { console.error(`  (stopped at turn ${t}: turn ${lead.t} had passed its check and is kept)`); keep(lead.made, lead.j.t, `${lead.j.why} (turn ${lead.t} of ${turnsRun}; stopped at turn ${t})`, { ...lead.j.extra, episode, turns: turnsRun, best: lead.t }); }
       putBack(); const why = `the attempt was stopped (${how}) at turn ${t}, so it is put back`; note('stopped', why, { episode, turns: turnsRun, best: 0 }); die(why);
     };
