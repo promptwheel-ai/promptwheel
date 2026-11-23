@@ -1501,7 +1501,8 @@ function gateInner(repo, opts) {
     if (change) for (const m of fell) { const w = change.has(m.name) && fellIn(change.get(m.name), defOf(m.name)); if (w) m.where = w; }
     if (change) for (const m of held) { const w = change.has(m.name) && lostInFiles(repo, base, head, change.get(m.name), defOf(m.name), seen); if (w) m.lostIn = w; }
   }
-  // tests an earlier commit of this change added, all gone at its head (testsTakenOut): a note, never part of the verdict
+  // tests an earlier commit of this change added, all gone at its head (testsTakenOut): a note, never part of the verdict,
+  // except on a pull request, where it is the guard tests_taken_out (above)
   const takenOut = takenOutRead;
   // two or more named tests gone, or a file that stays lost every test (testsGone): a note, never part of the verdict
   const goneByName = opts.working ? null : testsGone(repo, base, head);
@@ -2609,7 +2610,7 @@ export function testsIn(path, text) {
 // common shape (proof-bench/outside-repos, 2026-11-19: 29 of 45).
 // So the change's own commits are read, each against the base, for the tests it ADDS there by name. When an earlier
 // commit added some and the last adds none, the report says so and names them (`testsTakenOut`). A note for a reader,
-// never part of a verdict. Scored on 994 pull requests (proof-bench/per-test/RESULT.md): it speaks on 14 of 139 pull
+// never part of a verdict, except on a pull request (0.8.20: the guard tests_taken_out, in gate()). Scored on 994 pull requests (proof-bench/per-test/RESULT.md): it speaks on 14 of 139 pull
 // requests a person objected to, 6 of 270 matched ones nobody objected to, and none of 271 ordinary ones by an agent.
 // The trigger is the NUMBER of tests added, not their names: a rename is a name gone, and by name alone half of what
 // this spoke on among controls was a rename. Wider forms (half or fewer left) spoke on too much unobjected work.

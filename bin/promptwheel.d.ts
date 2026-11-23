@@ -270,7 +270,7 @@ export interface Report {
   allowable?: string[];
   /** `true` when the contract at the base holds `"allowFromAuthor": true`: on a pull request the comment of the account that opened it counts. */
   openerCounts?: true;
-  /** In a run between two commits with more than one commit between them: an earlier commit of the change (`at`, short) added `added` tests, by name, and the change as it stands adds none. `names` holds at most ten of them, `more` how many are left out. A note for a reader, never part of a verdict. */
+  /** In a run between two commits with more than one commit between them: an earlier commit of the change (`at`, short) added `added` tests, by name, and the change as it stands adds none. `names` holds at most ten of them, `more` how many are left out. A note for a reader, never part of a verdict, except with `pullRequest`: then it is also the guard `tests_taken_out` among the metrics. */
   testsTakenOut?: { added: number; names: string[]; more: number; at: string };
   /** two or more test names gone over the changed files, or a file that stays lost every test (0.8.20): a note, never part of the verdict */
   testsGone?: { gone: number; names: string[]; more: number; emptied: string[] };
