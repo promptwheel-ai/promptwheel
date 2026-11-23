@@ -3800,7 +3800,7 @@ test('the comment is Sawbuck\'s: its name, one link to the one repo, the numbers
   assert.match(md, /> \*\*Where:\*\* `test\/a\.test\.js` \(2 → 1\)/);
   assert.match(md, /> Put back what was removed, and push\. Or, if removing it is the job:\n>\n> To accept this, someone with write access who did not open this PR comments `sawbuck-allow: <their reason>` on it, and the check is run again\./);
   assert.match(md, /verdict FAIL/, 'the engine\'s own word for it is still there, with the numbers');
-  assert.match(renderMarkdown(prRep({ verdict: 'gamed', metrics: [{ ...prRep().metrics[0], status: 'improved', gamed: true, retained: 0 }] })), /^### 🚩 Sawbuck: sent back\n\n> 🚩 A metric "improved" only because/m, 'a gamed win says why in view, not in the fold');
+  assert.match(renderMarkdown(prRep({ verdict: 'gamed', metrics: [{ ...prRep().metrics[0], status: 'improved', gamed: true, retained: 0 }] })), /^### 🚩 Sawbuck: sent back\n\n> 🚩 \*\*The tests pass only because a test, config or grader file was changed\.\*\*/m, 'a gamed win says why in view, not in the fold');
   assert.doesNotMatch(renderMarkdown(sentBack(), { fold: false }), /<details>/, 'the job summary gets it unfolded');
 });
 test('a comment only when there is something to say: ten passing pushes leave none, and a pass with only watch-notes leaves none', () => {
@@ -4977,3 +4977,24 @@ test('pages: where the check runs is said once, with what is not run there', () 
   const readme = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'README.md'), 'utf8');
   assert.match(readme, /reads GAMED the same on Linux, macOS, and Windows \(the `gamed-catch` CI job runs this one check on all three\)\. The rest of the engine's tests run on Linux, and Sawbuck, built on it, is not supported on Windows yet\./);
 });
+
+// ---- the gamed comment gets its way out (the owner's yes of 2026-11-22 on words-for-your-yes-check-2026-11-22.md) ------
+// On the real pull requests of 2026-11-22 the comment for a gamed win was one sentence and a table: what was found, and
+// nothing about what to do. The comment for a fallen count said what to do. And it said "the agent edited" of a change
+// that may be a person's. Now it says what to do, in the sentences that were measured for a fallen count, and names no one.
+test('the comment on a gamed win says what to do, in the measured sentences, and names no one', () => {
+  const gamed = (over = {}) => prRep({ verdict: 'gamed', metrics: [{ ...prRep().metrics[0], before: 0, after: 1, delta: 1, status: 'improved', gamed: true, retained: 0 }], protects: 9, ...over });
+  const md = renderMarkdown(gamed());
+  assert.match(md, /^### 🚩 Sawbuck: sent back\n\n> 🚩 \*\*The tests pass only because a test, config or grader file was changed\.\*\* With those files put back, the source alone does not pass\.\n>\n> Put the files back and fix the source, and push\. Or, if the file itself was wrong:\n>\n> To accept this, someone with write access who did not open this PR comments `sawbuck-allow: <their reason>` on it, and the check is run again\.\n>\n> Changing the workflow, the contract or this check is not a way through: those changes are sent back too\./m);
+  assert.doesNotMatch(md, /the agent/, 'it names no one: the change may be a person\'s');
+  assert.ok(md.indexOf('Put the files back') > 0 && md.indexOf('Put the files back') < md.indexOf('<details>'), 'what to do is in view');
+  const other = renderMarkdown(gamed({ metrics: [{ name: 'coverage', guard: true, before: 70, after: 80, delta: 10, status: 'improved', gamed: true, retained: 0, confidence: 'high', ok: true }] }));
+  assert.match(other, /> 🚩 A metric "improved" only because a test, config or grader file was changed, not the source\. The win does not survive a source-only re-run\./, 'another measure keeps the general sentence');
+  assert.doesNotMatch(other, /the agent/);
+  assert.match(renderMarkdown(gamed({ openerCounts: true })), /One person works in this repo, so a comment from the account that opened the PR counts\./, 'one person in the repo: the sentence for that');
+  assert.doesNotMatch(renderMarkdown(gamed({ protects: 0 })), /not a way through/, 'a contract that protects nothing does not say so');
+  // a fallen count in the same change already gives the way out: it is not said twice
+  const both = renderMarkdown(sentBack({ metrics: [{ ...prRep().metrics[0], before: 0, after: 1, delta: 1, status: 'improved', gamed: true, retained: 0 }, FELL] }));
+  assert.equal((both.match(/sawbuck-allow:/g) || []).length, 1);
+});
+

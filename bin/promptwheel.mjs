@@ -2327,7 +2327,19 @@ function renderMarkdown(r, o = {}) {
     const status = m.gamed === true ? `🚩 gamed (${(m.retained * 100).toFixed(0)}% survives source-only)` : `${sIcon[m.status] || ''} ${m.status}${m.inert ? ' ⚠ never passes' : ''}`;
     return `| ${m.guard ? '🛡️ ' : ''}${m.name} | ${m.before} | ${m.after} | ${d} | ${status} | ${m.confidence} |`;
   }).join('\n');
-  const said = r.verdict === 'gamed' ? '> 🚩 A metric "improved" only because the agent edited tests/config/grader, not the source. The win does not survive a source-only re-run.' : r.verdict === 'fail' ? (r.mandates ? '> ⛔ A protected path changed. This is a hard rule; no metric result clears it.' : '> ❌ A 🛡️ guarded metric regressed beyond the noise band.') : r.verdict === 'inconclusive' ? (r.metrics.some((m) => m.inert) && r.metrics.every((m) => !m.inert || m.ran === 'both') ? '> 🟡 A 🛡️ guarded check is **inert**, it fails before and after this change, so nothing was actually verified. Fix it before trusting a pass.' : '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.') : '> ✅ No guarded metric regressed.';
+  // The gamed sentence names no one: the change may be a person's (2026-11-22: it said "the agent edited"). Where the
+  // test run is what was gamed it says so in plain words; another measure keeps the general sentence.
+  const gamedSaid = r.metrics.some((m) => m.gamed === true && m.name === 'tests_pass')
+    ? '> 🚩 **The tests pass only because a test, config or grader file was changed.** With those files put back, the source alone does not pass.'
+    : '> 🚩 A metric "improved" only because a test, config or grader file was changed, not the source. The win does not survive a source-only re-run.';
+  // What to do about a gamed win, in the sentences measured for a fallen count: put it back, or a person's reason, and
+  // changing the check is no way through. Until 2026-11-22 this comment said what was found and stopped (seen on real
+  // pull requests, proof-bench/live/action-on-github-0.2.3). Not said twice where a fallen count already says it.
+  const gamedWayOut = r.verdict === 'gamed' && !(r.explained && mdWayOut(r).length)
+    ? ['>', '> Put the files back and fix the source, and push. Or, if the file itself was wrong:', '>', `> ${mdAccept(r)}`,
+       ...(r.protects ? ['>', '> Changing the workflow, the contract or this check is not a way through: those changes are sent back too.'] : [])]
+    : [];
+  const said = r.verdict === 'gamed' ? gamedSaid : r.verdict === 'fail' ? (r.mandates ? '> ⛔ A protected path changed. This is a hard rule; no metric result clears it.' : '> ❌ A 🛡️ guarded metric regressed beyond the noise band.') : r.verdict === 'inconclusive' ? (r.metrics.some((m) => m.inert) && r.metrics.every((m) => !m.inert || m.ran === 'both') ? '> 🟡 A 🛡️ guarded check is **inert**, it fails before and after this change, so nothing was actually verified. Fix it before trusting a pass.' : '> 🟡 A 🛡️ guarded check is **inert**, it never runs, so nothing was actually verified. Fix its command before trusting a pass.') : '> ✅ No guarded metric regressed.';
   // a gamed win and a check that measured nothing have no "needs a look" line of their own: their sentence stays in view
   const inView = r.verdict === 'gamed' || r.verdict === 'inconclusive';
   const lost = r.metrics.flatMap((m) => (m.lostIn || []).map((w) => `> ℹ️ **Note:** \`${w.file}\` has ${PLAIN[m.name] || m.name} (${w.before} → ${w.after}), though the repo's total did not fall.`));
@@ -2340,7 +2352,7 @@ function renderMarkdown(r, o = {}) {
     ...(would ? ['This check only comments here. It never fails the job.'] : []),
     ...(r.mandates ? [[...r.mandates.map((md) => `> ⛔ **Protected path touched:** \`${md.name}\`${md.reason ? ': ' + md.reason : ''} (touched \`${md.files.join('`, `')}\`)${md.removed ? ' (deleted in this same change; it stays in force for the change that removes it)' : md.edited ? ' (edited in this same change; the version before the change stays in force for the change that edits it)' : ''}`), ...mdPathWayOut(r)].join('\n')] : []),
     ...(r.explained ? [[...r.explained.map((x) => `> ${x.noted ? 'ℹ️ **Note:**' : '✋ **Needs a look:**'} ${x.what}${x.items ? ': `' + x.items.join('`, `') + '`' : ''}`), ...mdWayOut(r)].join('\n')] : []),
-    ...(inView ? [said] : []),
+    ...(inView ? [[said, ...gamedWayOut].join('\n')] : []),
     ...(r.gate && r.gate.weakened ? [`> 🚩 **Gate weakened:** ${r.gate.weakened.map((w) => `\`${w.name}\` ${w.change === 'guard-removed' ? 'removed' : w.change === 'guard-edited' ? 'edited' : w.change === 'measurement-edited' ? 'measured another way (setup, env or linked dirs)' : 'disabled'} (would have ${wouldHave(w.status)} at head)`).join('; ')}. The pass was bought by changing the gate, not by earning it.`] : []),
     ...(r.allowed && r.allowed.cleared.length ? [`> ✓ **Allowed:** \`${r.allowed.cleared.join('`, `')}\` cleared by a declared reason: ${r.allowed.reason}`] : []),
     ...(r.allowed && (r.allowable || []).some((l) => !r.allowed.cleared.includes(l)) ? [`> ✋ **Not let through:** \`${r.allowable.filter((l) => !r.allowed.cleared.includes(l)).join('`, `')}\`. A reason lets through only what it names when there is more than one thing. ${mdAccept(r, true)}`] : []),
