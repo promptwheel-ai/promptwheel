@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased: the wheel, put back
+## 0.8.18 (2026-11-22): the wheel, put back, and a comment that says what to do
+
+Three things in one release. Each has its own part below.
+
+- **The comment on a gamed win says what to do.** On real pull requests it was one sentence and a table, where the comment for a fallen count says what to do. Now it says to put the files back and fix the source, how a person can accept it, and that changing the check is not a way through, in the sentences measured for a fallen count. It also named "the agent" whoever made the change. It names no one now.
+- **The report says when an earlier state could not be run.** Both commits are measured with what is installed now. A change that removes a tool the earlier tests need leaves the earlier state unable to start, and the move reads as failing, then passing: an honest tool swap by a person read `gamed` on a real commit. The measure now carries `baseUnrun`, with the line that names what is missing. It is the reading alone. No verdict reads it yet, because a change that takes out the test runner looks the same, and that case is settled first. A file that cannot be read inside a package that is not installed is read as a missing dependency.
+- **The pages' words.** The demo is a gamed green built by hand (`examples/gamed-green`). A metric has guards. The help's line for `run` says what it does by default. The sentence on where the check runs says what is not run there.
+
+### The wheel, put back
 
 - **One keeper.** For a day the loop had three keepers: the step in `examples/improve-loop/` (written by another session), a copy of it in that session's treegate, and a command inside the engine (the `improve` the bullets below describe as it was built). The owner chose one, outside the engine: the step. What the command and the copy had and the step lacked is in the step now: `--turns` and `--patience`, the contract rule, the mark a killed run leaves, `--may-change`, and a count of gate asks. `promptwheel improve` is a door that runs the step, which ships in the package; `--goal` is another name for its `--target`, and a win is a gain on that target. With none named, the target is `score`, or the contract's only measure, or its only one that is not a tripwire: on the contract `init` writes, and with no config, the test run. A contract that leaves a choice, or cannot be read, is refused before the attempt runs, where the step alone finds out only after it. The engine's own keeper is gone, with its 34 tests: each behaviour is held by a test of the step (132 of them). The views read the loop's record (`.git/improve/attempts.jsonl`) for what was kept and thrown away, in the step's own words. Its home is this package, and its path stays (the owner's decision, 2026-11-22): it ships with the gate whose report it reads, and tools built on it, such as the framework session's treegate, run it from beside the engine they use as their gate. The new code was broken on purpose: my 32 breaks were caught 28 of 32 at first, a second reader's 20 were caught 0 of 20; each gap has a test now. One of the reader's was a bug: a run over several turns did not stop on Ctrl-C when the attempt caught the signal and ended by itself (the step is synchronous, and its handler never ran in time). It stops now, and keeps a best turn that had passed.
 - **An attempt that could not run is not a try.** Found in the first real run of a loop on this step: an attempt script crashed before its agent started, the step wrote "nothing" for each try, and a plan of tries was used up in two seconds. Now an attempt command that ends with 64, or that the shell could not run or find (126, 127) with no file changed, writes no line and ends the step with 64. Any other failure with no file changed is still a try. In a run over turns the same holds for the first turn, and a later turn that could not run ends the run as a run ends: a best turn that had passed is kept once it wins again when measured once more, and anything else is put back. And the step refuses a git older than 2.31, which ignores the setting that holds hooks off for the step's own calls. The framework session found it and wrote it, for its copy and then onto the one keeper; the two ports agreed but for that second look. Its 13 tests are here as written, with 4 more.
@@ -29,7 +37,7 @@
 - **What is not claimed:** that the loop gets better with use. `bench/compounding-ab.mjs` is the test, and it has not been run on real use. See `docs/LEARNING.md`.
 - New exports: `foldOutcomes`, `betaMean`, `scoreKey`. New options on `check()`: `record`, `label`.
 
-## Unreleased: a score that wobbles, and the loop is back
+### A score that wobbles, and the loop is back
 
 From the branch `feat/noisy-scorer-gate`, a second line of work the same night, merged here as it was written. Not released, and no version is set.
 
