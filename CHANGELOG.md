@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.19 (2026-11-23): a file named HEAD, and the name of a try
+
+- **Fixed: a commit that added a file named `HEAD`, or one named as its base, stopped the check with an error.**
+  Git refuses a call like `git diff <base> HEAD` when a file of one of those names exists. On a pull request the
+  job went red with an error from git and no verdict, for an honest commit too. In the loop, a file named as the
+  commit an attempt began at stopped the attempt from being put back. Every git call that names a revision now
+  says where its revisions end.
+- **The kept commit is named by the command's first word.** `--label "<words>"` names it yourself.
+
 ## 0.8.18 (2026-11-22): the wheel, put back, and a comment that says what to do
 
 Three things in one release. Each has its own part below.
