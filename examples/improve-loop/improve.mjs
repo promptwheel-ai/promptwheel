@@ -124,10 +124,29 @@ if (!attempt) die('--attempt "<command that changes the repo>" is required');
 // label is the kept commit's subject and a field of the record, and both are pushed with the repo. The whole command
 // can hold a prompt someone typed for an agent, or a key set in front of it (NAME=value), and until 0.8.19 it was the
 // default. `--label` names a try otherwise, and is kept as given.
+// The words of a shell line, as sh splits the first few: quotes kept together, $( ) and ` ` kept whole, the operators
+// ; & | ( ) apart. A first form split on spaces alone, and a second reader found a name made of part of a quoted value
+// (API_KEY='sk... part2' perl named the try "part2").
+const shellWords = (cmd, max = 12) => {
+  const s = String(cmd), out = []; let w = '', q = null, depth = 0;
+  for (let i = 0; i < s.length && out.length < max; i++) {
+    const c = s[i];
+    if (q) { if (c === q) q = null; else if (c === '\\' && q === '"' && i + 1 < s.length) w += s[++i]; else w += c; continue; }
+    if (depth) { w += c; if (c === '(') depth++; else if (c === ')') depth--; continue; }
+    if (c === "'" || c === '"') { q = c; continue; }
+    if (c === '\\' && i + 1 < s.length) { w += s[++i]; continue; }
+    if (c === '$' && s[i + 1] === '(') { w += '$('; i++; depth = 1; continue; }
+    if (c === '`') { const j = s.indexOf('`', i + 1); const end = j < 0 ? s.length : j + 1; w += s.slice(i, end); i = end - 1; continue; }
+    if (/\s/.test(c) || ';&|()'.includes(c)) { if (w) { out.push(w); w = ''; } if (!/\s/.test(c)) out.push(c); continue; }
+    w += c;
+  }
+  if (w && out.length < max) out.push(w);
+  return out;
+};
 const firstWord = (cmd) => {
-  const word = String(cmd).trim().split(/\s+/).find((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && /[A-Za-z0-9]/.test(w)) || '';
-  const name = (word.match(/[A-Za-z0-9_.+\/\\-]+/) || [''])[0].split(/[\/\\]/).filter(Boolean).pop() || '';
-  return name.slice(0, 60) || 'attempt';
+  const word = shellWords(cmd).find((w) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) && !/^[;&|()]+$/.test(w) && /[A-Za-z0-9]/.test(w)) || '';
+  const name = word.split(/[\/\\]/).filter(Boolean).pop() || '';
+  return ((name.match(/[A-Za-z0-9_.+-]+/) || [''])[0]).slice(0, 60) || 'attempt';
 };
 const label = args['--label'] ?? firstWord(attempt), target = args['--target'] ?? 'score', cheaper = args['--cheaper'], floor = args['--floor'] === true;
 const whole = (flag, dflt) => { if (args[flag] === undefined) return dflt; const v = Number(args[flag]); if (!Number.isInteger(v) || v < 1) die(`${flag} needs a whole number of 1 or more`); return v; };

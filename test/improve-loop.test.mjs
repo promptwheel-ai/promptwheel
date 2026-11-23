@@ -364,7 +364,10 @@ test('loop: a label is kept as given, quotes and all, and with no label the name
 // landed there. The owner's call (2026-11-23): the first word, and only the program's name in it.
 test('loop: with no label, nothing of the attempt command but its first word lands in the kept commit, the record or what is printed', () => {
   const said = 'please fix the billing export for ACME'; const key = 'sk-not-a-real-key-123';
-  for (const [attempt, name] of [[`API_KEY=${key} sh -c "echo 120 > src/score.txt # ${said}"`, 'sh'], [`"/bin/sh" -c "echo 120 > src/score.txt # ${said}"`, 'sh'], [`( echo 120 > src/score.txt ) # ${said}`, 'echo']]) {
+  // the last four were found by a second reader: a word split inside quotes or inside $( ) put part of a value in the name
+  for (const [attempt, name] of [[`API_KEY=${key} sh -c "echo 120 > src/score.txt # ${said}"`, 'sh'], [`"/bin/sh" -c "echo 120 > src/score.txt # ${said}"`, 'sh'], [`( echo 120 > src/score.txt ) # ${said}`, 'echo'],
+    [`API_KEY='${key} part2' sh -c "echo 120 > src/score.txt"`, 'sh'], [`PROMPT="${said}" sh -c "echo 120 > src/score.txt"`, 'sh'],
+    [`TOKEN=$(echo ${key}) sh -c "echo 120 > src/score.txt"`, 'sh'], [`X=\`echo ${key}\` sh -c "echo 120 > src/score.txt"`, 'sh']]) {
     const d = toy(); const r = step(d, attempt);
     assert.equal(r.code, 0, r.out + r.err); assert.deepEqual(record(d).map((x) => [x.label, x.result]), [[name, 'kept']], attempt);
     assert.equal(git(d, 'log', '-1', '--format=%s'), `improve: ${name}`);
