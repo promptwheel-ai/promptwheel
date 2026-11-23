@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Watch PromptWheel catch an agent that "fixes" the code by editing the TEST.
-# Illustrative: a hand-built cheat so you can see the mechanism fire; NOT evidence.
+# An illustration: a gamed green built by hand so you can see the check read it; NOT evidence.
 #
 #   ./run-demo.sh        # spins up a throwaway repo, greens the suite dishonestly, gates it
 #

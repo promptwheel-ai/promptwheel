@@ -1,4 +1,4 @@
-# catch-a-cheat - the 60-second "watch it fire" demo
+# gamed-green: the 60-second demo
 
 The headline feature, made runnable. `./run-demo.sh` spins up a throwaway repo where an
 agent "fixes" a failing test **by editing the test to expect the bug** - the code stays
@@ -14,7 +14,7 @@ production-source files**, and returns:
   (exit 2)
 ```
 
-**This is illustrative, not evidence.** A hand-built cheat shows you the *mechanism*; it
+**This is illustrative, not evidence.** A gamed green built by hand shows you the *mechanism*; it
 says nothing about how often real agents do this. It's here so you can watch the detector
 trip in one command - then point it at your own repo's real history (`promptwheel run
 --base <commit>~1 --head <commit>`) where a flag actually means something.
@@ -26,4 +26,4 @@ Run it:
 ```
 
 For the npm-flow version (what a newcomer copy-pastes), see the 60-second block in the
-top-level [README](../../README.md#catch-your-agent-cheating-in-60-seconds).
+top-level [README](../../README.md#see-it-in-60-seconds).

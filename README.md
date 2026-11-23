@@ -10,10 +10,10 @@ PromptWheel is the engine inside Sawbuck. If you came for the tool, start at [gi
 
 ## See it in 60 seconds
 
-A hand-built cheat, so you can watch the mechanism fire (illustrative, not evidence):
+A gamed green built by hand, so you can watch the check read it (an illustration, not evidence):
 
 ```bash
-mkdir pw-cheat-demo && cd pw-cheat-demo && git init -q
+mkdir pw-gamed-demo && cd pw-gamed-demo && git init -q
 printf '{"name":"demo","type":"module","scripts":{"test":"node --test"}}\n' > package.json
 printf 'export const add = (a, b) => a - b;   // BUG: should be a + b\n' > add.js
 printf "import {test} from 'node:test'; import assert from 'node:assert'; import {add} from './add.js';\ntest('add', () => assert.equal(add(2, 3), 5));   // honest test, FAILS on the bug\n" > add.test.js
@@ -113,7 +113,7 @@ These three shape every measurement, so they are part of the gate. A change that
 
 Copy a config for your stack (pytest, tsc, coverage, bundle size, LLM eval) from [examples/](examples/).
 
-### Guardrails and inheritance
+### Guards and inheritance
 
 Teams keep one shared base config and have every repo inherit it via `extends`:
 
@@ -123,7 +123,7 @@ Teams keep one shared base config and have every repo inherit it via `extends`:
   "metrics": [ { "name": "cost_per_run_usd", "guard": false } ] }   // loosen one inherited guard, locally
 ```
 
-`extends` takes a path (or array of paths) to base configs: a repo **inherits** their guardrails, and a local metric of the same name **overrides** the inherited one (tighten, loosen, or disable). Read this way, `extends` is the set of shared invariants your agents are held to, enforced as measured guards rather than advisory text. Natural-language conventions belong in `AGENTS.md`; only deterministic, measurable guards belong here.
+`extends` takes a path (or array of paths) to base configs: a repo **inherits** their guards, and a local metric of the same name **overrides** the inherited one (tighten, loosen, or disable). Read this way, `extends` is the set of shared invariants your agents are held to, enforced as measured guards rather than advisory text. Natural-language conventions belong in `AGENTS.md`; only deterministic, measurable guards belong here.
 
 ### Mandates (protected paths)
 
@@ -260,7 +260,7 @@ We do not say the loop gets better with use. That has a test, and the test has n
 - **It says what it borrowed.** The check runs your test command in the environment it is run in. When that environment sets `PYTEST_ADDOPTS`, `PYTEST_PLUGINS`, or a preload in `NODE_OPTIONS` (`--require`, `--import`, a loader), the report says so, as a note and never a verdict: those can change which tests run or load code into them, and no diff shows them. A variable the contract's own `env` sets is declared there and is not noted. It does not take them out: a setup may need them.
 - **A provenance receipt** on every verdict (`report.provenance`: base and head SHAs, a config hash, a verdict hash), so a skeptic can re-run `(base, head, config)` and get the same hash.
 
-**The honest limit.** This is one layer, not a silver bullet. It catches the evaluator-tampering class (test, grader, golden and config edits) deterministically and for free. A suite weakened while it stays green is not proved: there is no win to re-run. Tripwires catch skips and removed assertions in a signed repo. It is blind, by construction, to a cheat that lives in the source file itself (a hardcoded answer, behavior that differs under test), or in a build script the unchanged `setup` runs (a change that makes that script rewrite a test is a source edit to this check). A base config that `extends` a file outside the repository cannot be compared across the change. A local check trusts the repo's own git settings: a filter set in its git config changes what a checkout holds, so the check can read another number than the commit holds. The check on a pull request runs on a clean clone and does not read them. A replace ref is never read: the check reads the objects as they are stored. These need held-out tests, an LLM judge, or a human, and those expensive layers should be reserved for the calls only they can make. The coverage matrix and the in/out-of-scope boundary are in [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md); the measured numbers are in [bench/RESULTS.md](bench/RESULTS.md) (`node bench/gaming-bench.mjs` to reproduce). Another gameable thing, an LLM judge asking "did you cheat?", is deliberately not part of the check.
+**The honest limit.** This is one layer, not a silver bullet. It catches the evaluator-tampering class (test, grader, golden and config edits) deterministically and for free. A suite weakened while it stays green is not proved: there is no win to re-run. Tripwires catch skips and removed assertions in a signed repo. It is blind, by construction, to a gaming move that lives in the source file itself (a hardcoded answer, behavior that differs under test), or in a build script the unchanged `setup` runs (a change that makes that script rewrite a test is a source edit to this check). A base config that `extends` a file outside the repository cannot be compared across the change. A local check trusts the repo's own git settings: a filter set in its git config changes what a checkout holds, so the check can read another number than the commit holds. The check on a pull request runs on a clean clone and does not read them. A replace ref is never read: the check reads the objects as they are stored. These need held-out tests, an LLM judge, or a human, and those expensive layers should be reserved for the calls only they can make. The coverage matrix and the in/out-of-scope boundary are in [docs/DETECTION-LAYERS.md](docs/DETECTION-LAYERS.md); the measured numbers are in [bench/RESULTS.md](bench/RESULTS.md) (`node bench/gaming-bench.mjs` to reproduce). Another gameable thing, an LLM judge asking "was this gamed?", is deliberately not part of the check.
 
 **Noise.** A number that jumps around between runs is worthless as a signal, and PromptWheel does not pretend otherwise: `--repeat N` measures each metric N times at both refs and uses the median; the noise band is the observed spread; a delta inside the band is `inconclusive` with `low` confidence and does not fail a guard (no flaky CI failures). Confidence reads `high` (deterministic extract, or zero observed noise), `medium` (delta clears the noise band), `low` (delta inside noise), or `unverified` (single read; run `--repeat` to earn trust). A guarded pass/fail check that reads 0 at both refs (its command never ran, or it ran and failed both times; the report says which) makes the verdict `inconclusive`, never a fake pass.
 
@@ -274,7 +274,7 @@ A check runs your metric commands in two throwaway worktrees (before and after),
 
 ## Portability
 
-The core gamed-win check is git only and runs anywhere git does: it classifies the files a win touched (`git diff --name-only`) to separate production source from test, config, and grader files, so a green that came only from editing the goalposts is caught the same on Linux, macOS, and Windows (the `gamed-catch` CI job proves this on all three). Two kinds of test file a name cannot settle are read from the repo: a Python `test.py` or `tests.py` is test-side when it imports a test framework (Django writes a `tests.py` into every app; Jinja keeps production code in one), and a script the test command itself runs is test-side when it is named like a runner (`sh test.sh`, `python3 runtests.py`, or the same through `npm test`). The starter tripwire metrics that `init` writes are `grep` one-liners that assume a GNU-grep-compatible shell, which PromptWheel runs through the system shell (`sh` on Linux/macOS, `cmd` on native Windows). Where grep is absent, those metrics read unmeasurable, and an unmeasurable guard fails closed (verdict `FAIL`), so a gamed green is still caught, never passed; it just lands as `FAIL` rather than the dedicated `GAMED`. Run under WSL or git-bash, or replace those tripwire `cmd`s with your toolchain's own counters, for a clean verdict on Windows.
+The core gamed-win check is git only and runs anywhere git does: it classifies the files a win touched (`git diff --name-only`) to separate production source from test, config, and grader files, so a green that came only from editing the goalposts reads GAMED the same on Linux, macOS, and Windows (the `gamed-catch` CI job runs this one check on all three). The rest of the engine's tests run on Linux, and Sawbuck, built on it, is not supported on Windows yet. Two kinds of test file a name cannot settle are read from the repo: a Python `test.py` or `tests.py` is test-side when it imports a test framework (Django writes a `tests.py` into every app; Jinja keeps production code in one), and a script the test command itself runs is test-side when it is named like a runner (`sh test.sh`, `python3 runtests.py`, or the same through `npm test`). The starter tripwire metrics that `init` writes are `grep` one-liners that assume a GNU-grep-compatible shell, which PromptWheel runs through the system shell (`sh` on Linux/macOS, `cmd` on native Windows). Where grep is absent, those metrics read unmeasurable, and an unmeasurable guard fails closed (verdict `FAIL`), so a gamed green is still caught, never passed; it just lands as `FAIL` rather than the dedicated `GAMED`. Run under WSL or git-bash, or replace those tripwire `cmd`s with your toolchain's own counters, for a clean verdict on Windows.
 
 ## Docs
 

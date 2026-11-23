@@ -4960,3 +4960,20 @@ test('the improve loop example and its tests are still here (0.8.0 removed the l
   assert.ok(count >= 60, `test/improve-loop.test.mjs holds ${count} tests, and it is held to 60 or more. ${why}`);
   assert.ok(!/^test\.(skip|todo)\(|\{ *(skip|todo):/m.test(text), `a test in test/improve-loop.test.mjs is skipped or marked todo. ${why}`);
 });
+
+// ---- the pages' words (the owner's yes of 2026-11-22) -----------------------------------------------------------------
+// Two words are not used on a public page of this package: "cheat" and "guardrail". The help says what a run does, not
+// what it finds. History (docs/history, the changelog's old entries) keeps its own words: it is a record.
+test('pages: the README, the examples, the architecture page and the help use neither word', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const files = ['README.md', 'docs/ARCHITECTURE.md', 'examples/README.md', ...readdirSync(join(root, 'examples'), { withFileTypes: true }).filter((e) => e.isDirectory()).flatMap((e) => readdirSync(join(root, 'examples', e.name)).filter((f) => /\.(md|sh)$/.test(f)).map((f) => `examples/${e.name}/${f}`))];
+  for (const f of files) { const t = readFileSync(join(root, f), 'utf8'); assert.doesNotMatch(t, /cheat/i, `${f} says "cheat"`); assert.doesNotMatch(t, /guardrail/i, `${f} says "guardrail"`); }
+  assert.ok(!readdirSync(join(root, 'examples')).some((n) => /cheat/i.test(n)), 'no example folder is named for it');
+  const help = spawnSync(process.execPath, [join(root, 'bin', 'promptwheel.mjs'), '--help'], { encoding: 'utf8' }).stdout;
+  assert.doesNotMatch(help, /guardrail/i); assert.doesNotMatch(help, /catches reward-hacking/i);
+  assert.match(help, /re-proves each win from SOURCE edits alone BY DEFAULT/);
+});
+test('pages: where the check runs is said once, with what is not run there', () => {
+  const readme = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'README.md'), 'utf8');
+  assert.match(readme, /reads GAMED the same on Linux, macOS, and Windows \(the `gamed-catch` CI job runs this one check on all three\)\. The rest of the engine's tests run on Linux, and Sawbuck, built on it, is not supported on Windows yet\./);
+});

@@ -41,7 +41,7 @@ See **[`reliability-sprint/`](reliability-sprint/)** - gates `eval_pass_rate` (u
 **One mechanism, every stack:** revert the test/config/grader/golden edits, re-run *your* gate, see if the win survives. `--detect-gaming` is on by default in `run`; `--no-detect-gaming` for the bare gate.
 
 ## Runnable demos
-- **[`catch-a-cheat/`](catch-a-cheat/)** - the 60-second "watch it fire": an agent greens a suite by editing the test → `GAMED`.
+- **[`gamed-green/`](gamed-green/)**: the 60-second demo. An agent greens a suite by editing the test → `GAMED`.
 - **[`test-change-verdicts/`](test-change-verdicts/)** - *"but what if I legitimately change a test?"* Three scenarios in one script (refactor → PASS · fix+test-edit → PASS · test-only → GAMED). Same metric move, opposite verdict - it keys on whether **source** carried the win, not whether a test was touched.
 
 - **[`improve-loop/`](improve-loop/)** - one step of a self-improving loop: run an attempt, ask the gate, keep the change or put it back. Its demo shows a score walking downhill in steps that each pass, and `--floor` stopping it. An example to copy, not part of the npm package.

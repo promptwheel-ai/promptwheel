@@ -46,7 +46,7 @@ The working tree is **never** touched - every read happens in a temp worktree th
 
 ```jsonc
 {
-  "extends": "./promptwheel.base.json",  // optional: inherit guardrails from a shared base (path or array)
+  "extends": "./promptwheel.base.json",  // optional: inherit guards from a shared base (path or array)
   "repeat": 1,                 // default sample count (overridden by --repeat)
   "linkDirs": ["node_modules"], // dirs symlinked from the repo into each measuring worktree (deps that live outside git, e.g. node_modules / .venv / target); with nothing set, the root node_modules and each workspace's own are linked, and links back into the repo are pointed at the worktree. Back-compat: linkNodeModules:false links nothing.
   "env": { "PYTHONPATH": "{wt}/src:{wt}" }, // optional env vars for metric commands; {wt} substitutes to the worktree path

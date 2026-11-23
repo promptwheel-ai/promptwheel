@@ -139,7 +139,7 @@ const relOf = (repo, p) => { try { return relative(repo, p) || p; } catch { retu
 
 // resolve a config + its `extends` chain into a flat, provenance-tagged metric list.
 // `extends` is a path (or array of paths) to base configs, relative to the config file:
-// a repo INHERITS their guardrails, and a local metric of the same name overrides the inherited one.
+// a repo INHERITS their guards, and a local metric of the same name overrides the inherited one.
 function resolveConfig(p, repo, seen) {
   const abs = realpathSync(p);
   if (seen.has(abs)) bad(`config inheritance cycle at ${relOf(repo, p)}`);
@@ -3073,7 +3073,7 @@ function dispatch() {
       '  promptwheel lock                             write promptwheel.lock.json, the shape of this repo (dependencies, install scripts, workflows, modules, import edges, routes, entry points, hosts); the supply-chain preset holds it',
       '  promptwheel init [--preset <name> | --list] [--no-agent-block]  write a starter config + an AGENTS.md guide so your agent runs the gate (OPTIONAL: run works zero-config, auto-detecting your test command)',
       '  promptwheel run [--base R] [--head R] [--repeat N] [--json|--markdown]',
-      '       catches reward-hacking BY DEFAULT, re-proves each win from SOURCE edits alone (verdict GAMED,',
+      '       re-proves each win from SOURCE edits alone BY DEFAULT (verdict GAMED,',
       '       exit 2, when a metric only moved by editing tests/config/grader). Use --no-detect-gaming for the bare gate.',
       '  promptwheel run --working                    gate uncommitted changes (incl. newly added files)',
       '  promptwheel improve --attempt "<cmd>" [--target <measure>] [--label "<name>"] [--json]   the loop: run any agent or script, check what it changed, and keep it (one commit) only if the target improved;',
@@ -3099,7 +3099,7 @@ function dispatch() {
       'Exit codes: 0 pass · 1 fail (a guarded metric regressed, or a mandate was violated) · 2 gamed · 3 inconclusive · 64 usage or config error (never a verdict).',
       'Integrate (library / conform / shell): see INTEGRATE.md. Import: `import { check } from \'promptwheel\'`.',
       'Config:   promptwheel.config.json → { extends?, metrics:[{ name, cmd, direction, extract?, guard? }] }   (or: promptwheel init)',
-      '          extends: a path (or array) to a shared base config, repos INHERIT its guardrails; local metrics override by name.',
+      '          extends: a path (or array) to a shared base config, repos INHERIT its guards; local metrics override by name.',
     ].join('\n'));
     process.exit(help ? 0 : EX_USAGE);
   }
