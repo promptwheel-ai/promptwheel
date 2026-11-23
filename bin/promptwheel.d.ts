@@ -162,6 +162,8 @@ export interface MetricResult extends Evaluation {
   cause?: 'missing-dependency' | 'failing' | 'too-much-output';
   /** With `cause: 'missing-dependency'`: the line that names what is missing, at most 200 characters. */
   detail?: string;
+  /** The command failed at the base for want of something not installed (a tool, a module, a file inside a package) and ran at the head. So the earlier state did not run: it did not fail. Both commits are measured with what is installed now, and a change that removes a tool the earlier tests need looks like this. The reading alone: no verdict reads it yet. */
+  baseUnrun?: { cause: 'missing-dependency'; detail: string };
   /** `true` when the win did not survive the source-only re-run; `null` when the source-only patch could not be applied (then `unprovable` is set and the verdict is `inconclusive`, never `pass`). Absent without gaming detection or when the metric did not improve. */
   gamed?: boolean | null;
   /** `true`: the source-only patch could not be applied, so this win could not be re-proven and the verdict is `inconclusive`. `false` only after a declared override cleared it (then `allowed` is `true`). */

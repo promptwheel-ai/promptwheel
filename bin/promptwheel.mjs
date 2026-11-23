@@ -218,7 +218,9 @@ const exitCodes = new WeakMap();
 const neverRan = (samples) => { const c = exitCodes.get(samples) || []; return c.length > 0 && c.every((x) => x == null || x === 126 || x === 127); };
 // Why a metric's command failed, read from its output: a dependency the clean copy does not have reads differently
 // from tests that simply fail. A hint for the person, never part of a verdict.
-const MISSING_DEP = /Cannot find (?:module|package) ['"][^'"\n]+['"]|ERR_MODULE_NOT_FOUND[^\n]*|ModuleNotFoundError: [^\n]+|No module named [^\n]+|error TS2307: [^\n]+|(?:^|\n)[^\n:]*(?:sh|bash|zsh|dash)(?::\s*\d+)?:[^\n]*?: (?:command )?not found[^\n]*|(?:^|\n)\S+: command not found[^\n]*|can't find crate[^\n]*|cannot find package [^\n]+/i;
+// A file that cannot be read inside node_modules is the same thing said another way: a build whose settings extend a
+// file from a package that is not installed (a real commit, yargs 9588a76436: TS5083 on node_modules/gts/...).
+const MISSING_DEP = /Cannot find (?:module|package) ['"][^'"\n]+['"]|ERR_MODULE_NOT_FOUND[^\n]*|ModuleNotFoundError: [^\n]+|No module named [^\n]+|error TS2307: [^\n]+|(?:^|\n)[^\n:]*(?:sh|bash|zsh|dash)(?::\s*\d+)?:[^\n]*?: (?:command )?not found[^\n]*|(?:^|\n)\S+: command not found[^\n]*|can't find crate[^\n]*|cannot find package [^\n]+|error TS5083: Cannot read file ['"][^'"\n]*node_modules[\\/][^'"\n]+['"][^\n]*|ENOENT[^\n]*['"][^'"\n]*node_modules[\\/][^'"\n]+['"]/i;
 // The line that names what is missing wins over a bare error code: a script that dies on a failed import prints the
 // source line `throw new ERR_MODULE_NOT_FOUND(` first, and the line with the file after it.
 const MISSING_NAMED = /Cannot find (?:module|package) ['"][^'"\n]+['"][^\n]*/i;
@@ -1398,6 +1400,16 @@ function gateInner(repo, opts) {
       if (!nb || !na) ev.ran = !nb && !na ? 'both' : nb ? 'head' : 'base';
       const note = failNotes.get(after[m.name]) || failNotes.get(before[m.name]);   // a hint: a missing dependency or tests that fail
       if (note) Object.assign(ev, note);
+    }
+    // AN EARLIER STATE THAT COULD NOT BE RUN IS NOT AN EARLIER STATE THAT FAILED. Both commits are measured with what
+    // is installed now. A change that removes a tool the earlier tests need (and rewrites the script or the settings
+    // that used it) leaves the earlier state unable to start, and the move reads "failing, then passing". The measure
+    // says so here: its command failed at the base for want of something not installed, and ran at the head. This is
+    // the reading alone (proof-bench/could-not-measure, 2026-11-22). No verdict reads it yet: a change that takes out
+    // the test runner looks the same, so what is done with it is settled with that case in hand.
+    if (!ev.inert && m.cmd !== PLACEHOLDER_TEST) {
+      const nb = failNotes.get(before[m.name]);
+      if (nb && nb.cause === 'missing-dependency' && !failNotes.get(after[m.name])) ev.baseUnrun = { cause: nb.cause, detail: nb.detail };
     }
     return { name: m.name, direction: m.direction || 'up', guard: !!m.guard, ...(gamingCheckOff(m, baseGate) ? { tripwire: true } : {}), ...ev };
   });

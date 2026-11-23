@@ -4998,3 +4998,42 @@ test('the comment on a gamed win says what to do, in the measured sentences, and
   assert.equal((both.match(/sawbuck-allow:/g) || []).length, 1);
 });
 
+
+// ---- an earlier state that could not be run is not an earlier state that failed (proof-bench/could-not-measure) ------
+// A person swaps a test tool: it leaves the dependencies, and the script or the settings that used it are rewritten.
+// The check measures the commit before with what is installed NOW, where the tool is gone. So the earlier tests cannot
+// start, and the change reads as a move from failing to passing (found on a real commit, yargs 9588a76436, 2026-11-22:
+// the first false alarm in the replay). The report now says, on the measure, that the earlier state did not run and
+// why (`baseUnrun`). This is the reading alone. What a verdict does with it is decided beside the way round it would
+// open (a change that takes out the test runner reads the same), and is not changed here.
+test('run: an earlier state that could not run for want of something not installed is marked on the measure', () => {
+  const mk = (make) => {
+    const d = mkdtempSync(join(tmpdir(), 'pw-unrun-')); const g = (a) => execFileSync('git', a, { cwd: d });
+    g(['init', '-q']); g(['config', 'user.email', 't@t']); g(['config', 'user.name', 't']);
+    writeFileSync(join(d, '.gitignore'), '.promptwheel/\nnode_modules\n'); mkdirSync(join(d, 'test'));
+    writeFileSync(join(d, 'test/a.test.js'), "require('node:test').test('t', () => require('node:assert').equal(1, 1));\n");
+    make(d); const rep = runJson(d).rep; rmSync(d, { recursive: true, force: true }); return rep.metrics.find((x) => x.name === 'tests_pass');
+  };
+  const pkg = (d, scripts) => writeFileSync(join(d, 'package.json'), JSON.stringify({ name: 'x', version: '1.0.0', scripts }));
+  // a tool the earlier script calls by name is not installed
+  let m = mk((d) => { pkg(d, { test: 'node --test', posttest: 'a-tool-nobody-installed' }); commitAll(d, 'a'); pkg(d, { test: 'node --test' }); commitAll(d, 'b'); });
+  assert.equal(m.before, 0); assert.equal(m.after, 1);
+  assert.equal(m.baseUnrun && m.baseUnrun.cause, 'missing-dependency', JSON.stringify(m)); assert.match(m.baseUnrun.detail, /a-tool-nobody-installed/);
+  // a file the earlier build reads from inside a package that is not installed (the real commit's own shape)
+  m = mk((d) => {
+    writeFileSync(join(d, 'build.js'), "const fs = require('fs'), p = require('path').resolve('node_modules/gone-tool/base.json');\nif (JSON.parse(fs.readFileSync('tsconfig.json', 'utf8')).extends && !fs.existsSync(p)) { console.error(\"error TS5083: Cannot read file '\" + p + \"'.\"); process.exit(2); }\n");
+    writeFileSync(join(d, 'tsconfig.json'), '{"extends":"gone-tool/base.json"}'); pkg(d, { pretest: 'node build.js', test: 'node --test' }); commitAll(d, 'a');
+    writeFileSync(join(d, 'tsconfig.json'), '{}'); commitAll(d, 'b');
+  });
+  assert.equal(m.before, 0); assert.equal(m.after, 1);
+  assert.equal(m.baseUnrun && m.baseUnrun.cause, 'missing-dependency', JSON.stringify(m)); assert.match(m.baseUnrun.detail, /Cannot read file .*gone-tool/);
+  // an earlier state that ran and failed is not marked: a test that truly failed, fixed in the source
+  m = mk((d) => {
+    writeFileSync(join(d, 'a.js'), 'exports.v = 1;\n'); writeFileSync(join(d, 'test/a.test.js'), "require('node:test').test('t', () => require('node:assert').equal(require('../a.js').v, 2));\n");
+    pkg(d, { test: 'node --test' }); commitAll(d, 'a'); writeFileSync(join(d, 'a.js'), 'exports.v = 2;\n'); commitAll(d, 'b');
+  });
+  assert.equal(m.before, 0); assert.equal(m.after, 1); assert.equal(m.baseUnrun, undefined, 'a test that ran and failed is a failing test');
+  // and a later state that cannot run is not this: nothing is marked when the tool goes missing AFTER
+  m = mk((d) => { pkg(d, { test: 'node --test' }); commitAll(d, 'a'); pkg(d, { test: 'node --test', posttest: 'a-tool-nobody-installed' }); commitAll(d, 'b'); });
+  assert.equal(m.before, 1); assert.equal(m.after, 0); assert.equal(m.baseUnrun, undefined);
+});
