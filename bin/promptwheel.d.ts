@@ -434,7 +434,7 @@ export interface CommentPlan {
   /** The job would fail on this run (an inconclusive verdict counts only where `inconclusive` is not `pass`). */
   wouldFail: boolean;
   /** The comment as plain text for the log of the step that fails (`commentLog`); `''` when the job would not fail. */
-  log: string;
+  log?: string;
 }
 
 /** The comment as plain text, for a job log: no markup, only the measures that moved, the way through as the comment gives it. An agent that works on a failed check reads its log, not a bot's comment. */

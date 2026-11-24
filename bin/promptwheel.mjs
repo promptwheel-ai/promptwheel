@@ -160,13 +160,13 @@ function resolveConfig(p, repo, seen) {
       const base = resolveConfig(bp, repo, seen);
       for (const m of base.metrics) byName.set(m.name, m);
       for (const md of (base.mandates || [])) if (md && md.name) mandatesByName.set(md.name, md);
-      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer', 'allowFromAuthor']) if (base[k] !== undefined) scalars[k] = base[k];
+      for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer', 'allowFromAuthor', 'testRewrites']) if (base[k] !== undefined) scalars[k] = base[k];
     }
     for (const m of (cfg.metrics || [])) {
       byName.set(m.name, m);
     }
     for (const md of (cfg.mandates || [])) if (md && md.name) mandatesByName.set(md.name, md);
-    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer', 'allowFromAuthor']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
+    for (const k of ['repeat', 'linkNodeModules', 'linkDirs', 'env', 'setup', 'gamingThreshold', 'evaluatorPaths', 'allowTrailer', 'allowFromAuthor', 'testRewrites']) if (cfg[k] !== undefined) scalars[k] = cfg[k];
     return { ...scalars, metrics: [...byName.values()], mandates: [...mandatesByName.values()] };
   } finally {
     seen.delete(abs); // only ACTIVE ancestors are a cycle, a diamond (a base reached two ways) is fine
@@ -2714,24 +2714,36 @@ export function testsGoneIn(repo, from, to) {
 // controls from the same repos, which is why it is a note unless the contract asks ("testRewrites": "ask").
 // steps: [{ base, head }] oldest first; split(a, b) -> { source, nonSource }; isTest(path). -> { tests, more, at, after } | null
 export function testsRewrittenAfter(repo, steps, split, isTest = (f) => TEST_PATH.test(f)) {
-  if (!Array.isArray(steps) || steps.length < 2 || typeof split !== 'function') return null;
-  const fork = steps[0].base, tip = steps[steps.length - 1].head;
-  const has = (ref, f) => { try { execFileSync('git', ['cat-file', '-e', `${ref}:${f}`], { cwd: repo, stdio: 'ignore' }); return true; } catch { return false; } };
-  const net = split(fork, tip); if (!net) return null;
-  const had = net.nonSource.filter((f) => isTest(f) && has(fork, f) && has(tip, f));
-  if (!had.length) return null;
-  const per = steps.map((st) => split(st.base, st.head)); if (per.some((x) => !x)) return null;
-  const touched = per.map((x) => new Set([...x.source, ...x.nonSource]));
-  const hits = [];
-  for (const t of had) {
-    const first = touched.findIndex((set) => set.has(t));
-    if (first < 1) continue;
-    const j = per.slice(0, first).findIndex((x, i) => x.source.length > 0 && !touched[i].has(t));
-    if (j >= 0) hits.push({ t, at: steps[first].head, after: steps[j].head });
-  }
-  if (!hits.length) return null;
-  const tests = hits.map((h) => h.t).sort();
-  return { tests: tests.slice(0, 10), more: Math.max(0, tests.length - 10), at: short(repo, hits[0].at), after: short(repo, hits[0].after) };
+  // Capped like the readers above (second read of 0.2.8: uncapped, it took 157 s where 0.8.20 took 6 on a pull request
+  // of 100 commits that rewrote 3,000 test files): at most 60 commits and 2,000 names a step, names read once a commit,
+  // and the engine's own source split asked only of a commit before a rewrite, once each.
+  if (!Array.isArray(steps) || steps.length < 2 || steps.length > TESTS_READ_COMMITS || typeof split !== 'function') return null;
+  try {
+    const statuses = (a, b) => {   // path -> status letter, read with -z as the readers above read names; null over the cap
+      const parts = execFileSync('git', ['diff', '--name-status', '-z', '--no-renames', a, b, '--'], { cwd: repo, maxBuffer: 1 << 30, stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8').split('\0');
+      const m = new Map(); for (let i = 0; i + 1 < parts.length; i += 2) m.set(parts[i + 1], parts[i][0]);
+      return m.size > TESTS_READ_FILES ? null : m;
+    };
+    const net = statuses(steps[0].base, steps[steps.length - 1].head); if (!net) return null;
+    // a test the base had and the head still has: modified over the whole change (a rename reads as one gone and one new)
+    const had = [...net].filter(([f, st]) => st === 'M' && isTest(f)).map(([f]) => f);
+    if (!had.length) return null;
+    const per = []; for (const st of steps) { const m = statuses(st.base, st.head); if (!m) return null; per.push(m); }
+    // a commit changed the source: not where it named only tests, else as the engine's own split says, asked once a commit
+    const named = per.map((m) => [...m.keys()].some((f) => !isTest(f)));
+    const src = new Map();
+    const changedSource = (i) => { if (!named[i]) return false; if (!src.has(i)) { const x = split(steps[i].base, steps[i].head); src.set(i, !!(x && x.source.length)); } return src.get(i); };
+    const hits = [];
+    for (const t of had) {
+      const first = per.findIndex((m) => m.has(t));
+      if (first < 1) continue;
+      let j = -1; for (let i = 0; i < first; i++) if (changedSource(i)) { j = i; break; }
+      if (j >= 0) hits.push({ t, at: steps[first].head, after: steps[j].head });
+    }
+    if (!hits.length) return null;
+    const tests = hits.map((h) => h.t).sort();
+    return { tests: tests.slice(0, 10), more: Math.max(0, tests.length - 10), at: short(repo, hits[0].at), after: short(repo, hits[0].after) };
+  } catch { return null; }   // a commit git cannot read (a damaged or partial clone): no note, never a failed run
 }
 export function testsTakenOut(repo, steps) {
   if (!Array.isArray(steps) || steps.length < 2) return null;

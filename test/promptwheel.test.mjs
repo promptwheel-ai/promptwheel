@@ -5262,6 +5262,28 @@ test('the Action: the final step keeps its exit when the words are missing, and 
   r = run({ GATE_EXIT: '1', COMMENT_ONLY: 'true' }); assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, /^::warning title=Sawbuck would have sent this back::Sawbuck: sent back%0A/m);
   rmSync(d, { recursive: true, force: true });
 });
+test('the Action: the log is printed with workflow commands stopped, so a file name in it cannot speak to the runner', (t) => {
+  if (spawnSync('bash', ['-c', 'true']).status !== 0) return t.skip('no bash here');
+  const action = readFileSync(join(dirname(ENGINE), '..', 'action.yml'), 'utf8');
+  const lines = action.slice(action.lastIndexOf('GATE_EXIT: ${{ steps.gate.outputs.exit }}')).split('\n');
+  const at = lines.findIndex((l) => /^\s+run: \|$/.test(l));
+  const body = []; for (const l of lines.slice(at + 1)) { if (l.trim() && !l.startsWith('        ')) break; body.push(l.slice(8)); }
+  const d = mkdtempSync(join(TMP_ROOT, 'fin-')); const script = join(d, 'final.sh'); writeFileSync(script, body.join('\n') + '\n');
+  const run = (env) => spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', script], { encoding: 'utf8', env: { PATH: process.env.PATH, RUNNER_TEMP: d, INCONCLUSIVE: 'fail', COMMENT_ONLY: 'false', ...env } });
+  // git allows a line break in a file name, and the comment names files as they are
+  writeFileSync(join(d, 'promptwheel.log'), 'Sawbuck: sent back\n  .github/workflows/x\n::warning::y.yml\n');
+  for (const env of [{ GATE_EXIT: '1' }, { GATE_EXIT: '1', COMMENT_ONLY: 'true' }]) {
+    const out = run(env).stdout.split('\n');
+    const i = out.findIndex((l) => /^::stop-commands::\S{16,}$/.test(l)); assert.ok(i >= 0, out.join('\n'));
+    const tok = out[i].slice('::stop-commands::'.length); const j = out.indexOf(`::${tok}::`);
+    const inj = out.indexOf('::warning::y.yml');
+    assert.ok(i < inj && inj < j, 'the line from the log sits between the stop and the resume: ' + out.join('\n'));
+  }
+  rmSync(d, { recursive: true, force: true });
+});
+test('types: a CommentPlan built by hand needs no log', () => {
+  assert.match(readFileSync(join(dirname(ENGINE), 'promptwheel.d.ts'), 'utf8'), /\n  log\?: string;/);
+});
 
 // The c-none pattern (proof-bench/ship-vs-check, 2026-11-24): the person's commit changed the source and broke a test the
 // base had; a later commit rewrote that test to the new result. Over the whole pull request it read green to green, and
@@ -5307,4 +5329,30 @@ test('a rewritten test is not this rule\'s when source and test change in one co
   put(d, 'src/a.js', 'exports.f = () => 1\nexports.g = () => 3\n'); commitAll(d, 'add g');
   put(d, 'test/a.test.js', NODE_TEST("require('../src/a.js').f(), 1") + "require('node:test').test('g', () => require('node:assert').equal(require('../src/a.js').g(), 3))\n"); commitAll(d, 'test g');
   assert.equal(range(d, base, 'HEAD', '--pull-request').rep.testsRewritten, undefined, 'the base\'s tests pass on the new source');
+});
+test('the rewritten-test reader: capped like the others, the source split asked only where needed, a git error is no note', () => {
+  const { d, base, c1, c2 } = rewrittenRepo();
+  const full = (x) => gitIn(d, 'rev-parse', x);
+  const steps = [{ base, head: full(c1) }, { base: full(c1), head: full(c2) }];
+  let calls = 0;
+  const split = (a, b) => { calls++; const names = gitIn(d, 'diff', '--name-only', a, b).split('\n').filter(Boolean); return { source: names.filter((f) => f.startsWith('src/')), nonSource: names.filter((f) => !f.startsWith('src/')) }; };
+  assert.deepEqual(engineNow.testsRewrittenAfter(d, steps, split), { tests: ['test/a.test.js'], more: 0, at: c2, after: c1 });
+  assert.equal(calls, 1, 'one split: the commit before the rewrite (the first reader asked for three)');
+  calls = 0;
+  assert.equal(engineNow.testsRewrittenAfter(d, Array.from({ length: 61 }, () => steps[0]), split), null, 'more than 60 commits: no note');
+  assert.equal(calls, 0, 'and nothing asked');
+  assert.equal(engineNow.testsRewrittenAfter(d, steps, () => { throw new Error('fatal: unable to read tree'); }), null, 'a git error is no note');
+  // through the whole run: a commit of the pull request whose tree git cannot read (a damaged or partial clone)
+  const r2 = rewrittenRepo(); const tree = gitIn(r2.d, 'rev-parse', `${r2.c1}^{tree}`); const obj = join(r2.d, '.git', 'objects', tree.slice(0, 2), tree.slice(2));
+  assert.ok(existsSync(obj), 'the tree is a loose object here'); rmSync(obj);
+  const r = pw2(r2.d, ['run', '--base', r2.base, '--head', 'HEAD', '--no-record', '--json', '--pull-request']);
+  assert.equal(r.code, 0, r.err || r.out); assert.equal(JSON.parse(r.out).testsRewritten, undefined);
+});
+test('a pull request that writes "testRewrites": "ask" into its own contract is held by it: the stricter of the base\'s and its own', () => {
+  const d = prRepo(); pw(d, ['init']); commitAll(d, 'the contract'); const base = rev(d);
+  const p = join(d, 'promptwheel.config.json'); const c = JSON.parse(readFileSync(p, 'utf8')); c.testRewrites = 'ask'; writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
+  put(d, 'src/a.js', 'exports.f = () => 2\n'); commitAll(d, 'f returns two now, and the contract asks');
+  put(d, 'test/a.test.js', NODE_TEST("require('../src/a.js').f(), 2")); commitAll(d, 'align the test with two');
+  const r = pw2(d, ['run', '--base', base, '--head', 'HEAD', '--no-record', '--json', '--pull-request']); const rep = JSON.parse(r.out);
+  assert.ok(rep.metrics.some((m) => m.name === 'tests_rewritten' && m.status === 'regressed'), JSON.stringify(rep.metrics.map((m) => [m.name, m.status])));
 });
