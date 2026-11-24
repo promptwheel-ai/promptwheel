@@ -5241,3 +5241,49 @@ test('the Action: the step that fails prints the words and raises one annotation
   assert.match(last, /cat "\$RUNNER_TEMP\/promptwheel\.log"/, 'the failing step prints them');
   assert.match(last, /::error title=Sawbuck/, 'and raises one annotation');
 });
+
+// The c-none pattern (proof-bench/ship-vs-check, 2026-11-24): the person's commit changed the source and broke a test the
+// base had; a later commit rewrote that test to the new result. Over the whole pull request it read green to green, and
+// the check passed it. On a pull request it is now a note; where the contract says "testRewrites": "ask", a guard.
+const rewrittenRepo = (contract = null) => {
+  const d = prRepo();
+  if (contract) { pw(d, ['init']); const p = join(d, 'promptwheel.config.json'); const c = JSON.parse(readFileSync(p, 'utf8')); Object.assign(c, contract); writeFileSync(p, JSON.stringify(c, null, 2) + '\n'); commitAll(d, 'the contract'); }
+  const base = rev(d);
+  put(d, 'src/a.js', 'exports.f = () => 2\n'); commitAll(d, 'f returns two now'); const c1 = gitIn(d, 'rev-parse', '--short', 'HEAD');
+  put(d, 'test/a.test.js', NODE_TEST("require('../src/a.js').f(), 2")); commitAll(d, 'align the test with two'); const c2 = gitIn(d, 'rev-parse', '--short', 'HEAD');
+  return { d, base, c1, c2 };
+};
+test('on a pull request, a test the base had, rewritten after an earlier commit changed the source and broke it, is a note that names it', () => {
+  const { d, base, c1, c2 } = rewrittenRepo();
+  const { code, rep } = range(d, base, 'HEAD', '--pull-request');
+  assert.equal(code, 0); assert.equal(rep.verdict, 'pass', 'a plain contract: a note, not a verdict');
+  assert.deepEqual(rep.testsRewritten, { tests: ['test/a.test.js'], more: 0, at: c2, after: c1 });
+  const md = renderMarkdown(rep);
+  assert.match(md, /> ℹ️ \*\*Note:\*\* a later commit of this pull request \(`[0-9a-f]{7,}`\) rewrote a test the base branch had, after `[0-9a-f]{7,}` changed the source and the base's tests failed on it: `test\/a\.test\.js`\./);
+  assert.equal(conformsToContract(rep).ok, true);
+  assert.equal(engineNow.commentPlan({ key: KEY, comments: [], report: rep, exit: 0 }).action, 'create', 'the comment speaks on a pass that holds the note');
+});
+test('where the contract says "testRewrites": "ask", that pull request is sent back, and a person\'s reason lets it through', () => {
+  const { d, base } = rewrittenRepo({ testRewrites: 'ask' });
+  const r = pw2(d, ['run', '--base', base, '--head', 'HEAD', '--no-record', '--json', '--pull-request']); const rep = JSON.parse(r.out);
+  assert.equal(r.code, 1, r.err); assert.equal(rep.verdict, 'fail');
+  assert.ok(rep.metrics.some((m) => m.name === 'tests_rewritten' && m.status === 'regressed'));
+  assert.equal(conformsToContract(rep).ok, true, JSON.stringify(conformsToContract(rep).errors || conformsToContract(rep)));
+  const md = renderMarkdown(rep);
+  assert.match(md, /> ✋ \*\*Needs a look:\*\* a later commit of this pull request \(`[0-9a-f]{7,}`\) rewrote a test the base branch had/);
+  assert.doesNotMatch(md, /ℹ️ \*\*Note:\*\* a later commit of this pull request/, 'not said twice');
+  assert.match(md, /sawbuck-allow:/, 'the way out follows');
+  const ok = range(d, base, 'HEAD', '--pull-request', '--allow', 'the rule changed: two is right now, so the tests change');
+  assert.equal(ok.code, 0); assert.ok(ok.rep.allowed && (ok.rep.allowed.cleared || []).includes('tests_rewritten'));
+});
+test('a rewritten test is not this rule\'s when source and test change in one commit, off a pull request, or when the base\'s tests still pass', () => {
+  let d = prRepo(); let base = rev(d);
+  put(d, 'src/a.js', 'exports.f = () => 2\n'); put(d, 'test/a.test.js', NODE_TEST("require('../src/a.js').f(), 2")); commitAll(d, 'two, and its test');
+  assert.equal(range(d, base, 'HEAD', '--pull-request').rep.testsRewritten, undefined, 'one commit: an ordinary change of behaviour');
+  ({ d, base } = rewrittenRepo());
+  assert.equal(range(d, base).rep.testsRewritten, undefined, 'only on a pull request');
+  d = prRepo(); base = rev(d);
+  put(d, 'src/a.js', 'exports.f = () => 1\nexports.g = () => 3\n'); commitAll(d, 'add g');
+  put(d, 'test/a.test.js', NODE_TEST("require('../src/a.js').f(), 1") + "require('node:test').test('g', () => require('node:assert').equal(require('../src/a.js').g(), 3))\n"); commitAll(d, 'test g');
+  assert.equal(range(d, base, 'HEAD', '--pull-request').rep.testsRewritten, undefined, 'the base\'s tests pass on the new source');
+});

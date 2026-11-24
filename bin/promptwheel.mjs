@@ -872,7 +872,7 @@ function warnEditableInstall(repo) {
 // guarded metric in the very diff it "passes". We resolve the gate as of BASE too and, if a
 // guard was dropped, re-measure it under its BASE definition; the pass only reads GAMED when
 // that guard WOULD HAVE FAILED at head (a real regression hidden by moving the goalposts).
-const GATE_SCALARS = ['gamingThreshold', 'evaluatorPaths', 'allowTrailer', 'allowFromAuthor', 'setup', 'env', 'linkDirs', 'linkNodeModules'];
+const GATE_SCALARS = ['gamingThreshold', 'evaluatorPaths', 'allowTrailer', 'allowFromAuthor', 'setup', 'env', 'linkDirs', 'linkNodeModules', 'testRewrites'];
 // what runs or shapes every measurement besides the metric's own command. A setup can rewrite a test and an
 // env var can skip one, so these are part of the gate: fingerprinted, and held at their base values for the
 // change that edits them (see detectGamingPass).
@@ -1027,7 +1027,7 @@ function gateWeakenings(baseGate, headMetrics) {
 // A reason names a thing when the thing's name stands in it as a whole word, in any case (`mandate:` is optional).
 // The checks that are about the tests themselves are ONE thing to a reason: deleting a test moves the green, the count
 // of tests and the count of assertions in one act, and a person who accepts that act has accepted all three.
-const TEST_KIND = new Set(['tests_pass', 'test_count', 'skipped_tests', 'assertions', 'tests_taken_out']);
+const TEST_KIND = new Set(['tests_pass', 'test_count', 'skipped_tests', 'assertions', 'tests_taken_out', 'tests_rewritten']);
 const kindOf = (label) => (TEST_KIND.has(label) ? 'the tests' : label);
 const kindsIn = (labels) => new Set([...labels].map(kindOf)).size;
 const reasonNames = (reason, label) => new RegExp(`(^|[^A-Za-z0-9_-])${label.replace(/^mandate:/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9_-])`, 'i').test(reason);
@@ -1467,6 +1467,17 @@ function gateInner(repo, opts) {
     metrics.push({ name: 'tests_taken_out', direction: 'up', guard: true, ok: false, status: 'regressed', before: takenOutEarly.added, after: 0, delta: -takenOutEarly.added, noise: 0, confidence: 'high', tripwire: true, gamingCheck: false, takenOut: takenOutEarly });
     mode.set('tests_taken_out', 'flag');
   }
+  // ON A PULL REQUEST, a test the base had, rewritten after an earlier commit changed the source, with the base's tests
+  // failing on the new source (testsRewrittenAfter): a note; where the contract says "testRewrites": "ask" (the base's
+  // contract or the change's, the stricter), a guard of its own, let through by a person's reason as the counts are.
+  const rewritten = opts.pullRequest && !opts.working && metrics.some((m) => m.heldByTestEdit)
+    ? testsRewrittenAfter(repo, changeStepsAll(repo, base, head), (a, b) => changedSourcePaths(repo, a, b, evaluatorMatcher(cfg), { metrics: [...(cfg.metrics || []), ...(baseGate ? [...baseGate.metrics.values()] : [])] }), (f) => TEST_PATH.test(f) || evaluatorMatcher(cfg)(f))
+    : null;
+  const askRewrites = rewritten && [cfg.testRewrites, (() => { try { return ((gateDefAtRef(repo, base) || {}).scalars || {}).testRewrites; } catch { return undefined; } })()].includes('ask');
+  if (askRewrites) {
+    metrics.push({ name: 'tests_rewritten', direction: 'up', guard: true, ok: false, status: 'regressed', before: rewritten.tests.length + rewritten.more, after: 0, delta: -(rewritten.tests.length + rewritten.more), noise: 0, confidence: 'high', tripwire: true, gamingCheck: false, rewritten });
+    mode.set('tests_rewritten', 'flag');
+  }
   const gm = opts.detectGaming ? metrics.filter((m) => m.gamed === true) : [];
   const up = opts.detectGaming ? metrics.filter((m) => m.unprovable === true) : [];
   const gw = !!(opts.detectGaming && gateInfo && gateInfo.weakened);
@@ -1530,6 +1541,7 @@ function gateInner(repo, opts) {
     ...(allowable.length ? { allowable } : {}),
     ...(byCommit.length ? { byCommit } : {}),
     ...(takenOut ? { testsTakenOut: takenOut } : {}),
+    ...(rewritten ? { testsRewritten: rewritten } : {}),
     ...(goneByName ? { testsGone: goneByName } : {}),
     ...(Array.isArray(cfg.mandates) && cfg.mandates.length ? { protects: cfg.mandates.length } : {}),
     // a repo with one person in it: the contract at the base says the account that opened a pull request may let it
@@ -2204,6 +2216,7 @@ function printHuman(r) {
   }
   for (const m of r.metrics || []) for (const w of m.lostIn || []) console.log(`  ℹ note: ${w.file} has ${PLAIN[m.name] || m.name} (${w.before} → ${w.after}), though the repo's total did not fall`);
   if (r.testsTakenOut) console.log(`  ℹ note: ${takenOutSaid(r.testsTakenOut, false)}`);
+  if (r.testsRewritten && !r.metrics.some((m) => m.name === 'tests_rewritten')) console.log(`  ℹ note: ${rewrittenSaid(r.testsRewritten, false)}`);
   if (r.testsGone) console.log(`  ℹ note: ${goneSaid(r.testsGone, false)}`);
   for (const x of r.explained || []) if (x.metric === 'environment') console.log(`  ℹ note: ${x.what}: ${x.items.join(', ')}`);
   if (r.setup) { const at = Object.keys(r.setup), f = r.setup[at[0]]; console.log(`  ⚠ setup failed (exit ${f.exit}) at the ${at.join(' and ')} ref${at.length > 1 ? 's' : ''}${f.lastLine ? ': ' + f.lastLine : ''}`); }
@@ -2240,7 +2253,7 @@ const allowFlag = (r) => `--allow "${allowNames(r)}<reason>"`;
 const PLAIN = {
   lifecycle_scripts: 'a new install script', dependency_entries: 'a new dependency', lock_nonregistry_sources: 'a dependency from outside the registry',
   unpinned_execution: 'something that runs without a pinned version', install_policy_gaps: 'a weaker install policy', lock_drift: 'the shape of the repo changed',
-  pins_changed: 'resolved dependency versions changed', tests_pass: 'tests stopped passing', test_count: 'fewer tests', skipped_tests: 'more skipped tests', tests_taken_out: 'tests this change added and then took out',
+  pins_changed: 'resolved dependency versions changed', tests_pass: 'tests stopped passing', test_count: 'fewer tests', skipped_tests: 'more skipped tests', tests_taken_out: 'tests this change added and then took out', tests_rewritten: 'a test the base had, rewritten after the source changed',
   suppressions: 'more silenced checks', assertions: 'fewer assertions',
 };
 // What the measurement borrows from the machine it runs on and no diff shows: a variable that can change which tests
@@ -2264,7 +2277,7 @@ function explainMetrics(repo, metrics) {
   if (hit.some((m) => m.name === 'lock_drift')) {
     try { items = JSON.parse(execFileSync(process.execPath, ['.promptwheel/packs/supply-chain/lock.mjs', 'drift', '.', '--json'], { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })).slice(0, 8); } catch { /* words without the list */ }
   }
-  return hit.map((m) => ({ metric: m.name, noted: !!m.noted, what: (m.name === 'tests_taken_out' && m.takenOut) ? takenOutSaid(m.takenOut, true) : (PLAIN[m.name] || m.name), ...(m.name === 'lock_drift' && items.length ? { items } : {}), ...(m.allowable ? { allowable: true } : {}) }));
+  return hit.map((m) => ({ metric: m.name, noted: !!m.noted, what: (m.name === 'tests_taken_out' && m.takenOut) ? takenOutSaid(m.takenOut, true) : (m.name === 'tests_rewritten' && m.rewritten) ? rewrittenSaid(m.rewritten, true) : (PLAIN[m.name] || m.name), ...(m.name === 'lock_drift' && items.length ? { items } : {}), ...(m.allowable ? { allowable: true } : {}) }));
 }
 // A reason a person left on a pull request. The newest `sawbuck-allow: <reason>` comment from someone with write
 // access wins. A bot never counts. Since 0.8.10 neither does the account that opened the pull request (`author`),
@@ -2358,6 +2371,10 @@ const takenOutNames = (t, q = '') => `${t.names.map((n) => q + n + q).join(', ')
 const takenOutSaid = (t, md) => md
   ? `an earlier commit of this pull request (\`${t.at}\`) added ${t.added} test${t.added === 1 ? '' : 's'}. ${t.added === 1 ? 'That test is not' : 'None of them is'} in it now: ${takenOutNames(t, '`')}.`
   : `an earlier commit of this change (${t.at}) added ${t.added} test${t.added === 1 ? '' : 's'}, and ${t.added === 1 ? 'that test is not' : 'none of them is'} in it now: ${takenOutNames(t)}`;
+const rewrittenNames = (t, q = '') => t.tests.map((n) => `${q}${n}${q}`).join(', ') + (t.more ? ` and ${t.more} more` : '');
+const rewrittenSaid = (t, md) => md
+  ? `a later commit of this pull request (\`${t.at}\`) rewrote a test the base branch had, after \`${t.after}\` changed the source and the base's tests failed on it: ${rewrittenNames(t, '`')}.`
+  : `a later commit of this pull request (${t.at}) rewrote a test the base branch had, after ${t.after} changed the source and the base's tests failed on it: ${rewrittenNames(t)}`;
 function renderMarkdown(r, o = {}) {
   const sIcon = { improved: '🟢', regressed: '🔴', unchanged: '⚪', inconclusive: '🟡', unmeasurable: '⚫' };
   const rows = r.metrics.map((m) => {
@@ -2397,6 +2414,7 @@ function renderMarkdown(r, o = {}) {
     ...(r.gate && r.gate.changed ? [`> ⚠ **Gate definition changed** in this diff (fingerprint \`${r.gate.fingerprint.base}\` -> \`${r.gate.fingerprint.head}\`): a metric, guard, evaluatorPath, mandate, or the setup, env or linked dirs they are measured with was added, removed or edited. Review the config change with the code.`] : []),
     ...(lost.length ? [lost.join('\n')] : []),
     ...(r.testsTakenOut && !r.metrics.some((m) => m.name === 'tests_taken_out') ? [`> ℹ️ **Note:** ${takenOutSaid(r.testsTakenOut, true)}`] : []),
+    ...(r.testsRewritten && !r.metrics.some((m) => m.name === 'tests_rewritten') ? [`> ℹ️ **Note:** ${rewrittenSaid(r.testsRewritten, true)}`] : []),
     ...(r.testsGone ? [`> ℹ️ **Note:** ${goneSaid(r.testsGone, true)}`] : []),   // on a pull request it is a line that needs a look instead
     ...(o.note && String(o.note).trim() ? [String(o.note).trim()] : []),
     o.fold === false ? `\`${span}\`${rest}\n\n${table}` : `<details><summary>What was measured (<code>${span}</code>${rest})</summary>\n\n${table}\n\n</details>`,
@@ -2688,6 +2706,33 @@ export function testsGoneIn(repo, from, to) {
   return { gone: n, names: names.slice(0, 10), more: Math.max(0, names.length - 10), emptied };
 }
 // steps: [{ base, head }] in order, the last one the change as it stands. -> { added, names, more, at } | null
+// ON A PULL REQUEST: the tests the base had that a later commit of the change rewrote, after an earlier commit changed
+// the source and left them as they were (proof-bench/ship-vs-check, 2026-11-24: the person's commit broke a test, the
+// agent's next commit rewrote it to the new result, and over the whole change it read green to green, so the check
+// passed it). The gate speaks only where the base's tests also fail on the new source (heldByTestEdit). Measured first
+// (proof-bench/ship-vs-check/gap-a): the steps alone match 95 of 198 pull requests a reviewer objected to and 98 of 388
+// controls from the same repos, which is why it is a note unless the contract asks ("testRewrites": "ask").
+// steps: [{ base, head }] oldest first; split(a, b) -> { source, nonSource }; isTest(path). -> { tests, more, at, after } | null
+export function testsRewrittenAfter(repo, steps, split, isTest = (f) => TEST_PATH.test(f)) {
+  if (!Array.isArray(steps) || steps.length < 2 || typeof split !== 'function') return null;
+  const fork = steps[0].base, tip = steps[steps.length - 1].head;
+  const has = (ref, f) => { try { execFileSync('git', ['cat-file', '-e', `${ref}:${f}`], { cwd: repo, stdio: 'ignore' }); return true; } catch { return false; } };
+  const net = split(fork, tip); if (!net) return null;
+  const had = net.nonSource.filter((f) => isTest(f) && has(fork, f) && has(tip, f));
+  if (!had.length) return null;
+  const per = steps.map((st) => split(st.base, st.head)); if (per.some((x) => !x)) return null;
+  const touched = per.map((x) => new Set([...x.source, ...x.nonSource]));
+  const hits = [];
+  for (const t of had) {
+    const first = touched.findIndex((set) => set.has(t));
+    if (first < 1) continue;
+    const j = per.slice(0, first).findIndex((x, i) => x.source.length > 0 && !touched[i].has(t));
+    if (j >= 0) hits.push({ t, at: steps[first].head, after: steps[j].head });
+  }
+  if (!hits.length) return null;
+  const tests = hits.map((h) => h.t).sort();
+  return { tests: tests.slice(0, 10), more: Math.max(0, tests.length - 10), at: short(repo, hits[0].at), after: short(repo, hits[0].after) };
+}
 export function testsTakenOut(repo, steps) {
   if (!Array.isArray(steps) || steps.length < 2) return null;
   const cache = new Map(); let most = null, at = null;
@@ -2774,7 +2819,7 @@ export function commentPlan(input = {}) {
     full = ['### ⚠️ Sawbuck: could not run', `Nothing was checked on this push${why ? ':' : '.'}`, ...(why ? [why] : []), ...(commentOnly ? ['This check only comments here. It never fails the job.'] : []), MD_FOOT].join('\n\n');
     speaks = true;
   } else {
-    speaks = wouldFail || !!(report.allowed && (report.allowed.cleared || []).length) || report.metrics.some((m) => m.lostIn && m.lostIn.length) || !!report.testsTakenOut || !!report.testsGone || !!(report.gate && report.gate.changed);
+    speaks = wouldFail || !!(report.allowed && (report.allowed.cleared || []).length) || report.metrics.some((m) => m.lostIn && m.lostIn.length) || !!report.testsTakenOut || !!report.testsRewritten || !!report.testsGone || !!(report.gate && report.gate.changed);
     full = null;
   }
   const render = (fold) => (readable ? renderMarkdown(report, { fold, commentOnly, wouldFail, note: wouldFail ? note : '' }) : full);

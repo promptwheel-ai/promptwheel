@@ -272,6 +272,8 @@ export interface Report {
   openerCounts?: true;
   /** In a run between two commits with more than one commit between them: an earlier commit of the change (`at`, short) added `added` tests, by name, and the change as it stands adds none. `names` holds at most ten of them, `more` how many are left out. A note for a reader, never part of a verdict, except with `pullRequest`: then it is also the guard `tests_taken_out` among the metrics. */
   testsTakenOut?: { added: number; names: string[]; more: number; at: string };
+  /** On a pull request: tests the base had, rewritten in a later commit than one that changed the source, with the base's tests failing on the new source (`testsRewrittenAfter`). */
+  testsRewritten?: { tests: string[]; more: number; at: string; after: string };
   /** two or more test names gone over the changed files, or a file that stays lost every test (0.8.20): a note, never part of the verdict */
   testsGone?: { gone: number; names: string[]; more: number; emptied: string[] };
   /** Present only when the `setup` command failed: at which ref, with what exit code, and its last output line. */
@@ -515,6 +517,8 @@ export interface NamedTest { name: string; line: number; asserts: number; skippe
 export declare function testsIn(path: string, text: string): NamedTest[];
 /** The tests an earlier step of a change added and its last step no longer adds. `steps` are the change's commits in order, each with the commit it is held against. `null` when there is nothing to say or a step cannot be read. */
 export declare function testsTakenOut(repo: string, steps: { base: string; head: string }[]): { added: number; names: string[]; more: number; at: string } | null;
+/** The tests the base had that a later commit rewrote, after an earlier commit changed the source and left them as they were. `split(a, b)` is the engine's own source split; `isTest` which paths are tests. */
+export declare function testsRewrittenAfter(repo: string, steps: { base: string; head: string }[], split: (a: string, b: string) => { source: string[]; nonSource: string[] } | null, isTest?: (path: string) => boolean): { tests: string[]; more: number; at: string; after: string } | null;
 export declare function testsGone(repo: string, base: string, head: string): { gone: number; names: string[]; more: number; emptied: string[] } | null;
 /** The same reading over one span, `from` to `to`, with no search for where the change left its base. */
 export declare function testsGoneIn(repo: string, from: string, to: string): { gone: number; names: string[]; more: number; emptied: string[] } | null;
