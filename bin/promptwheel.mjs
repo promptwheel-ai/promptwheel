@@ -2628,8 +2628,9 @@ function testsAddedAt(repo, base, head, cache, out = null) {
   const asks = []; for (const c of changed) { if (c.st !== 'A') asks.push([c, 'a', `${base}:${c.f}`]); if (c.st !== 'D') asks.push([c, 'b', `${head}:${c.f}`]); }
   let chk; try { chk = g(['cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'], asks.map((a) => a[2]).join('\n') + '\n').toString('utf8').split('\n'); } catch { return null; }
   const want = new Map();
-  // a side that is not a blob this reads (too big, or not in the clone) leaves the whole file out: read as empty, its tests
-  // all read as gone, or all as new (second read of 0.2.7)
+  // a side that is not a blob this reads (too big, or not in the clone): the step cannot be read, and the notes say nothing.
+  // Read as empty, its tests all read as gone or all as new (second read of 0.2.7); left out of the tally, tests moved out
+  // of it and back read as added and taken out (the re-read): neither is a reading.
   asks.forEach((a, i) => { const m = /^([0-9a-f]{40,64}) blob (\d+)$/.exec(chk[i] || ''); if (!(m && +m[2] <= TESTS_READ_BLOB)) a[0].unread = true; if (m && +m[2] <= TESTS_READ_BLOB) { a[0][a[1]] = `${m[1]}.${testExt(a[0].f)}`; if (!cache.has(a[0][a[1]])) want.set(a[0][a[1]], [m[1], a[0].f]); } });
   const todo = [...want.entries()];
   for (let i = 0; i < todo.length; i += 500) {
@@ -2644,7 +2645,8 @@ function testsAddedAt(repo, base, head, cache, out = null) {
     }
   }
   const tally = new Map(); const bump = (n, by) => tally.set(n, (tally.get(n) || 0) + by);
-  for (const c of changed) { if (c.unread) continue; for (const n of (c.b && cache.get(c.b)) || []) bump(n, 1); for (const n of (c.a && cache.get(c.a)) || []) bump(n, -1); }
+  if (changed.some((c) => c.unread)) return null;
+  for (const c of changed) { for (const n of (c.b && cache.get(c.b)) || []) bump(n, 1); for (const n of (c.a && cache.get(c.a)) || []) bump(n, -1); }
   if (out) { out.changed = changed; out.tally = tally; }   // testsGone reads the whole tally and each file
   return new Map([...tally].filter(([, v]) => v > 0));   // a test that moved to another changed file keeps its name and cancels
 }
@@ -2667,7 +2669,7 @@ export function testsGoneIn(repo, from, to) {
   if (testsAddedAt(repo, from, to, cache, out) === null || !out.tally) return null;
   const gone = [...out.tally].filter(([, v]) => v < 0);
   const n = gone.reduce((a, [, v]) => a - v, 0);
-  const emptied = (out.changed || []).filter((c) => !c.unread && c.st !== 'D' && c.a && c.b && (cache.get(c.a) || []).length >= 1 && (cache.get(c.b) || []).length === 0).map((c) => c.f).sort();
+  const emptied = (out.changed || []).filter((c) => c.st !== 'D' && c.a && c.b && (cache.get(c.a) || []).length >= 1 && (cache.get(c.b) || []).length === 0).map((c) => c.f).sort();
   // two or more gone, or one gone with a file that lost every test; a file emptied by tests that moved to another changed
   // file has nothing gone, and says nothing (second read of 0.2.7: it printed "0 tests ...: .")
   if (n < 2 && !(n >= 1 && emptied.length)) return null;

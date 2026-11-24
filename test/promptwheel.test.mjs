@@ -5148,4 +5148,16 @@ test('a test file grown past what the note reads is left out of it, not read as 
   const { rep } = range(d, base);
   assert.equal(rep.testsGone, undefined);
 });
+// re-read of 0.2.7: leaving an unread file out of a step's tally made tests that moved out of a file grown past what the
+// note reads, and back, read as added and then taken out: a false send-back on a pull request. A step with a test file
+// it cannot read is a step it cannot read: the notes say nothing, as for a commit that is not in the clone.
+const BIG = (names, pad) => `const t=require('node:test');\n${names.map((n) => `t.test('${n}',()=>{})`).join('\n')}\n${`// ${'x'.repeat(98)}\n`.repeat(pad)}`;
+test('a test file a step cannot read silences the notes: tests moved out of a file grown past 2 MiB and back are no send-back', () => {
+  const d = prRepo(); put(d, 'test/big.test.js', BIG(['x', 'y', 'z', 'k'], 15000)); commitAll(d, 'a big test file'); const base = rev(d);
+  put(d, 'test/big.test.js', BIG(['k'], 25000)); put(d, 'test/new.test.js', BIG(['x', 'y', 'z'], 0)); commitAll(d, 'move three out, more fixtures');
+  put(d, 'test/big.test.js', BIG(['k', 'x', 'y', 'z'], 25000)); unlinkSync(join(d, 'test/new.test.js')); commitAll(d, 'move them back');
+  const r = pw2(d, ['run', '--base', base, '--head', 'HEAD', '--no-record', '--json', '--pull-request']); const rep = JSON.parse(r.out);
+  assert.equal(rep.testsTakenOut, undefined, 'no note'); assert.ok(!rep.metrics.some((m) => m.name === 'tests_taken_out'), 'no send-back');
+  assert.equal(rep.testsGone, undefined);
+});
 
