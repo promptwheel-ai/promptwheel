@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.20 (2026-11-23): tests a pull request added and took out, and two named tests gone
+
+- **On a pull request, tests it added and then took out fail the check.** Where every test an earlier commit of a
+  pull request added is gone at its head, the comment's line for it now needs a look, the job fails, and a person's
+  `sawbuck-allow:` reason lets it through. The Action passes the new `--pull-request` flag there and only there.
+  Everywhere else it is the note it was.
+- **A new note: two or more named tests are gone.** When the files a change touched no longer name two or more of
+  the tests they named where the change left its base, or a file that stays lost every test it had, the report
+  names them. A rename reads the same way, and the note says so. It never fails the check.
+
 ## 0.8.19 (2026-11-23): a file named HEAD, and the name of a try
 
 - **Fixed: a commit that added a file named `HEAD`, or one named as its base, stopped the check with an error.**
