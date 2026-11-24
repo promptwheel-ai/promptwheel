@@ -5241,6 +5241,27 @@ test('the Action: the step that fails prints the words and raises one annotation
   assert.match(last, /cat "\$RUNNER_TEMP\/promptwheel\.log"/, 'the failing step prints them');
   assert.match(last, /::error title=Sawbuck/, 'and raises one annotation');
 });
+test('the Action: the final step keeps its exit when the words are missing, and comment-only still passes', (t) => {
+  if (spawnSync('bash', ['-c', 'true']).status !== 0) return t.skip('no bash here');
+  const action = readFileSync(join(dirname(ENGINE), '..', 'action.yml'), 'utf8');
+  const lines = action.slice(action.lastIndexOf('GATE_EXIT: ${{ steps.gate.outputs.exit }}')).split('\n');
+  const at = lines.findIndex((l) => /^\s+run: \|$/.test(l)); assert.ok(at > 0, 'the final step has a run block');
+  const body = []; for (const l of lines.slice(at + 1)) { if (l.trim() && !l.startsWith('        ')) break; body.push(l.slice(8)); }
+  const d = mkdtempSync(join(TMP_ROOT, 'fin-')); const script = join(d, 'final.sh'); writeFileSync(script, body.join('\n') + '\n');
+  // as GitHub runs a step with `shell: bash`
+  const run = (env) => spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', script], { encoding: 'utf8', env: { PATH: process.env.PATH, RUNNER_TEMP: d, INCONCLUSIVE: 'fail', COMMENT_ONLY: 'false', ...env } });
+  // no words written (pr-comment stopped before it wrote them): the exits of 0.8.20, never 1 for a missing file
+  let r = run({ GATE_EXIT: '1', COMMENT_ONLY: 'true' }); assert.equal(r.status, 0, 'comment-only passes whatever happened: ' + r.stdout + r.stderr); assert.match(r.stdout, /comment-only mode/);
+  r = run({ GATE_EXIT: '3' }); assert.equal(r.status, 3, r.stdout + r.stderr);
+  r = run({ GATE_EXIT: '1' }); assert.equal(r.status, 1, r.stdout + r.stderr); assert.match(r.stdout, /^::error title=Sawbuck sent this back::exit 1$/m);
+  r = run({ GATE_EXIT: '0' }); assert.equal(r.status, 0, r.stdout + r.stderr); assert.equal(r.stdout, '');
+  // with the words: printed, then one annotation that carries them on one line
+  writeFileSync(join(d, 'promptwheel.log'), 'Sawbuck: sent back\n  tests_pass  1  0\n100% sure\n');
+  r = run({ GATE_EXIT: '1' }); assert.equal(r.status, 1, r.stdout + r.stderr); assert.match(r.stdout, /^Sawbuck: sent back$/m);
+  assert.match(r.stdout, /^::error title=Sawbuck sent this back::Sawbuck: sent back%0A  tests_pass  1  0%0A100%25 sure$/m);
+  r = run({ GATE_EXIT: '1', COMMENT_ONLY: 'true' }); assert.equal(r.status, 0, r.stdout + r.stderr); assert.match(r.stdout, /^::warning title=Sawbuck would have sent this back::Sawbuck: sent back%0A/m);
+  rmSync(d, { recursive: true, force: true });
+});
 
 // The c-none pattern (proof-bench/ship-vs-check, 2026-11-24): the person's commit changed the source and broke a test the
 // base had; a later commit rewrote that test to the new result. Over the whole pull request it read green to green, and

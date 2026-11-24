@@ -128,17 +128,18 @@ runs:
         # What the comment says, in this step's own log, where an agent that works on a failed check reads (gh run view
         # --log-failed), and as one annotation. It reads no bot's comment it was not told to: on 2026-11-24 Claude Code's
         # /ship watch found "no cause beyond a failed gate" here (proof-bench/ship-vs-check).
+        # The step runs under bash -e: a missing log (pr-comment stopped before it wrote one) must not change the exit.
         esc(){ local m; m=$(head -n 12 "$RUNNER_TEMP/promptwheel.log" 2>/dev/null); m=${m//'%'/'%25'}; m=${m//$'\r'/'%0D'}; m=${m//$'\n'/'%0A'}; printf '%s' "${m:-exit $GATE_EXIT}"; }
         if [ "$COMMENT_ONLY" = true ]; then
           if [ "$GATE_EXIT" != 0 ]; then
-            cat "$RUNNER_TEMP/promptwheel.log" 2>/dev/null
+            cat "$RUNNER_TEMP/promptwheel.log" 2>/dev/null || true
             echo "::warning title=Sawbuck would have sent this back::$(esc)"
             echo "::warning::Sawbuck is in comment-only mode here, so the job passes. With comment-only off this pull request would have been sent back (exit $GATE_EXIT)."
           fi
           exit 0
         fi
         if [ "$GATE_EXIT" != 0 ]; then
-          cat "$RUNNER_TEMP/promptwheel.log" 2>/dev/null
+          cat "$RUNNER_TEMP/promptwheel.log" 2>/dev/null || true
           echo "::error title=Sawbuck sent this back::$(esc)"
         fi
         exit "$GATE_EXIT"
