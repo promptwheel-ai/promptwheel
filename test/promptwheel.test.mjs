@@ -5160,4 +5160,25 @@ test('a test file a step cannot read silences the notes: tests moved out of a fi
   assert.equal(rep.testsTakenOut, undefined, 'no note'); assert.ok(!rep.metrics.some((m) => m.name === 'tests_taken_out'), 'no send-back');
   assert.equal(rep.testsGone, undefined);
 });
+// last look at 0.2.7: the rule above ran over every changed source file, so a built bundle past 2 MiB (dist/index.js), or a
+// small file whose name is not UTF-8, silenced the 0.2.4 note and its send-back where 0.8.19 gave it. Only a file that is a
+// test file (by its path, or by the tests its readable side holds) silences the notes; any other counts as holding none.
+const twoAddedThenOut = (middle) => {
+  const d = prRepo(); const base = rev(d);
+  put(d, 'test/more.test.js', "const t=require('node:test');\nt.test('n1',()=>{})\nt.test('n2',()=>{})\n"); commitAll(d, 'two tests');
+  middle(d); commitAll(d, 'something else');
+  unlinkSync(join(d, 'test/more.test.js')); commitAll(d, 'take them out');
+  const r = pw2(d, ['run', '--base', base, '--head', 'HEAD', '--no-record', '--json', '--pull-request']); return { r, rep: JSON.parse(r.out) };
+};
+test('a built bundle past 2 MiB, or a file whose name is not UTF-8, does not silence the note of tests added and taken out', () => {
+  let { r, rep } = twoAddedThenOut((d) => put(d, 'dist/index.js', '// built\n' + 'x'.repeat(2.6 * 1024 * 1024) + '\n'));
+  assert.deepEqual(rep.testsTakenOut && rep.testsTakenOut.names, ['n1', 'n2'], 'a big file that is not a test file'); assert.equal(r.code, 1, 'and on a pull request it is sent back');
+  ({ r, rep } = twoAddedThenOut((d) => writeFileSync(Buffer.concat([Buffer.from(join(d, 'src', 'caf')), Buffer.from([0xe9]), Buffer.from('.js')]), 'exports.c = 1;\n')));   // a byte name: fs takes a Buffer
+  assert.deepEqual(rep.testsTakenOut && rep.testsTakenOut.names, ['n1', 'n2'], 'a name that is not UTF-8');
+});
+test('a big source file whose readable side holds tests still silences the notes', () => {
+  const d = prRepo(); put(d, 'src/helpers.js', "const t=require('node:test');\nt.test('h1',()=>{})\nt.test('h2',()=>{})\n"); commitAll(d, 'helpers with tests'); const base = rev(d);
+  put(d, 'src/helpers.js', "const t=require('node:test');\nt.test('h1',()=>{})\nt.test('h2',()=>{})\n// " + 'x'.repeat(2.6 * 1024 * 1024) + '\n'); commitAll(d, 'grown past what the notes read');
+  const { rep } = range(d, base); assert.equal(rep.testsGone, undefined); assert.equal(rep.testsTakenOut, undefined);
+});
 

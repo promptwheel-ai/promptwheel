@@ -2617,6 +2617,8 @@ export function testsIn(path, text) {
 // It reads at most the last 60 of the change's commits, and says nothing when a step touches more than 2,000 files it
 // can read or a commit is not in the clone (a shallow one). Blobs are read from the object store; nothing is checked out.
 const TESTS_READ_COMMITS = 60, TESTS_READ_FILES = 2000, TESTS_READ_BLOB = 2 * 1024 * 1024;
+// a path that names a test file in the usual ways: a tests folder, or a test or spec file of its language
+const TEST_PATH = /(^|\/)(tests?|__tests__|specs?)\/|(^|\/)test_[^/]*\.py$|_test\.(go|py|rb|exs?)$|\.(test|spec)\.[cm]?[jt]sx?$|(Tests?|Specs?)\.(java|kt|cs|swift|scala)$|_spec\.rb$/i;
 function testsAddedAt(repo, base, head, cache, out = null) {
   // the tests `head` adds over `base`, by name: Map name -> how many more of it. null: this step cannot be read.
   const g = (args, input) => execFileSync('git', args, { cwd: repo, input, maxBuffer: 1 << 30, stdio: ['pipe', 'pipe', 'ignore'] });
@@ -2628,9 +2630,10 @@ function testsAddedAt(repo, base, head, cache, out = null) {
   const asks = []; for (const c of changed) { if (c.st !== 'A') asks.push([c, 'a', `${base}:${c.f}`]); if (c.st !== 'D') asks.push([c, 'b', `${head}:${c.f}`]); }
   let chk; try { chk = g(['cat-file', '--batch-check=%(objectname) %(objecttype) %(objectsize)'], asks.map((a) => a[2]).join('\n') + '\n').toString('utf8').split('\n'); } catch { return null; }
   const want = new Map();
-  // a side that is not a blob this reads (too big, or not in the clone): the step cannot be read, and the notes say nothing.
-  // Read as empty, its tests all read as gone or all as new (second read of 0.2.7); left out of the tally, tests moved out
-  // of it and back read as added and taken out (the re-read): neither is a reading.
+  // a side that is not a blob this reads (too big, or not in the clone, or a name git gives in bytes that are not UTF-8):
+  // where the file is a test file, the step cannot be read and the notes say nothing (below). Read as empty, its tests all
+  // read as gone or all as new (second read of 0.2.7); left out of the tally, tests moved out of it and back read as
+  // added and taken out (the re-read): neither is a reading.
   asks.forEach((a, i) => { const m = /^([0-9a-f]{40,64}) blob (\d+)$/.exec(chk[i] || ''); if (!(m && +m[2] <= TESTS_READ_BLOB)) a[0].unread = true; if (m && +m[2] <= TESTS_READ_BLOB) { a[0][a[1]] = `${m[1]}.${testExt(a[0].f)}`; if (!cache.has(a[0][a[1]])) want.set(a[0][a[1]], [m[1], a[0].f]); } });
   const todo = [...want.entries()];
   for (let i = 0; i < todo.length; i += 500) {
@@ -2645,7 +2648,10 @@ function testsAddedAt(repo, base, head, cache, out = null) {
     }
   }
   const tally = new Map(); const bump = (n, by) => tally.set(n, (tally.get(n) || 0) + by);
-  if (changed.some((c) => c.unread)) return null;
+  // only a test file not read silences the notes: by its path, or by the tests its readable side holds. Any other file not
+  // read holds no tests, as before 0.8.20: a built bundle past 2 MiB silenced them otherwise (last look at 0.2.7).
+  const holds = (c) => ((c.a && cache.get(c.a)) || []).length + ((c.b && cache.get(c.b)) || []).length;
+  if (changed.some((c) => c.unread && (TEST_PATH.test(c.f) || holds(c) > 0))) return null;
   for (const c of changed) { for (const n of (c.b && cache.get(c.b)) || []) bump(n, 1); for (const n of (c.a && cache.get(c.a)) || []) bump(n, -1); }
   if (out) { out.changed = changed; out.tally = tally; }   // testsGone reads the whole tally and each file
   return new Map([...tally].filter(([, v]) => v > 0));   // a test that moved to another changed file keeps its name and cancels
