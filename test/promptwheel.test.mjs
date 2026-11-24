@@ -5209,3 +5209,35 @@ test('a big source file whose readable side holds tests still silences the notes
   const { rep } = range(d, base); assert.equal(rep.testsGone, undefined); assert.equal(rep.testsTakenOut, undefined);
 });
 
+
+// The job's own log says what the comment says (2026-11-24, proof-bench/ship-vs-check): Claude Code's /ship watch read
+// our failed check's log, not our comment (it reads no bot it was not told to), and found "no cause beyond a failed
+// gate". The step that fails printed only an exit code.
+test('the job log: a failed check says in plain text what its comment says, for an agent that reads only the log', () => {
+  const p = plan({ report: sentBack(), exit: 1 });
+  assert.ok(p.log, 'a failed check has words for its log');
+  assert.match(p.log, /^Sawbuck: sent back$/m);
+  assert.match(p.log, /Needs a look/);
+  assert.match(p.log, /Put back what was removed, and push/, 'the way through, as the comment gives it');
+  assert.match(p.log, /test_count/, 'the measure that moved');
+  assert.doesNotMatch(p.log, /<!--|<details>|<summary>|<code>|<sub>|\*\*|^#+ /m, 'plain text: no markup');
+  assert.doesNotMatch(p.log, /\bunchanged\b/, 'only the measures that moved');
+  assert.equal(plan({ report: prRep(), exit: 0 }).log, '', 'a pass says nothing');
+  assert.ok(plan({ report: sentBack(), exit: 1, comment: 'false' }).log, 'with comments off the log still speaks');
+  assert.match(plan({ report: null, exit: 64, error: 'promptwheel: base ref "x" is not in this clone\n' }).log, /could not run[\s\S]*base ref "x" is not in this clone/);
+});
+test('pr-comment --log writes those words for the step that fails, and nothing on a pass', () => {
+  const d = mkdtempSync(join(TMP_ROOT, 'prl-')); const f = (n) => join(d, n);
+  writeFileSync(f('report.json'), JSON.stringify(sentBack())); writeFileSync(f('comments.jsonl'), '');
+  const run = (...a) => spawnSync('node', [ENGINE, 'pr-comment', '--report', f('report.json'), '--comments', f('comments.jsonl'), '--key', KEY, '--body', f('body.md'), '--log', f('log.txt'), ...a], { encoding: 'utf8' });
+  let r = run('--exit', '1'); assert.equal(r.status, 0, r.stderr); assert.match(readFileSync(f('log.txt'), 'utf8'), /^Sawbuck: sent back$/m);
+  writeFileSync(f('report.json'), JSON.stringify(prRep())); r = run('--exit', '0'); assert.equal(r.status, 0, r.stderr); assert.equal(readFileSync(f('log.txt'), 'utf8'), '');
+  rmSync(d, { recursive: true, force: true });
+});
+test('the Action: the step that fails prints the words and raises one annotation, so a failed check says why', () => {
+  const action = readFileSync(join(dirname(ENGINE), '..', 'action.yml'), 'utf8');
+  assert.match(action, /pr-comment [\s\S]*--log "\$RUNNER_TEMP\/promptwheel\.log"/, 'the gate step writes the words');
+  const last = action.slice(action.lastIndexOf('GATE_EXIT: ${{ steps.gate.outputs.exit }}'));
+  assert.match(last, /cat "\$RUNNER_TEMP\/promptwheel\.log"/, 'the failing step prints them');
+  assert.match(last, /::error title=Sawbuck/, 'and raises one annotation');
+});

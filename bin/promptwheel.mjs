@@ -2733,9 +2733,30 @@ function changeStepsAll(repo, base, head) {
 // - A comment about an earlier push is never left standing on a push that passes: it is edited to one short line.
 // `commentOnly`: the job never fails, and the comment says what would have been sent back.
 // Pure: what to do is returned, and the Action's own shell does it. { action: 'none' | 'create' | 'update', id, body,
-// summary, wouldFail }.
+// summary, log, wouldFail }.
 const BOT = 'github-actions[bot]';
 const markerFor = (key) => `<!-- sawbuck-check: ${String(key || '').replace(/[^A-Za-z0-9 _.\/-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80) || 'check'} -->`;
+// The comment as plain text, for the log of the step that fails. An agent that works on a failed check reads that
+// check's log (`gh run view --log-failed`), not a bot's comment: on 2026-11-24 Claude Code's /ship watch read our
+// failed job and found "no cause beyond a failed gate" (proof-bench/ship-vs-check). No markup, only the measures that
+// moved, and the same words as the comment, the way through included.
+export function commentLog(md) {
+  const out = [];
+  for (const raw of String(md || '').split('\n')) {
+    const t = raw.trim();
+    if (/^<!--.*-->$/.test(t) || /^<sub>.*<\/sub>$/.test(t)) continue;          // the marker, the footer
+    if (/^\|[\s:|-]+\|$/.test(t)) continue;                                      // a table's rule line
+    let l = raw.replace(/<\/?(details|summary|code|sub|b|i)>|<br\s*\/?>/g, '').replace(/\*\*/g, '').replace(/^\s*#+\s+/, '').replace(/^\s*>\s?/, '');
+    l = l.replace(/^[\s\p{Extended_Pictographic}\uFE0F\u200D]+/u, '');
+    if (/^\|.*\|$/.test(l.trim())) {                                             // a table row: only what moved
+      if (/\bunchanged\b/.test(l)) continue;
+      l = '  ' + l.trim().slice(1, -1).split('|').map((c) => c.trim().replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\s]+/u, '')).join('  ');
+    }
+    out.push(l);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function commentPlan(input = {}) {
   const { report = null, error = '', comments = [], note = '' } = input;
   const exit = Number(input.exit) || 0, mode = String(input.comment ?? 'true'), commentOnly = input.commentOnly === true;
@@ -2758,16 +2779,17 @@ export function commentPlan(input = {}) {
   }
   const render = (fold) => (readable ? renderMarkdown(report, { fold, commentOnly, wouldFail, note: wouldFail ? note : '' }) : full);
   const summary = render(false);
-  if (mode === 'false') return { action: 'none', body: '', summary, wouldFail };
+  const log = wouldFail ? commentLog(summary) : '';   // for the step that fails (commentLog)
+  if (mode === 'false') return { action: 'none', body: '', summary, log, wouldFail };
   let text = '';
   if (speaks || mode === 'always') text = render(true);
   else if (mine) text = [`### ✅ Sawbuck: passes`, `Nothing to add on this push (\`${report.base} → ${report.head}\`). What this comment said about an earlier push is in its edit history.`, MD_FOOT].join('\n\n');
-  if (!text) return { action: 'none', body: '', summary, wouldFail };
+  if (!text) return { action: 'none', body: '', summary, log, wouldFail };
   // GitHub takes 65,536 characters in a comment and refuses a longer one whole: cut it, and say where the rest is
   if (text.length > 60000) text = `${text.slice(0, 60000)}\n\n(Cut short: the whole report is in the job summary.)`;
   const body = `${marker}\n${text}`;
-  if (mine && String(mine.body || '').trim() === body.trim()) return { action: 'none', body: '', summary, wouldFail };
-  return mine ? { action: 'update', id: mine.id, body, summary, wouldFail } : { action: 'create', body, summary, wouldFail };
+  if (mine && String(mine.body || '').trim() === body.trim()) return { action: 'none', body: '', summary, log, wouldFail };
+  return mine ? { action: 'update', id: mine.id, body, summary, log, wouldFail } : { action: 'create', body, summary, log, wouldFail };
 }
 
 function parseArgs(argv) {
@@ -3111,9 +3133,9 @@ async function prAllow(argv = []) {
 
 // pr-comment: what the Action does with the comment, decided here so the Action's shell stays thin (commentPlan).
 // Prints one word: `none`, `create`, or `update:<comment id>`. Writes the comment to --body (empty for `none`) and
-// adds the whole report to --summary. A file that is missing or empty reads as nothing; a flag it does not know is a
+// adds the whole report to --summary, and writes to --log what the step that fails prints. A file that is missing or empty reads as nothing; a flag it does not know is a
 // usage error, so a typo in a workflow cannot switch comment-only off in silence.
-const PR_COMMENT_FLAGS = ['--report', '--exit', '--error', '--comments', '--key', '--note', '--comment', '--inconclusive', '--comment-only', '--body', '--summary'];
+const PR_COMMENT_FLAGS = ['--report', '--exit', '--error', '--comments', '--key', '--note', '--comment', '--inconclusive', '--comment-only', '--body', '--summary', '--log'];
 function prComment(argv = []) {
   const o = {};
   for (let i = 0; i < argv.length; i += 2) {
@@ -3127,6 +3149,7 @@ function prComment(argv = []) {
   const p = commentPlan({ report, exit: o.exit, error: read(o.error), comments: readComments(read(o.comments)), key: o.key, note: read(o.note), comment: o.comment, inconclusive: o.inconclusive, commentOnly: o['comment-only'] === 'true' });
   if (o.body) writeFileSync(o.body, p.body ? p.body + '\n' : '');
   if (o.summary) { try { appendFileSync(o.summary, p.summary + '\n'); } catch { /* the summary is a courtesy */ } }
+  if (o.log) writeFileSync(o.log, p.log ? p.log + '\n' : '');
   process.stdout.write(p.action === 'update' ? `update:${p.id}\n` : `${p.action}\n`);
 }
 
