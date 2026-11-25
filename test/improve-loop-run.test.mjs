@@ -188,7 +188,11 @@ test('run: held-out is measured at the start and at the end only, and no try is 
   assert.equal(r.code, 0, r.err);
   assert.equal(readFileSync(count, 'utf8').split('\n').filter(Boolean).length, 2, 'two readings for three tries');
   assert.equal(runs(d)[0].heldOut, 200); assert.equal(runs(d)[1].heldOut, 230);
-  assert.doesNotMatch(readFileSync(seen, 'utf8'), /heldOut|held-out|\b200\b|\b230\b/, 'nothing a try was handed names it or holds its numbers');
+  // a try's environment also holds what this test inherited, the runner's own variables among them (GITHUB_RUN_NUMBER=230
+  // on the v0.8.21 tag's run, 2026-11-25, failed this line): look only at what the loop handed over
+  const inherited = new Set(Object.entries(process.env).map(([k, v]) => `${k}=${v}`));
+  const handed = readFileSync(seen, 'utf8').split('\n').filter((l) => !inherited.has(l)).join('\n');
+  assert.doesNotMatch(handed, /heldOut|held-out|\b200\b|\b230\b/, 'nothing a try was handed names it or holds its numbers');
   assert.match(report(d).out, /held-out: 200 at the start, 230 at the end/);
 });
 test('run: a last held-out number that could not be read is measured on the next start, once, and the report then shows it', () => {
