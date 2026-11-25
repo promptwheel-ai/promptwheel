@@ -5302,7 +5302,7 @@ test('on a pull request, a test the base had, rewritten after an earlier commit 
   assert.equal(code, 0); assert.equal(rep.verdict, 'pass', 'a plain contract: a note, not a verdict');
   assert.deepEqual(rep.testsRewritten, { tests: ['test/a.test.js'], more: 0, at: c2, after: c1 });
   const md = renderMarkdown(rep);
-  assert.match(md, /> ℹ️ \*\*Note:\*\* a later commit of this pull request \(`[0-9a-f]{7,}`\) rewrote a test the base branch had, after `[0-9a-f]{7,}` changed the source and the base's tests failed on it: `test\/a\.test\.js`\./);
+  assert.match(md, /> ℹ️ \*\*Note:\*\* a later commit of this pull request \(`[0-9a-f]{7,}`\) rewrote a test the base branch had, after an earlier commit \(`[0-9a-f]{7,}`\) changed the source, and the base branch's tests fail on this pull request's source: `test\/a\.test\.js`\./);
   assert.equal(conformsToContract(rep).ok, true);
   assert.equal(engineNow.commentPlan({ key: KEY, comments: [], report: rep, exit: 0 }).action, 'create', 'the comment speaks on a pass that holds the note');
 });

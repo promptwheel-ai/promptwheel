@@ -2373,8 +2373,8 @@ const takenOutSaid = (t, md) => md
   : `an earlier commit of this change (${t.at}) added ${t.added} test${t.added === 1 ? '' : 's'}, and ${t.added === 1 ? 'that test is not' : 'none of them is'} in it now: ${takenOutNames(t)}`;
 const rewrittenNames = (t, q = '') => t.tests.map((n) => `${q}${n}${q}`).join(', ') + (t.more ? ` and ${t.more} more` : '');
 const rewrittenSaid = (t, md) => md
-  ? `a later commit of this pull request (\`${t.at}\`) rewrote a test the base branch had, after \`${t.after}\` changed the source and the base's tests failed on it: ${rewrittenNames(t, '`')}.`
-  : `a later commit of this pull request (${t.at}) rewrote a test the base branch had, after ${t.after} changed the source and the base's tests failed on it: ${rewrittenNames(t)}`;
+  ? `a later commit of this pull request (\`${t.at}\`) rewrote a test the base branch had, after an earlier commit (\`${t.after}\`) changed the source, and the base branch's tests fail on this pull request's source: ${rewrittenNames(t, '`')}.`
+  : `a later commit of this pull request (${t.at}) rewrote a test the base branch had, after an earlier commit (${t.after}) changed the source, and the base branch's tests fail on this pull request's source: ${rewrittenNames(t)}`;
 function renderMarkdown(r, o = {}) {
   const sIcon = { improved: '🟢', regressed: '🔴', unchanged: '⚪', inconclusive: '🟡', unmeasurable: '⚫' };
   const rows = r.metrics.map((m) => {
