@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.21 (2026-11-24): a failed check prints its reason in the job log, and a note on a test rewritten after the source changed
+
+- **A failed check prints its reason in the job log.** `pr-comment --log <file>` writes the comment as plain text.
+  When the job fails, the Action's last step prints it and raises one annotation (`::error`, or `::warning` with
+  comment-only). A missing log never changes the step's exit. New export: `commentLog`.
+- **A new note on a pull request: a test the base had, rewritten after the source changed.** It applies where a
+  later commit than one that changed the source rewrites a test the base had, and the base's tests fail on the new
+  source. `"testRewrites": "ask"` in the contract makes it a guard, `tests_rewritten`, that a person's reason lets
+  through. It is read at the base and in the change, and the stricter one counts. New export: `testsRewrittenAfter`.
+- **One checked run reads as one run** in insights, playbook and suggest. They said "1 checked runs".
+- **A temp folder behind a symlink (a Mac's).** The self-heal named its folders through the link while git lists a
+  worktree by its real path, so a worktree another run was measuring in could be taken for one a killed run left
+  behind, and removed. The base-cache guard compared the repo's real path with the folder as typed, so a folder
+  inside the repo named through a link read as outside it. Both compare real paths now.
+
 ## 0.8.20 (2026-11-23): tests a pull request added and took out, and two named tests gone
 
 - **On a pull request, tests it added and then took out fail the check.** Where every test an earlier commit of a
